@@ -96,9 +96,21 @@ class GAProperty(BaseModel):
     displayName: str
     websiteUrl: Optional[str] = None
 
+# class GAMetrics(BaseModel):
+#     propertyId: str
+#     propertyName: str
+#     totalUsers: int
+#     sessions: int
+#     engagedSessions: int
+#     engagementRate: float
+#     averageSessionDuration: float
+#     bounceRate: float
+#     pagesPerSession: float
+
 class GAMetrics(BaseModel):
     propertyId: str
     propertyName: str
+    # Original 7 GA4 metrics (main card values)
     totalUsers: int
     sessions: int
     engagedSessions: int
@@ -106,7 +118,19 @@ class GAMetrics(BaseModel):
     averageSessionDuration: float
     bounceRate: float
     pagesPerSession: float
+    # Additional 9 calculated insights (secondary card values)
+    totalUsersChange: str
+    sessionsPerUser: float
+    engagedSessionsPercentage: str
+    engagementRateStatus: str
+    sessionDurationQuality: str
+    bounceRateStatus: str
+    contentDepthStatus: str
+    # Extra metrics for 8th card
+    viewsPerSession: float
+    sessionQualityScore: str
 
+    
 class GATrafficSource(BaseModel):
     channel: str
     sessions: int

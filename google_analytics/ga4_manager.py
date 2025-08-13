@@ -139,7 +139,7 @@ class GA4Manager:
             raise HTTPException(status_code=500, detail=f"Failed to fetch properties: {str(e)}")
     
     def get_metrics(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
-        """Get GA4 metrics for a specific property"""
+        """Get GA4 metrics for a specific property with dashboard insights"""
         try:
             start_date, end_date = self.get_date_range(period)
             
@@ -163,34 +163,186 @@ class GA4Manager:
                 row = response.rows[0]
                 metrics = row.metric_values
                 
+                # Basic calculations
+                total_users = self.safe_int(metrics[0].value)
                 sessions = self.safe_int(metrics[1].value)
+                engaged_sessions = self.safe_int(metrics[2].value)
+                engagement_rate = self.safe_float(metrics[3].value) * 100
                 total_duration = self.safe_float(metrics[4].value)
                 avg_session_duration = total_duration / sessions if sessions > 0 else 0
+                bounce_rate = self.safe_float(metrics[5].value) * 100
+                pages_per_session = self.safe_float(metrics[6].value)
+                
+                # Get previous period data for comparison
+                previous_metrics = self.get_previous_period_metrics(property_id, period)
+                
+                # Calculate additional insights
+                user_change = self.calculate_percentage_change(total_users, previous_metrics.get('totalUsers', 0))
+                sessions_per_user = round(sessions / total_users, 1) if total_users > 0 else 0
+                engaged_percentage = round((engaged_sessions / sessions) * 100) if sessions > 0 else 0
+                engagement_status = self.get_engagement_status(engagement_rate)
+                duration_quality = self.get_duration_quality(avg_session_duration)
+                bounce_status = self.get_bounce_status(bounce_rate)
+                content_depth_status = self.get_content_depth_status(pages_per_session)
+                views_per_session = pages_per_session  # Same as pagesPerSession
+                session_quality_score = self.calculate_session_quality_score(engagement_rate, avg_session_duration, bounce_rate, pages_per_session)
                 
                 return {
                     'propertyId': property_id,
                     'propertyName': f"Property {property_id}",
-                    'totalUsers': self.safe_int(metrics[0].value),
+                    # Original 7 GA4 metrics
+                    'totalUsers': total_users,
                     'sessions': sessions,
-                    'engagedSessions': self.safe_int(metrics[2].value),
-                    'engagementRate': self.safe_float(metrics[3].value) * 100,
-                    'averageSessionDuration': avg_session_duration,
-                    'bounceRate': self.safe_float(metrics[5].value) * 100,
-                    'pagesPerSession': self.safe_float(metrics[6].value)
+                    'engagedSessions': engaged_sessions,
+                    'engagementRate': round(engagement_rate, 2),
+                    'averageSessionDuration': round(avg_session_duration, 2),
+                    'bounceRate': round(bounce_rate, 2),
+                    'pagesPerSession': round(pages_per_session, 2),
+                    # Additional 9 calculated insights
+                    'totalUsersChange': f"{'+' if user_change > 0 else ''}{user_change:.1f}%",
+                    'sessionsPerUser': sessions_per_user,
+                    'engagedSessionsPercentage': f"{engaged_percentage}%",
+                    'engagementRateStatus': engagement_status,
+                    'sessionDurationQuality': duration_quality,
+                    'bounceRateStatus': bounce_status,
+                    'contentDepthStatus': content_depth_status,
+                    'viewsPerSession': round(views_per_session, 2),
+                    'sessionQualityScore': session_quality_score
                 }
             
+            # Return default values if no data
             return {
                 'propertyId': property_id,
                 'propertyName': f"Property {property_id}",
-                'totalUsers': 0, 'sessions': 0, 'engagedSessions': 0,
-                'engagementRate': 0.0, 'averageSessionDuration': 0.0,
-                'bounceRate': 0.0, 'pagesPerSession': 0.0
+                # Original 7 GA4 metrics
+                'totalUsers': 0,
+                'sessions': 0,
+                'engagedSessions': 0,
+                'engagementRate': 0.0,
+                'averageSessionDuration': 0.0,
+                'bounceRate': 0.0,
+                'pagesPerSession': 0.0,
+                # Additional 9 calculated insights
+                'totalUsersChange': "0%",
+                'sessionsPerUser': 0.0,
+                'engagedSessionsPercentage': "0%",
+                'engagementRateStatus': "No Data",
+                'sessionDurationQuality': "No Data",
+                'bounceRateStatus': "No Data",
+                'contentDepthStatus': "No Data",
+                'viewsPerSession': 0.0,
+                'sessionQualityScore': "0/100"
             }
             
         except Exception as e:
             logger.error(f"Error fetching metrics for property {property_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch metrics: {str(e)}")
-    
+
+    def get_previous_period_metrics(self, property_id: str, period: str) -> Dict[str, Any]:
+        """Get metrics from previous period for comparison"""
+        try:
+            # Calculate previous period dates
+            if period == "7d":
+                previous_period = "14d"  # Get 14 days ago to 7 days ago
+                end_date = datetime.now() - timedelta(days=7)
+                start_date = end_date - timedelta(days=7)
+            elif period == "90d":
+                previous_period = "180d"  # Get 180 days ago to 90 days ago
+                end_date = datetime.now() - timedelta(days=90)
+                start_date = end_date - timedelta(days=90)
+            elif period == "365d":
+                previous_period = "730d"  # Get 730 days ago to 365 days ago
+                end_date = datetime.now() - timedelta(days=365)
+                start_date = end_date - timedelta(days=365)
+            else:  # 30d default
+                previous_period = "60d"  # Get 60 days ago to 30 days ago
+                end_date = datetime.now() - timedelta(days=30)
+                start_date = end_date - timedelta(days=30)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(
+                    start_date=start_date.strftime("%Y-%m-%d"), 
+                    end_date=end_date.strftime("%Y-%m-%d")
+                )],
+                metrics=[Metric(name="totalUsers")],
+            )
+            
+            response = self.client.run_report(request=request)
+            
+            if response.rows:
+                return {'totalUsers': self.safe_int(response.rows[0].metric_values[0].value)}
+            return {'totalUsers': 0}
+            
+        except Exception:
+            return {'totalUsers': 0}  # Fallback if comparison fails
+
+    def calculate_percentage_change(self, current: float, previous: float) -> float:
+        """Calculate percentage change between current and previous values"""
+        if previous == 0:
+            return 0.0
+        return ((current - previous) / previous) * 100
+
+    def get_engagement_status(self, engagement_rate: float) -> str:
+        """Get engagement rate status"""
+        if engagement_rate >= 50:
+            return "Excellent"
+        elif engagement_rate >= 35:
+            return "Above Average"
+        elif engagement_rate >= 20:
+            return "Average"
+        else:
+            return "Below Average"
+
+    def get_duration_quality(self, duration: float) -> str:
+        """Get session duration quality assessment"""
+        if duration >= 120:  # 2 minutes
+            return "Excellent"
+        elif duration >= 60:  # 1 minute
+            return "Good"
+        elif duration >= 30:  # 30 seconds
+            return "Average"
+        else:
+            return "Needs Improvement"
+
+    def get_bounce_status(self, bounce_rate: float) -> str:
+        """Get bounce rate status"""
+        if bounce_rate <= 25:
+            return "Excellent"
+        elif bounce_rate <= 40:
+            return "Good"
+        elif bounce_rate <= 55:
+            return "Average"
+        elif bounce_rate <= 70:
+            return "High"
+        else:
+            return "Very High"
+
+    def get_content_depth_status(self, pages_per_session: float) -> str:
+        """Get content exploration depth status"""
+        if pages_per_session >= 4:
+            return "Deep"
+        elif pages_per_session >= 2.5:
+            return "Good"
+        elif pages_per_session >= 1.5:
+            return "Moderate"
+        else:
+            return "Shallow"
+
+    def calculate_session_quality_score(self, engagement_rate: float, duration: float, bounce_rate: float, pages_per_session: float) -> str:
+        """Calculate overall session quality score (0-100)"""
+        # Weighted scoring system
+        engagement_score = min(engagement_rate * 0.8, 30)  # Max 30 points
+        duration_score = min(duration / 4, 25)              # Max 25 points (100 seconds = 25 points)
+        depth_score = min(pages_per_session * 10, 25)       # Max 25 points
+        bounce_penalty = max(0, 20 - (bounce_rate / 5))     # Max 20 points (less bounce = more points)
+        
+        total_score = engagement_score + duration_score + depth_score + bounce_penalty
+        final_score = min(int(total_score), 100)
+        
+        return f"{final_score}/100"
+
+
     def get_traffic_sources(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
         """Get traffic source data for a specific property"""
         try:
