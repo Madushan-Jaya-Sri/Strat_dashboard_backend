@@ -3,7 +3,7 @@ Response Models for the Unified Marketing Dashboard API
 """
 
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 # Authentication Models
@@ -292,3 +292,55 @@ class GACombinedROASROIMetrics(BaseModel):
     firstTimePurchasers: int
     averagePurchaseRevenuePerActiveUser: float
     activeUsers: int
+
+# Combined Dashboard Models
+class CombinedOverview(BaseModel):
+    ads: Optional[dict] = None
+    analytics: Optional[dict] = None
+
+# Intent Insights Models
+class KeywordInsightRequest(BaseModel):
+    seed_keywords: List[str]  # Max 10 keywords
+    country: str
+    timeframe: str  # "1_month", "3_months", "12_months", "custom"
+    start_date: Optional[str] = None  # Required for custom timeframe
+    end_date: Optional[str] = None    # Required for custom timeframe
+
+class EnhancedKeywordInsight(BaseModel):
+    keyword: str
+    avg_monthly_searches: int
+    competition: str
+    competition_index: float
+    low_top_of_page_bid: float
+    high_top_of_page_bid: float
+    yoy_change: str
+    three_month_change: str
+    trend_direction: str
+    monthly_volumes: Dict[str, int]
+    opportunity_score: int
+    recommendation: str
+    seasonality: Dict[str, Any]
+
+class KeywordInsightsResponse(BaseModel):
+    seed_keywords: List[str]
+    country: str
+    location_id: str
+    timeframe: str
+    date_range: str
+    keyword_insights: List[EnhancedKeywordInsight]
+    search_volumes: Dict[str, Dict[str, int]]
+    month_labels: List[str]
+    total_keywords: int
+    generated_at: str
+
+class IntentAnalysisResponse(BaseModel):
+    informational: List[str]
+    commercial: List[str]
+    transactional: List[str]
+    navigational: List[str]
+
+# Error Models
+class ErrorResponse(BaseModel):
+    error: str
+    detail: Optional[str] = None
+    status_code: int

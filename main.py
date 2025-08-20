@@ -6,7 +6,7 @@ Combines Google Ads and Google Analytics data in a single FastAPI application
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse  # Add HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 import logging
@@ -18,13 +18,14 @@ from dotenv import load_dotenv
 from auth.auth_manager import AuthManager
 from google_ads.ads_manager import GoogleAdsManager
 from google_analytics.ga4_manager import GA4Manager
+from intent_insights.intent_manager import IntentManager
 from models.response_models import *
 from utils.helpers import get_date_range
-
 
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 # Load environment variables
 load_dotenv(override=True)
 
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="Unified Marketing Dashboard API",
-    description="Backend API combining Google Ads and Google Analytics data",
+    description="Backend API combining Google Ads, Google Analytics, and Intent Insights",
     version="1.0.0"
 )
 
@@ -68,7 +69,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "services": ["google_ads", "google_analytics"]
+        "services": ["google_ads", "google_analytics", "intent_insights"]
     }
 
 # Authentication Routes
@@ -117,9 +118,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 async def get_ads_customers(current_user: dict = Depends(get_current_user)):
     """Get accessible Google Ads customer accounts"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         customers = ads_manager.get_accessible_customers()
         return [AdCustomer(**customer) for customer in customers]
     except Exception as e:
@@ -129,14 +128,12 @@ async def get_ads_customers(current_user: dict = Depends(get_current_user)):
 @app.get("/api/ads/campaigns/{customer_id}", response_model=List[AdCampaign])
 async def get_ads_campaigns(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads campaigns for a customer"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         campaigns = ads_manager.get_campaigns_with_period(customer_id, period)
         return [AdCampaign(**campaign) for campaign in campaigns]
     except Exception as e:
@@ -146,16 +143,14 @@ async def get_ads_campaigns(
 @app.get("/api/ads/keywords/{customer_id}", response_model=KeywordResponse)
 async def get_ads_keywords(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     offset: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=50),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads keywords data with pagination"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         result = ads_manager.get_keywords_data(customer_id, period, offset, limit)
         return KeywordResponse(
             keywords=[AdKeyword(**kw) for kw in result["keywords"]],
@@ -171,14 +166,12 @@ async def get_ads_keywords(
 @app.get("/api/ads/performance/{customer_id}", response_model=List[PerformanceMetric])
 async def get_ads_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads performance metrics"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         metrics = ads_manager.get_advanced_metrics(customer_id, period)
         return [PerformanceMetric(**metric) for metric in metrics]
     except Exception as e:
@@ -188,14 +181,12 @@ async def get_ads_performance(
 @app.get("/api/ads/geographic/{customer_id}", response_model=List[GeographicPerformance])
 async def get_ads_geographic(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads geographic performance"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         geo_data = ads_manager.get_geographic_data(customer_id, period)
         return [GeographicPerformance(**geo) for geo in geo_data]
     except Exception as e:
@@ -205,14 +196,12 @@ async def get_ads_geographic(
 @app.get("/api/ads/device-performance/{customer_id}", response_model=List[DevicePerformance])
 async def get_ads_device_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads device performance"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         device_data = ads_manager.get_device_performance_data(customer_id, period)
         return [DevicePerformance(**device) for device in device_data]
     except Exception as e:
@@ -222,14 +211,12 @@ async def get_ads_device_performance(
 @app.get("/api/ads/time-performance/{customer_id}", response_model=List[TimePerformance])
 async def get_ads_time_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),  # ADD LAST_365_DAYS
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads time-based performance"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         time_data = ads_manager.get_time_performance_data(customer_id, period)
         return [TimePerformance(**time) for time in time_data]
     except Exception as e:
@@ -244,9 +231,7 @@ async def get_keyword_ideas(
 ):
     """Get keyword ideas and metrics"""
     try:
-        # ads_manager = GoogleAdsManager(current_user["email"])
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
         ideas = ads_manager.get_keyword_ideas(
             customer_id, 
             request_data.keywords, 
@@ -396,11 +381,26 @@ async def get_ga_trends(
         logger.error(f"Error fetching trends: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
+async def get_ga_roas_roi_time_series(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get GA4 ROAS and ROI time series data"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_roas_roi_time_series(property_id, period)
+        return [GAROASROITimeSeriesData(**ts) for ts in time_series]
+    except Exception as e:
+        logger.error(f"Error fetching ROAS/ROI time series: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/combined/overview")
 async def get_combined_overview(
     ads_customer_id: Optional[str] = Query(None),
     ga_property_id: Optional[str] = Query(None),
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),  # ADD 365d
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get combined overview from both Google Ads and Analytics"""
@@ -408,9 +408,7 @@ async def get_combined_overview(
         overview = {}
         
         if ads_customer_id:
-            # ads_manager = GoogleAdsManager(current_user["email"])
             ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-
             ads_period = "LAST_30_DAYS" if period == "30d" else f"LAST_{period[:-1]}_DAYS"
             ads_campaigns = ads_manager.get_campaigns_with_period(ads_customer_id, ads_period)
             overview["ads"] = {
@@ -435,37 +433,137 @@ async def get_combined_overview(
         logger.error(f"Error fetching combined overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-# @app.get("/api/analytics/roas-roi/{property_id}", response_model=GAROASROIMetrics)
-# async def get_ga_roas_roi(
-#     property_id: str,
-#     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get GA4 ROAS and ROI metrics"""
-#     try:
-#         ga4_manager = GA4Manager(current_user["email"])
-#         metrics = ga4_manager.get_roas_roi_metrics(property_id, period)
-#         return GAROASROIMetrics(**metrics)
-#     except Exception as e:
-#         logger.error(f"Error fetching ROAS/ROI metrics: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
-async def get_ga_roas_roi_time_series(
-    property_id: str,
+@app.get("/api/combined/roas-roi-metrics", response_model=GACombinedROASROIMetrics)
+async def get_combined_roas_roi_metrics(
+    ga_property_id: str = Query(..., description="GA4 Property ID"),
+    ads_customer_id: str = Query(..., description="Google Ads Customer ID"),
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get GA4 ROAS and ROI time series data"""
+    """Get combined ROAS and ROI metrics from GA4 and Google Ads"""
     try:
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_roas_roi_time_series(property_id, period)
-        return [GAROASROITimeSeriesData(**ts) for ts in time_series]
+        metrics = ga4_manager.get_combined_roas_roi_metrics(ga_property_id, ads_customer_id, period)
+        return GACombinedROASROIMetrics(**metrics)
     except Exception as e:
-        logger.error(f"Error fetching ROAS/ROI time series: {e}")
+        logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Intent Insights Routes
+@app.post("/api/intent/keyword-insights/{customer_id}", response_model=KeywordInsightsResponse)
+async def get_keyword_insights(
+    customer_id: str,
+    request_data: KeywordInsightRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get comprehensive keyword insights with search volumes and trends"""
+    try:
+        # Validate seed keywords limit
+        if len(request_data.seed_keywords) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 seed keywords allowed")
+        
+        # Validate custom timeframe
+        if request_data.timeframe == "custom":
+            if not request_data.start_date or not request_data.end_date:
+                raise HTTPException(status_code=400, detail="start_date and end_date required for custom timeframe")
+        
+        intent_manager = IntentManager(current_user["email"], auth_manager)
+        insights = intent_manager.get_keyword_insights(
+            customer_id,
+            request_data.seed_keywords,
+            request_data.country,
+            request_data.timeframe,
+            request_data.start_date,
+            request_data.end_date
+        )
+        
+        return KeywordInsightsResponse(**insights)
+        
+    except Exception as e:
+        logger.error(f"Error fetching keyword insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/intent/intent-analysis/{customer_id}", response_model=IntentAnalysisResponse)
+async def get_intent_analysis(
+    customer_id: str,
+    keywords: List[str],
+    location_id: str = Query("2144", description="Location ID for analysis"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Analyze search intent patterns for keywords"""
+    try:
+        intent_manager = IntentManager(current_user["email"], auth_manager)
+        analysis = intent_manager.get_intent_analysis(customer_id, keywords, location_id)
+        return IntentAnalysisResponse(**analysis)
+        
+    except Exception as e:
+        logger.error(f"Error analyzing intent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/intent/supported-countries")
+async def get_supported_countries():
+    """Get list of supported countries for keyword research"""
+    countries = {
+        "Sri Lanka": "2144",
+        "United States": "2840", 
+        "United Kingdom": "2826",
+        "Canada": "2124",
+        "Australia": "2036",
+        "India": "2356",
+        "Singapore": "2702",
+        "Malaysia": "2458",
+        "Thailand": "2764",
+        "Philippines": "2608",
+        "Germany": "2276",
+        "France": "2250",
+        "Japan": "2392",
+        "South Korea": "2410",
+        "Brazil": "2076",
+        "Mexico": "2484",
+        "Netherlands": "2528",
+        "Spain": "2724",
+        "Italy": "2380",
+        "Indonesia": "2360",
+        "Vietnam": "2704",
+        "Bangladesh": "2050",
+        "Pakistan": "2586",
+        "Myanmar": "2104",
+        "Cambodia": "2116"
+    }
+    
+    return {
+        "supported_countries": list(countries.keys()),
+        "country_codes": countries,
+        "default_country": "Sri Lanka"
+    }
+
+@app.post("/api/intent/keyword-metrics/{customer_id}")
+async def get_keyword_metrics_batch(
+    customer_id: str,
+    keywords: List[str],
+    location_id: str = Query("2144", description="Location ID for metrics"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get metrics for a specific list of keywords"""
+    try:
+        if len(keywords) > 50:
+            raise HTTPException(status_code=400, detail="Maximum 50 keywords allowed per request")
+        
+        intent_manager = IntentManager(current_user["email"], auth_manager)
+        metrics = intent_manager.get_keyword_metrics_batch(customer_id, keywords, location_id)
+        
+        return {
+            "keywords": keywords,
+            "location_id": location_id,
+            "metrics": metrics,
+            "total_keywords": len(metrics),
+            "generated_at": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching keyword metrics batch: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -482,41 +580,9 @@ async def generic_exception_handler(request: Request, exc: Exception):
         content={"error": "Internal server error", "detail": str(exc)}
     )
 
-
-@app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
-async def get_ga_roas_roi_time_series(
-    property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get GA4 ROAS and ROI time series data"""
-    try:
-        ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_roas_roi_time_series(property_id, period)
-        return [GAROASROITimeSeriesData(**ts) for ts in time_series]
-    except Exception as e:
-        logger.error(f"Error fetching ROAS/ROI time series: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/combined/roas-roi-metrics", response_model=GACombinedROASROIMetrics)
-async def get_combined_roas_roi_metrics(
-    ga_property_id: str = Query(..., description="GA4 Property ID"),
-    ads_customer_id: str = Query(..., description="Google Ads Customer ID"),
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get combined ROAS and ROI metrics from GA4 and Google Ads"""
-    try:
-        ga4_manager = GA4Manager(current_user["email"])
-        metrics = ga4_manager.get_combined_roas_roi_metrics(ga_property_id, ads_customer_id, period)
-        return GACombinedROASROIMetrics(**metrics)
-    except Exception as e:
-        logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))  
-
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")
-    logger.info("📊 Available services: Google Ads + Google Analytics")
+    logger.info("📊 Available services: Google Ads + Google Analytics + Intent Insights")
     logger.info("🌐 Server will be available at: http://localhost:8000")
     logger.info("📚 API docs available at: http://localhost:8000/docs")
     
