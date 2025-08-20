@@ -130,7 +130,7 @@ class GAMetrics(BaseModel):
     viewsPerSession: float
     sessionQualityScore: str
 
-    
+
 class GATrafficSource(BaseModel):
     channel: str
     sessions: int
@@ -209,3 +209,86 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+
+class GACombinedROASROIMetrics(BaseModel):
+    propertyId: str
+    propertyName: str
+    adsCustomerId: str
+    # Original metrics
+    totalRevenue: float
+    adSpend: float  # Real ad spend from Google Ads
+    roas: float
+    roi: float
+    conversionValue: float
+    costPerConversion: float
+    revenuePerUser: float
+    profitMargin: float
+    roasStatus: str
+    roiStatus: str
+    conversions: int
+    sessions: int
+    totalUsers: int
+    # New ecommerce metrics
+    totalAdRevenue: float
+    totalPurchasers: int
+    firstTimePurchasers: int
+    averagePurchaseRevenuePerActiveUser: float
+    activeUsers: int
+
+class GAROASROIMetrics(BaseModel):
+    propertyId: str
+    propertyName: str
+    # Original metrics
+    totalRevenue: float
+    adSpend: float
+    roas: float
+    roi: float
+    conversionValue: float
+    costPerConversion: float
+    revenuePerUser: float
+    profitMargin: float
+    roasStatus: str
+    roiStatus: str
+    conversions: int
+    sessions: int
+    totalUsers: int
+    # New ecommerce metrics
+    totalAdRevenue: float
+    totalPurchasers: int
+    firstTimePurchasers: int
+    averagePurchaseRevenuePerActiveUser: float
+    activeUsers: int
+    
+class GAROASROITimeSeriesData(BaseModel):
+    date: str
+    revenue: float
+    adSpend: float
+    roas: float
+    roi: float
+    conversions: float
+    sessions: int
+
+class GACombinedROASROIMetrics(BaseModel):
+    propertyId: str
+    propertyName: str
+    adsCustomerId: str
+    # Original metrics
+    totalRevenue: float
+    adSpend: float  # Real ad spend from Google Ads
+    roas: float
+    roi: float
+    conversionValue: float
+    costPerConversion: float
+    revenuePerUser: float
+    profitMargin: float
+    roasStatus: str
+    roiStatus: str
+    conversions: int
+    sessions: int
+    totalUsers: int
+    # New ecommerce metrics
+    totalAdRevenue: float
+    totalPurchasers: int
+    firstTimePurchasers: int
+    averagePurchaseRevenuePerActiveUser: float
+    activeUsers: int

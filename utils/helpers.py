@@ -81,3 +81,38 @@ def convert_ga_period_to_ads_period(ga_period: str) -> str:
         "90d": "LAST_90_DAYS"
     }
     return mapping.get(ga_period, "LAST_30_DAYS")
+
+
+def calculate_roas(revenue: float, ad_spend: float) -> float:
+    """Calculate Return on Ad Spend (Revenue / Ad Spend)"""
+    return (revenue / ad_spend) if ad_spend > 0 else 0.0
+
+def calculate_roi(revenue: float, ad_spend: float) -> float:
+    """Calculate Return on Investment ((Revenue - Cost) / Cost * 100)"""
+    return ((revenue - ad_spend) / ad_spend * 100) if ad_spend > 0 else 0.0
+
+def format_roas(roas: float) -> str:
+    """Format ROAS value"""
+    return f"{roas:.2f}:1"
+
+def format_roi(roi: float) -> str:
+    """Format ROI value as percentage"""
+    return f"{roi:.1f}%"
+
+def get_roas_benchmark(roas: float) -> str:
+    """Get ROAS benchmark status"""
+    if roas >= 4.0:
+        return "Above Industry Average"
+    elif roas >= 2.0:
+        return "Industry Average"
+    else:
+        return "Below Industry Average"
+
+def get_roi_benchmark(roi: float) -> str:
+    """Get ROI benchmark status"""
+    if roi >= 200:
+        return "Above Industry Average"
+    elif roi >= 100:
+        return "Industry Average"
+    else:
+        return "Below Industry Average"

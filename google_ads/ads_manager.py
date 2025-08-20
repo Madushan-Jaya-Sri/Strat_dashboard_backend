@@ -551,3 +551,18 @@ class GoogleAdsManager:
         except Exception as e:
             logger.error(f"Unexpected error getting keyword ideas: {e}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching keyword ideas")
+        
+    def get_total_cost_for_period(self, customer_id: str, period: str) -> float:
+        """Get total ad spend for a specific period"""
+        try:
+            # Use existing method to get campaigns with costs
+            campaigns = self.get_campaigns_with_period(customer_id, period)
+            
+            # Sum up all campaign costs
+            total_cost = sum(campaign.get('cost', 0) for campaign in campaigns)
+            
+            return total_cost
+            
+        except Exception as e:
+            logger.error(f"Error fetching total ad cost for customer {customer_id}: {e}")
+            return 0.0

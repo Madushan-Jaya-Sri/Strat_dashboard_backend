@@ -17,6 +17,8 @@ from google.analytics.data_v1beta.types import (
 )
 from googleapiclient.discovery import build
 
+from google_ads.ads_manager import GoogleAdsManager
+
 logger = logging.getLogger(__name__)
 
 class GA4Manager:
@@ -483,7 +485,361 @@ class GA4Manager:
         except Exception as e:
             logger.error(f"Error fetching conversions for property {property_id}: {e}")
             return []
-    
+    # def get_roas_roi_metrics(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+    #     """Get ROAS and ROI metrics for a specific property with additional ecommerce metrics"""
+    #     try:
+    #         start_date, end_date = self.get_date_range(period)
+            
+    #         # First request: Get basic revenue and user data
+    #         request = RunReportRequest(
+    #             property=f"properties/{property_id}",
+    #             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+    #             metrics=[
+    #                 Metric(name="totalRevenue"),
+    #                 Metric(name="purchaseRevenue"),
+    #                 Metric(name="totalAdRevenue"),
+    #                 Metric(name="conversions"),
+    #                 Metric(name="sessions"),
+    #                 Metric(name="totalUsers"),
+    #                 Metric(name="activeUsers"),
+    #                 Metric(name="totalPurchasers"),
+    #                 Metric(name="eventCount")
+    #             ],
+    #         )
+            
+    #         response = self.client.run_report(request=request)
+            
+    #         # Second request: Get first-time purchasers data
+    #         first_time_request = RunReportRequest(
+    #             property=f"properties/{property_id}",
+    #             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+    #             dimensions=[Dimension(name="newVsReturning")],
+    #             metrics=[
+    #                 Metric(name="totalPurchasers"),
+    #                 Metric(name="purchaseRevenue")
+    #             ],
+    #         )
+            
+    #         first_time_response = self.client.run_report(first_time_request)
+            
+    #         if response.rows:
+    #             row = response.rows[0]
+    #             metrics = row.metric_values
+                
+    #             total_revenue = self.safe_float(metrics[0].value)
+    #             purchase_revenue = self.safe_float(metrics[1].value)
+    #             total_ad_revenue = self.safe_float(metrics[2].value)
+    #             conversions = self.safe_float(metrics[3].value)
+    #             sessions = self.safe_int(metrics[4].value)
+    #             total_users = self.safe_int(metrics[5].value)
+    #             active_users = self.safe_int(metrics[6].value)
+    #             total_purchasers = self.safe_int(metrics[7].value)
+                
+    #             # Process first-time purchasers data
+    #             first_time_purchasers = 0
+    #             if first_time_response.rows:
+    #                 for row in first_time_response.rows:
+    #                     user_type = row.dimension_values[0].value
+    #                     purchasers = self.safe_int(row.metric_values[0].value)
+    #                     if user_type == "new":
+    #                         first_time_purchasers = purchasers
+                
+    #             # Calculate metrics
+    #             estimated_ad_cost = total_revenue * 0.25  # Assuming 25% ad spend ratio
+    #             roas = (total_revenue / estimated_ad_cost) if estimated_ad_cost > 0 else 0
+    #             roi = ((total_revenue - estimated_ad_cost) / estimated_ad_cost * 100) if estimated_ad_cost > 0 else 0
+                
+    #             cost_per_conversion = estimated_ad_cost / conversions if conversions > 0 else 0
+    #             revenue_per_user = total_revenue / total_users if total_users > 0 else 0
+    #             profit_margin = ((total_revenue - estimated_ad_cost) / total_revenue * 100) if total_revenue > 0 else 0
+                
+    #             # New calculations
+    #             average_purchase_revenue_per_active_user = purchase_revenue / active_users if active_users > 0 else 0
+                
+    #             return {
+    #                 'propertyId': property_id,
+    #                 'propertyName': f"Property {property_id}",
+    #                 # Original metrics
+    #                 'totalRevenue': round(total_revenue, 2),
+    #                 'adSpend': round(estimated_ad_cost, 2),
+    #                 'roas': round(roas, 2),
+    #                 'roi': round(roi, 2),
+    #                 'conversionValue': round(purchase_revenue, 2),
+    #                 'costPerConversion': round(cost_per_conversion, 2),
+    #                 'revenuePerUser': round(revenue_per_user, 2),
+    #                 'profitMargin': round(profit_margin, 2),
+    #                 'roasStatus': self.get_roas_status(roas),
+    #                 'roiStatus': self.get_roi_status(roi),
+    #                 'conversions': int(conversions),
+    #                 'sessions': sessions,
+    #                 'totalUsers': total_users,
+    #                 # New ecommerce metrics
+    #                 'totalAdRevenue': round(total_ad_revenue, 2),
+    #                 'totalPurchasers': total_purchasers,
+    #                 'firstTimePurchasers': first_time_purchasers,
+    #                 'averagePurchaseRevenuePerActiveUser': round(average_purchase_revenue_per_active_user, 2),
+    #                 'activeUsers': active_users
+    #             }
+            
+    #         return self.get_default_roas_roi_metrics(property_id)
+            
+    #     except Exception as e:
+    #         logger.error(f"Error fetching ROAS/ROI metrics for property {property_id}: {e}")
+    #         # Return default data instead of raising exception
+    #         return self.get_default_roas_roi_metrics(property_id)
+
+
+    def get_combined_roas_roi_metrics(self, property_id: str, ads_customer_id: str, period: str = "30d") -> Dict[str, Any]:
+        """Get ROAS and ROI metrics combining GA4 data with real Google Ads spend"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            # Get GA4 data
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="totalAdRevenue"),
+                    Metric(name="conversions"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers"),
+                    Metric(name="activeUsers"),
+                    Metric(name="totalPurchasers"),
+                    Metric(name="eventCount")
+                ],
+            )
+            
+            response = self.client.run_report(request=request)
+            
+            # Get first-time purchasers data
+            first_time_request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="newVsReturning")],
+                metrics=[
+                    Metric(name="totalPurchasers"),
+                    Metric(name="purchaseRevenue")
+                ],
+            )
+            
+            first_time_response = self.client.run_report(first_time_request)
+            
+            # Get real ad spend from Google Ads
+            try:
+                ads_manager = GoogleAdsManager(self.user_email, self.auth_manager)
+                # Convert GA4 period format to Google Ads format
+                ads_period = self.convert_ga_period_to_ads_period(period)
+                actual_ad_cost = ads_manager.get_total_cost_for_period(ads_customer_id, ads_period)
+            except Exception as ads_error:
+                logger.warning(f"Could not fetch Google Ads data: {ads_error}")
+                actual_ad_cost = 0.0
+            
+            if response.rows:
+                row = response.rows[0]
+                metrics = row.metric_values
+                
+                total_revenue = self.safe_float(metrics[0].value)
+                purchase_revenue = self.safe_float(metrics[1].value)
+                total_ad_revenue = self.safe_float(metrics[2].value)
+                conversions = self.safe_float(metrics[3].value)
+                sessions = self.safe_int(metrics[4].value)
+                total_users = self.safe_int(metrics[5].value)
+                active_users = self.safe_int(metrics[6].value)
+                total_purchasers = self.safe_int(metrics[7].value)
+                
+                # Process first-time purchasers data
+                first_time_purchasers = 0
+                if first_time_response.rows:
+                    for row in first_time_response.rows:
+                        user_type = row.dimension_values[0].value
+                        purchasers = self.safe_int(row.metric_values[0].value)
+                        if user_type == "new":
+                            first_time_purchasers = purchasers
+                
+                # Calculate metrics with real ad spend
+                roas = (total_revenue / actual_ad_cost) if actual_ad_cost > 0 else 0
+                roi = ((total_revenue - actual_ad_cost) / actual_ad_cost * 100) if actual_ad_cost > 0 else 0
+                
+                cost_per_conversion = actual_ad_cost / conversions if conversions > 0 else 0
+                revenue_per_user = total_revenue / total_users if total_users > 0 else 0
+                profit_margin = ((total_revenue - actual_ad_cost) / total_revenue * 100) if total_revenue > 0 else 0
+                
+                # New calculations
+                average_purchase_revenue_per_active_user = purchase_revenue / active_users if active_users > 0 else 0
+                
+                return {
+                    'propertyId': property_id,
+                    'propertyName': f"Property {property_id}",
+                    'adsCustomerId': ads_customer_id,
+                    # Original metrics with real ad spend
+                    'totalRevenue': round(total_revenue, 2),
+                    'adSpend': round(actual_ad_cost, 2),
+                    'roas': round(roas, 2),
+                    'roi': round(roi, 2),
+                    'conversionValue': round(purchase_revenue, 2),
+                    'costPerConversion': round(cost_per_conversion, 2),
+                    'revenuePerUser': round(revenue_per_user, 2),
+                    'profitMargin': round(profit_margin, 2),
+                    'roasStatus': self.get_roas_status(roas),
+                    'roiStatus': self.get_roi_status(roi),
+                    'conversions': int(conversions),
+                    'sessions': sessions,
+                    'totalUsers': total_users,
+                    # New ecommerce metrics
+                    'totalAdRevenue': round(total_ad_revenue, 2),
+                    'totalPurchasers': total_purchasers,
+                    'firstTimePurchasers': first_time_purchasers,
+                    'averagePurchaseRevenuePerActiveUser': round(average_purchase_revenue_per_active_user, 2),
+                    'activeUsers': active_users
+                }
+            
+            return self.get_default_combined_metrics(property_id, ads_customer_id)
+            
+        except Exception as e:
+            logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
+            return self.get_default_combined_metrics(property_id, ads_customer_id)
+
+    def convert_ga_period_to_ads_period(self, ga_period: str) -> str:
+        """Convert GA4 period format to Google Ads period format"""
+        mapping = {
+            "7d": "LAST_7_DAYS",
+            "30d": "LAST_30_DAYS", 
+            "90d": "LAST_90_DAYS",
+            "365d": "LAST_365_DAYS"
+        }
+        return mapping.get(ga_period, "LAST_30_DAYS")
+
+    def get_default_combined_metrics(self, property_id: str, ads_customer_id: str) -> Dict[str, Any]:
+        """Return default combined metrics when no data available"""
+        return {
+            'propertyId': property_id,
+            'propertyName': f"Property {property_id}",
+            'adsCustomerId': ads_customer_id,
+            'totalRevenue': 0.0,
+            'adSpend': 0.0,
+            'roas': 0.0,
+            'roi': 0.0,
+            'conversionValue': 0.0,
+            'costPerConversion': 0.0,
+            'revenuePerUser': 0.0,
+            'profitMargin': 0.0,
+            'roasStatus': "No Data",
+            'roiStatus': "No Data",
+            'conversions': 0,
+            'sessions': 0,
+            'totalUsers': 0,
+            'totalAdRevenue': 0.0,
+            'totalPurchasers': 0,
+            'firstTimePurchasers': 0,
+            'averagePurchaseRevenuePerActiveUser': 0.0,
+            'activeUsers': 0
+        }
+
+    def get_default_roas_roi_metrics(self, property_id: str) -> Dict[str, Any]:
+        """Return default ROAS/ROI metrics when no data available"""
+        return {
+            'propertyId': property_id,
+            'propertyName': f"Property {property_id}",
+            # Original metrics
+            'totalRevenue': 0.0,
+            'adSpend': 0.0,
+            'roas': 0.0,
+            'roi': 0.0,
+            'conversionValue': 0.0,
+            'costPerConversion': 0.0,
+            'revenuePerUser': 0.0,
+            'profitMargin': 0.0,
+            'roasStatus': "No Data",
+            'roiStatus': "No Data",
+            'conversions': 0,
+            'sessions': 0,
+            'totalUsers': 0,
+            # New ecommerce metrics
+            'totalAdRevenue': 0.0,
+            'totalPurchasers': 0,
+            'firstTimePurchasers': 0,
+            'averagePurchaseRevenuePerActiveUser': 0.0,
+            'activeUsers': 0
+        }
+    def get_roas_roi_time_series(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
+        """Get ROAS and ROI time series data"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="date")],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="conversions"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers")
+                ],
+                order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date"))]
+            )
+            
+            response = self.client.run_report(request=request)
+            
+            time_series = []
+            for row in response.rows:
+                date_val = row.dimension_values[0].value
+                revenue = self.safe_float(row.metric_values[0].value)
+                conversions = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                users = self.safe_int(row.metric_values[3].value)
+                
+                # Estimate ad cost (in real implementation, get from Google Ads API)
+                estimated_ad_cost = revenue * 0.25
+                
+                roas = (revenue / estimated_ad_cost) if estimated_ad_cost > 0 else 0
+                roi = ((revenue - estimated_ad_cost) / estimated_ad_cost * 100) if estimated_ad_cost > 0 else 0
+                
+                time_series.append({
+                    'date': date_val,
+                    'revenue': round(revenue, 2),
+                    'adSpend': round(estimated_ad_cost, 2),
+                    'roas': round(roas, 2),
+                    'roi': round(roi, 2),
+                    'conversions': conversions,
+                    'sessions': sessions
+                })
+            
+            return time_series
+            
+        except Exception as e:
+            logger.error(f"Error fetching ROAS/ROI time series for property {property_id}: {e}")
+            return []
+
+    def get_roas_status(self, roas: float) -> str:
+        """Get ROAS performance status"""
+        if roas >= 4.0:
+            return "Excellent"
+        elif roas >= 3.0:
+            return "Good"
+        elif roas >= 2.0:
+            return "Average"
+        elif roas >= 1.0:
+            return "Below Average"
+        else:
+            return "Poor"
+
+    def get_roi_status(self, roi: float) -> str:
+        """Get ROI performance status"""
+        if roi >= 300:
+            return "Excellent"
+        elif roi >= 200:
+            return "Good"
+        elif roi >= 100:
+            return "Average"
+        elif roi >= 50:
+            return "Below Average"
+        else:
+            return "Poor"
+
+
     def get_channel_performance(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
         """Get detailed channel performance data"""
         try:

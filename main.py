@@ -435,6 +435,37 @@ async def get_combined_overview(
         logger.error(f"Error fetching combined overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# @app.get("/api/analytics/roas-roi/{property_id}", response_model=GAROASROIMetrics)
+# async def get_ga_roas_roi(
+#     property_id: str,
+#     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+#     current_user: dict = Depends(get_current_user)
+# ):
+#     """Get GA4 ROAS and ROI metrics"""
+#     try:
+#         ga4_manager = GA4Manager(current_user["email"])
+#         metrics = ga4_manager.get_roas_roi_metrics(property_id, period)
+#         return GAROASROIMetrics(**metrics)
+#     except Exception as e:
+#         logger.error(f"Error fetching ROAS/ROI metrics: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
+async def get_ga_roas_roi_time_series(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get GA4 ROAS and ROI time series data"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_roas_roi_time_series(property_id, period)
+        return [GAROASROITimeSeriesData(**ts) for ts in time_series]
+    except Exception as e:
+        logger.error(f"Error fetching ROAS/ROI time series: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -450,6 +481,38 @@ async def generic_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"error": "Internal server error", "detail": str(exc)}
     )
+
+
+@app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
+async def get_ga_roas_roi_time_series(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get GA4 ROAS and ROI time series data"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_roas_roi_time_series(property_id, period)
+        return [GAROASROITimeSeriesData(**ts) for ts in time_series]
+    except Exception as e:
+        logger.error(f"Error fetching ROAS/ROI time series: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/combined/roas-roi-metrics", response_model=GACombinedROASROIMetrics)
+async def get_combined_roas_roi_metrics(
+    ga_property_id: str = Query(..., description="GA4 Property ID"),
+    ads_customer_id: str = Query(..., description="Google Ads Customer ID"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get combined ROAS and ROI metrics from GA4 and Google Ads"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        metrics = ga4_manager.get_combined_roas_roi_metrics(ga_property_id, ads_customer_id, period)
+        return GACombinedROASROIMetrics(**metrics)
+    except Exception as e:
+        logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))  
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")
