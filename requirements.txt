@@ -18,7 +18,7 @@ cryptography==41.0.7
 
 # HTTP
 httpx==0.25.2
-requests==2.31.0
+requests
 
 # Optional: For production deployment
 gunicorn==21.2.0
@@ -26,3 +26,6 @@ gunicorn==21.2.0
 # Optional: For development
 pytest==7.4.3
 pytest-asyncio==0.21.1
+
+httptools==0.6.1
+python-jose[cryptography]==3.3.0
