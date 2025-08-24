@@ -19,6 +19,7 @@ cryptography==41.0.7
 # HTTP
 httpx==0.25.2
 requests
+urllib3==1.26.18
 
 # Optional: For production deployment
 gunicorn==21.2.0
