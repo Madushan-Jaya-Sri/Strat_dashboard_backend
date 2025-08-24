@@ -566,3 +566,122 @@ class GoogleAdsManager:
         except Exception as e:
             logger.error(f"Error fetching total ad cost for customer {customer_id}: {e}")
             return 0.0
+            
+    def get_overall_key_stats(self, customer_id: str, period: str = "LAST_30_DAYS") -> Dict[str, Any]:
+            """Get overall key statistics for dashboard cards"""
+            try:
+                googleads_service = self.client.get_service("GoogleAdsService")
+                date_filter = self._get_date_filter(period)
+                
+                # Get overall campaign metrics
+                query = f"""
+                    SELECT
+                        metrics.impressions,
+                        metrics.clicks,
+                        metrics.cost_micros,
+                        metrics.conversions,
+                        metrics.ctr,
+                        metrics.average_cpc
+                    FROM campaign
+                    WHERE {date_filter}
+                    AND campaign.status != 'REMOVED'
+                """
+                
+                response = googleads_service.search(customer_id=customer_id, query=query)
+                
+                # Aggregate all metrics
+                total_impressions = 0
+                total_clicks = 0
+                total_cost = 0.0
+                total_conversions = 0.0
+                total_ctr_sum = 0.0
+                total_cpc_sum = 0.0
+                row_count = 0
+                
+                for row in response:
+                    metrics = row.metrics
+                    total_impressions += metrics.impressions
+                    total_clicks += metrics.clicks
+                    total_cost += metrics.cost_micros / 1_000_000
+                    total_conversions += metrics.conversions
+                    total_ctr_sum += metrics.ctr
+                    total_cpc_sum += metrics.average_cpc / 1_000_000 if metrics.average_cpc else 0
+                    row_count += 1
+                
+                # Calculate derived metrics
+                overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+                conversion_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
+                avg_cpc = total_cpc_sum / row_count if row_count > 0 else 0
+                cost_per_conversion = total_cost / total_conversions if total_conversions > 0 else 0
+                
+                # Format numbers for display
+                from utils.helpers import format_large_number, format_currency
+                
+                key_stats = {
+                    'total_impressions': {
+                        'value': total_impressions,
+                        'formatted': format_large_number(total_impressions),
+                        'label': 'TOTAL IMPRESSIONS',
+                        'description': 'Reach and Visibility'
+                    },
+                    'total_cost': {
+                        'value': total_cost,
+                        'formatted': format_currency(total_cost),
+                        'label': 'TOTAL COST',
+                        'description': 'Budget utilization'
+                    },
+                    'total_clicks': {
+                        'value': total_clicks,
+                        'formatted': format_large_number(total_clicks),
+                        'label': 'TOTAL CLICKS',
+                        'description': 'User engagement'
+                    },
+                    'conversion_rate': {
+                        'value': conversion_rate,
+                        'formatted': f"{conversion_rate:.2f}%",
+                        'label': 'CONVERSION RATE',
+                        'description': 'Campaign effectiveness'
+                    },
+                    'total_conversions': {
+                        'value': total_conversions,
+                        'formatted': f"{total_conversions:.1f}",
+                        'label': 'TOTAL CONVERSIONS',
+                        'description': 'Goal achievements'
+                    },
+                    'avg_cost_per_click': {
+                        'value': avg_cpc,
+                        'formatted': format_currency(avg_cpc),
+                        'label': 'AVG. COST PER CLICK',
+                        'description': 'Bidding efficiency'
+                    },
+                    'cost_per_conversion': {
+                        'value': cost_per_conversion,
+                        'formatted': format_currency(cost_per_conversion),
+                        'label': 'COST PER CONV.',
+                        'description': 'ROI efficiency'
+                    },
+                    'click_through_rate': {
+                        'value': overall_ctr,
+                        'formatted': f"{overall_ctr:.2f}%",
+                        'label': 'CLICK-THROUGH RATE',
+                        'description': 'Ad relevance'
+                    }
+                }
+                
+                # Add summary info
+                key_stats['summary'] = {
+                    'period': period,
+                    'customer_id': customer_id,
+                    'campaigns_count': row_count,
+                    'generated_at': datetime.now().isoformat()
+                }
+                
+                logger.info(f"Generated key stats for customer {customer_id} ({period})")
+                return key_stats
+                
+            except GoogleAdsException as ex:
+                logger.error(f"Google Ads API error getting key stats: {ex}")
+                raise HTTPException(status_code=400, detail=f"Failed to get key stats: {ex.error.message}")
+            except Exception as e:
+                logger.error(f"Unexpected error getting key stats: {e}")
+                raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching key stats")

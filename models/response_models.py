@@ -21,6 +21,31 @@ class AdCustomer(BaseModel):
     is_manager: bool
     resource_name: str
 
+
+
+class KeyStatMetric(BaseModel):
+    value: float
+    formatted: str
+    label: str
+    description: str
+
+class KeyStatsSummary(BaseModel):
+    period: str
+    customer_id: str
+    campaigns_count: int
+    generated_at: str
+
+class AdKeyStats(BaseModel):
+    total_impressions: KeyStatMetric
+    total_cost: KeyStatMetric
+    total_clicks: KeyStatMetric
+    conversion_rate: KeyStatMetric
+    total_conversions: KeyStatMetric
+    avg_cost_per_click: KeyStatMetric
+    cost_per_conversion: KeyStatMetric
+    click_through_rate: KeyStatMetric
+    summary: KeyStatsSummary
+
 class AdCampaign(BaseModel):
     id: str
     name: str
@@ -338,3 +363,4 @@ class RawKeywordInsightsResponse(BaseModel):
     request_info: RequestInfo
     keyword_ideas_raw: RawKeywordIdeas
     historical_metrics_raw: RawHistoricalMetrics
+

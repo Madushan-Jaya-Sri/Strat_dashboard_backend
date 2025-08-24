@@ -21,6 +21,7 @@ from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
 from models.response_models import *
 from utils.helpers import get_date_range, get_country_location_id, validate_timeframe
+from models.response_models import AdKeyStats, KeyStatMetric
 
 import sys
 import os
@@ -124,6 +125,23 @@ async def get_ads_customers(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error fetching ads customers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ads/key-stats/{customer_id}", response_model=AdKeyStats)
+async def get_ads_key_stats(
+    customer_id: str,
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get Google Ads key statistics for dashboard cards"""
+    try:
+        ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
+        key_stats = ads_manager.get_overall_key_stats(customer_id, period)
+        return AdKeyStats(**key_stats)
+    except Exception as e:
+        logger.error(f"Error fetching key stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/ads/campaigns/{customer_id}", response_model=List[AdCampaign])
 async def get_ads_campaigns(

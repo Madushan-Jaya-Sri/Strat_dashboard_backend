@@ -1535,3 +1535,96 @@ def validate_keyword_list(keywords: List[str], max_length: int = 10) -> Dict[str
         "keyword_count": len(keywords),
         "unique_keywords": len(set(keywords))
     }
+
+
+
+def format_metric_value(value: float, metric_type: str) -> str:
+    """Format metric values based on type"""
+    if metric_type in ["impressions", "clicks", "conversions"]:
+        return format_large_number(int(value))
+    elif metric_type in ["cost", "cpc", "cost_per_conversion"]:
+        return format_currency(value)
+    elif metric_type in ["ctr", "conversion_rate"]:
+        return f"{value:.2f}%"
+    else:
+        return str(value)
+
+def get_metric_performance_status(metric_name: str, value: float) -> str:
+    """Get performance status for different metrics"""
+    benchmarks = {
+        "ctr": {"excellent": 5.0, "good": 3.0, "average": 1.5},
+        "conversion_rate": {"excellent": 3.0, "good": 2.0, "average": 1.0},
+        "cost_per_conversion": {"excellent": 20.0, "good": 50.0, "average": 100.0},  # Lower is better
+        "avg_cpc": {"excellent": 1.0, "good": 2.0, "average": 5.0}  # Lower is better
+    }
+    
+    if metric_name.lower() not in benchmarks:
+        return "N/A"
+    
+    bench = benchmarks[metric_name.lower()]
+    
+    # For cost metrics, lower is better
+    if metric_name.lower() in ["cost_per_conversion", "avg_cpc"]:
+        if value <= bench["excellent"]:
+            return "Excellent"
+        elif value <= bench["good"]:
+            return "Good"
+        elif value <= bench["average"]:
+            return "Average"
+        else:
+            return "Needs Improvement"
+    else:
+        # For rate metrics, higher is better
+        if value >= bench["excellent"]:
+            return "Excellent"
+        elif value >= bench["good"]:
+            return "Good"
+        elif value >= bench["average"]:
+            return "Average"
+        else:
+            return "Needs Improvement"
+
+def calculate_metric_change(current_value: float, previous_value: float) -> Dict[str, Any]:
+    """Calculate metric change and trend"""
+    if previous_value == 0:
+        return {
+            "change_value": 0.0,
+            "change_percentage": 0.0,
+            "trend": "stable",
+            "formatted_change": "N/A"
+        }
+    
+    change_value = current_value - previous_value
+    change_percentage = (change_value / previous_value) * 100
+    
+    if change_percentage > 5:
+        trend = "increasing"
+        icon = "↗"
+    elif change_percentage < -5:
+        trend = "decreasing"
+        icon = "↘"
+    else:
+        trend = "stable"
+        icon = "→"
+    
+    return {
+        "change_value": change_value,
+        "change_percentage": change_percentage,
+        "trend": trend,
+        "formatted_change": f"{icon} {change_percentage:+.1f}%"
+    }
+
+def get_metric_description(metric_name: str) -> str:
+    """Get user-friendly descriptions for metrics"""
+    descriptions = {
+        "total_impressions": "Number of times your ads were shown",
+        "total_cost": "Total amount spent on advertising",
+        "total_clicks": "Number of times users clicked on your ads",
+        "conversion_rate": "Percentage of clicks that resulted in conversions",
+        "total_conversions": "Total number of desired actions completed",
+        "avg_cost_per_click": "Average amount paid for each click",
+        "cost_per_conversion": "Average cost to acquire one conversion",
+        "click_through_rate": "Percentage of impressions that resulted in clicks"
+    }
+    
+    return descriptions.get(metric_name.lower(), "Performance metric")
