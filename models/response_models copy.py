@@ -96,6 +96,8 @@ class GAProperty(BaseModel):
     displayName: str
     websiteUrl: Optional[str] = None
 
+
+
 class GAMetrics(BaseModel):
     propertyId: str
     propertyName: str
@@ -118,6 +120,7 @@ class GAMetrics(BaseModel):
     # Extra metrics for 8th card
     viewsPerSession: float
     sessionQualityScore: str
+
 
 class GATrafficSource(BaseModel):
     channel: str
@@ -250,16 +253,116 @@ class GAROASROITimeSeriesData(BaseModel):
     conversions: float
     sessions: int
 
-# Intent Insights Models - UPDATED
+class GACombinedROASROIMetrics(BaseModel):
+    propertyId: str
+    propertyName: str
+    adsCustomerId: str
+    # Original metrics
+    totalRevenue: float
+    adSpend: float  # Real ad spend from Google Ads
+    roas: float
+    roi: float
+    conversionValue: float
+    costPerConversion: float
+    revenuePerUser: float
+    profitMargin: float
+    roasStatus: str
+    roiStatus: str
+    conversions: int
+    sessions: int
+    totalUsers: int
+    # New ecommerce metrics
+    totalAdRevenue: float
+    totalPurchasers: int
+    firstTimePurchasers: int
+    averagePurchaseRevenuePerActiveUser: float
+    activeUsers: int
+
+# Combined Dashboard Models
+# Combined Dashboard Models
+class CombinedOverview(BaseModel):
+    ads: Optional[dict] = None
+    analytics: Optional[dict] = None
+
+# Intent Insights Models
 class KeywordInsightRequest(BaseModel):
     seed_keywords: List[str]  # Max 10 keywords
-    country: str = "Sri Lanka"
-    timeframe: str = "12_months"  # "1_month", "3_months", "12_months", "custom"
+    country: str
+    timeframe: str  # "1_month", "3_months", "12_months", "custom"
     start_date: Optional[str] = None  # Required for custom timeframe
     end_date: Optional[str] = None    # Required for custom timeframe
 
+class EnhancedKeywordInsight(BaseModel):
+    keyword: str
+    avg_monthly_searches: int
+    competition: str
+    competition_index: float
+    low_top_of_page_bid: float
+    high_top_of_page_bid: float
+    yoy_change: str
+    three_month_change: str
+    trend_direction: str
+    monthly_volumes: Dict[str, int]
+    opportunity_score: int
+    recommendation: str
+    seasonality: Dict[str, Any]
+
+
+class IntentAnalysisResponse(BaseModel):
+    informational: List[str]
+    commercial: List[str]
+    transactional: List[str]
+    navigational: List[str]
+
+# Search Volume Segmentation Models - Summary Focused
+class ComprehensiveDeviceSegmentation(BaseModel):
+    summary: Dict[str, Any]  # Contains total_mobile, total_desktop, total_tablet, percentages
+    data_source: str
+    keywords_analyzed: int
+
+class ComprehensiveLocationSegmentation(BaseModel):
+    summary: Dict[str, Any]  # Contains region_totals, percentages, top_region, geographic_concentration
+    country: str
+    data_source: str
+    keywords_analyzed: int
+
+class ComprehensiveLanguageSegmentation(BaseModel):
+    summary: Dict[str, Any]  # Contains language_totals, percentages, dominant_language, localization_opportunities
+    data_source: str
+    keywords_analyzed: int
+
+class ComprehensiveNetworkSegmentation(BaseModel):
+    summary: Dict[str, Any]  # Contains network_totals, google_search_share, partners_share, optimization_recommendation
+    data_source: str
+    keywords_analyzed: int
+class SegmentationInsights(BaseModel):
+    device_insights: Dict[str, Any]
+    location_insights: Dict[str, Any]
+    language_insights: Dict[str, Any]
+    network_insights: Dict[str, Any]
+    overall_insights: Dict[str, Any]
+
+class SearchVolumeSegmentationResponse(BaseModel):
+    seed_keywords: List[str]
+    total_keywords_analyzed: int
+    total_suggested_keywords: int
+    country: str
+    location_id: str
+    timeframe: str
+    segmentation: Dict[str, Any]  # Contains device, location, language, network summaries
+    insights: SegmentationInsights
+    generated_at: str
+    analysis_scope: str
+
+# Error Models
+class ErrorResponse(BaseModel):
+    error: str
+    detail: Optional[str] = None
+    status_code: int
+
+
 class KeywordMetrics(BaseModel):
-    """Model for individual keyword metrics with simplified structure"""
+    """Model for individual keyword metrics"""
     keyword: str
     avg_monthly_searches: int
     competition: str
@@ -269,10 +372,11 @@ class KeywordMetrics(BaseModel):
     yoy_change: float
     three_month_change: float
     monthly_volumes: Dict[str, int]
-    seasonality: Dict[str, Any]  # Changed to Any to handle mixed types from calculate_seasonality_index
+    # seasonality: Dict[str, float]
+    seasonality: Dict[str, float]  
 
 class KeywordInsightsResponse(BaseModel):
-    """Response model for keyword insights with separated seed and related keywords"""
+    """Updated response model matching the new structure"""
     seed_keywords: List[KeywordMetrics]
     related_keywords: List[KeywordMetrics]
     country: str
@@ -285,56 +389,14 @@ class KeywordInsightsResponse(BaseModel):
     total_related_keywords: int
     generated_at: str
 
-class IntentAnalysisResponse(BaseModel):
-    informational: List[str]
-    commercial: List[str]
-    transactional: List[str]
-    navigational: List[str]
-
-# Error Models
-class ErrorResponse(BaseModel):
-    error: str
-    detail: Optional[str] = None
-    status_code: int
-
-# Add this to your models/response_models.py
-
-class RawKeywordMetrics(BaseModel):
-    avg_monthly_searches: int
-    competition: str
-    competition_index: float
-    low_top_of_page_bid_micros: int
-    high_top_of_page_bid_micros: int
-    monthly_search_volumes: Optional[List[dict]] = []
-
-class RawKeywordResult(BaseModel):
-    keyword_text: str
-    metrics: Optional[RawKeywordMetrics] = None
-
-class RawKeywordIdeas(BaseModel):
-    total_results: int
-    results: List[RawKeywordResult]
-
-class RawHistoricalResult(BaseModel):
-    keyword_text: str
-    keyword_metrics: Optional[RawKeywordMetrics] = None
-
-class RawHistoricalMetrics(BaseModel):
-    date_range: str
-    total_results: int
-    results: List[RawHistoricalResult]
-
-class RequestInfo(BaseModel):
-    customer_id: str
+# If you have a request model, here it is:
+class KeywordInsightsRequest(BaseModel):
+    """Request model for keyword insights"""
     seed_keywords: List[str]
-    country: str
-    location_id: str
-    timeframe: str
-    date_range: str
-    include_zero_volume: bool
-    generated_at: str
+    country: str = "US"
+    timeframe: str = "12_months"
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
-class RawKeywordInsightsResponse(BaseModel):
-    request_info: RequestInfo
-    keyword_ideas_raw: RawKeywordIdeas
-    historical_metrics_raw: RawHistoricalMetrics
+
+    

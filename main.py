@@ -20,7 +20,7 @@ from google_ads.ads_manager import GoogleAdsManager
 from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
 from models.response_models import *
-from utils.helpers import get_date_range
+from utils.helpers import get_date_range, get_country_location_id, validate_timeframe
 
 import sys
 import os
@@ -449,25 +449,65 @@ async def get_combined_roas_roi_metrics(
         logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Intent Insights Routes
-@app.post("/api/intent/keyword-insights/{customer_id}", response_model=KeywordInsightsResponse)
+# # Intent Insights Routes with Enhanced Timeframe Validation
+# @app.post("/api/intent/keyword-insights/{customer_id}", response_model=KeywordInsightsResponse)
+# async def get_keyword_insights(
+#     customer_id: str,
+#     request_data: KeywordInsightRequest,
+#     current_user: dict = Depends(get_current_user)
+# ):
+#     """Get comprehensive keyword insights with search volumes and trends"""
+#     try:
+#         # Validate seed keywords limit
+#         if len(request_data.seed_keywords) > 10:
+#             raise HTTPException(status_code=400, detail="Maximum 10 seed keywords allowed")
+        
+#         # Validate timeframe with enhanced validation
+#         if not validate_timeframe(request_data.timeframe, request_data.start_date, request_data.end_date):
+#             if request_data.timeframe == "custom":
+#                 current_month = datetime.now().strftime("%B %Y")
+#                 raise HTTPException(
+#                     status_code=400, 
+#                     detail=f"Invalid timeframe. Data for {current_month} is not yet complete. Please ensure your end date is before the current month."
+#                 )
+#             else:
+#                 raise HTTPException(status_code=400, detail="Invalid timeframe parameters")
+        
+#         intent_manager = IntentManager(current_user["email"], auth_manager)
+        
+#         insights = intent_manager.get_keyword_insights(
+#             customer_id,
+#             request_data.seed_keywords,
+#             request_data.country,
+#             request_data.timeframe,
+#             request_data.start_date,
+#             request_data.end_date
+#         )
+        
+#         return KeywordInsightsResponse(**insights)
+        
+#     except Exception as e:
+#         logger.error(f"Error fetching keyword insights: {e}")
+#         if isinstance(e, HTTPException):
+#             raise e
+#         raise HTTPException(status_code=500, detail=str(e))  
+
+# Alternative: Return raw JSON without Pydantic validation
+
+@app.post("/api/intent/keyword-insights/{customer_id}")
 async def get_keyword_insights(
     customer_id: str,
     request_data: KeywordInsightRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get comprehensive keyword insights with search volumes and trends"""
+    """Get raw keyword insights from Google Ads API - returns raw JSON"""
     try:
         # Validate seed keywords limit
         if len(request_data.seed_keywords) > 10:
             raise HTTPException(status_code=400, detail="Maximum 10 seed keywords allowed")
         
-        # Validate custom timeframe
-        if request_data.timeframe == "custom":
-            if not request_data.start_date or not request_data.end_date:
-                raise HTTPException(status_code=400, detail="start_date and end_date required for custom timeframe")
-        
         intent_manager = IntentManager(current_user["email"], auth_manager)
+        
         insights = intent_manager.get_keyword_insights(
             customer_id,
             request_data.seed_keywords,
@@ -477,92 +517,16 @@ async def get_keyword_insights(
             request_data.end_date
         )
         
-        return KeywordInsightsResponse(**insights)
+        # Return raw JSON without Pydantic validation
+        return insights
         
     except Exception as e:
         logger.error(f"Error fetching keyword insights: {e}")
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/intent/intent-analysis/{customer_id}", response_model=IntentAnalysisResponse)
-async def get_intent_analysis(
-    customer_id: str,
-    keywords: List[str],
-    location_id: str = Query("2144", description="Location ID for analysis"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Analyze search intent patterns for keywords"""
-    try:
-        intent_manager = IntentManager(current_user["email"], auth_manager)
-        analysis = intent_manager.get_intent_analysis(customer_id, keywords, location_id)
-        return IntentAnalysisResponse(**analysis)
-        
-    except Exception as e:
-        logger.error(f"Error analyzing intent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/intent/supported-countries")
-async def get_supported_countries():
-    """Get list of supported countries for keyword research"""
-    countries = {
-        "Sri Lanka": "2144",
-        "United States": "2840", 
-        "United Kingdom": "2826",
-        "Canada": "2124",
-        "Australia": "2036",
-        "India": "2356",
-        "Singapore": "2702",
-        "Malaysia": "2458",
-        "Thailand": "2764",
-        "Philippines": "2608",
-        "Germany": "2276",
-        "France": "2250",
-        "Japan": "2392",
-        "South Korea": "2410",
-        "Brazil": "2076",
-        "Mexico": "2484",
-        "Netherlands": "2528",
-        "Spain": "2724",
-        "Italy": "2380",
-        "Indonesia": "2360",
-        "Vietnam": "2704",
-        "Bangladesh": "2050",
-        "Pakistan": "2586",
-        "Myanmar": "2104",
-        "Cambodia": "2116"
-    }
-    
-    return {
-        "supported_countries": list(countries.keys()),
-        "country_codes": countries,
-        "default_country": "Sri Lanka"
-    }
-
-@app.post("/api/intent/keyword-metrics/{customer_id}")
-async def get_keyword_metrics_batch(
-    customer_id: str,
-    keywords: List[str],
-    location_id: str = Query("2144", description="Location ID for metrics"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get metrics for a specific list of keywords"""
-    try:
-        if len(keywords) > 50:
-            raise HTTPException(status_code=400, detail="Maximum 50 keywords allowed per request")
-        
-        intent_manager = IntentManager(current_user["email"], auth_manager)
-        metrics = intent_manager.get_keyword_metrics_batch(customer_id, keywords, location_id)
-        
-        return {
-            "keywords": keywords,
-            "location_id": location_id,
-            "metrics": metrics,
-            "total_keywords": len(metrics),
-            "generated_at": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching keyword metrics batch: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Error handlers
 @app.exception_handler(HTTPException)
