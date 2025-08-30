@@ -1,7 +1,3 @@
-"""
-Google Ads Manager
-Handles all Google Ads API operations
-"""
 
 import os
 import logging
@@ -12,6 +8,8 @@ from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
 from google.oauth2.credentials import Credentials
 from auth.auth_manager import AuthManager
+
+from utils.helpers import convert_campaign_status, convert_campaign_type, convert_device_type
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +210,11 @@ class GoogleAdsManager:
                     'id': str(campaign.id),
                     'name': campaign.name,
                     'status': campaign.status.name if hasattr(campaign.status, 'name') else str(campaign.status),
+                    'status_code': str(campaign.status),
+                    'status_info': convert_campaign_status(str(campaign.status)),
                     'type': campaign.advertising_channel_type.name if hasattr(campaign.advertising_channel_type, 'name') else str(campaign.advertising_channel_type),
+                    'type_code': str(campaign.advertising_channel_type),
+                    'type_info': convert_campaign_type(str(campaign.advertising_channel_type)),
                     'start_date': campaign.start_date,
                     'end_date': campaign.end_date,
                     'impressions': metrics.impressions,
@@ -440,6 +442,7 @@ class GoogleAdsManager:
                 if device not in device_data:
                     device_data[device] = {
                         'device': device,
+                        'device_info': convert_device_type(device),
                         'clicks': 0,
                         'impressions': 0,
                         'cost': 0
@@ -448,6 +451,7 @@ class GoogleAdsManager:
                 device_data[device]['clicks'] += metrics.clicks
                 device_data[device]['impressions'] += metrics.impressions
                 device_data[device]['cost'] += metrics.cost_micros / 1_000_000
+
             
             return list(device_data.values())
             

@@ -21,8 +21,6 @@ class AdCustomer(BaseModel):
     is_manager: bool
     resource_name: str
 
-
-
 class KeyStatMetric(BaseModel):
     value: float
     formatted: str
@@ -35,6 +33,32 @@ class KeyStatsSummary(BaseModel):
     campaigns_count: int
     generated_at: str
 
+class StatusInfo(BaseModel):
+    name: str
+    label: str
+    color: str
+
+class TypeInfo(BaseModel):
+    name: str
+    label: str
+    icon: str
+
+class EnhancedAdCampaign(BaseModel):
+    id: str
+    name: str
+    status: str
+    status_code: str
+    status_info: StatusInfo
+    type: str
+    type_code: str
+    type_info: TypeInfo
+    start_date: str
+    end_date: Optional[str] = None
+    impressions: int
+    clicks: int
+    cost: float
+    conversions: float
+    ctr: float
 class AdKeyStats(BaseModel):
     total_impressions: KeyStatMetric
     total_cost: KeyStatMetric
@@ -87,6 +111,7 @@ class GeographicPerformance(BaseModel):
 
 class DevicePerformance(BaseModel):
     device: str
+    device_info: dict
     clicks: int
     impressions: int
     cost: float
@@ -120,6 +145,65 @@ class GAProperty(BaseModel):
     propertyId: str
     displayName: str
     websiteUrl: Optional[str] = None
+
+
+
+
+
+
+
+class AdSpendBreakdown(BaseModel):
+    customer_id: str
+    cost_original: float
+    currency: str
+    cost_usd: float
+
+class CurrencyInfo(BaseModel):
+    property_currency: str
+    calculation_currency: str
+    exchange_rates: Dict[str, float]
+    ad_spend_breakdown: List[AdSpendBreakdown]
+
+class GAEnhancedCombinedROASROIMetrics(BaseModel):
+    propertyId: str
+    propertyName: str
+    adsCustomerIds: List[str]
+    currency_info: CurrencyInfo
+    
+    # Original metrics (all in USD)
+    totalRevenue: float
+    totalRevenueOriginal: float  # Revenue in original currency
+    adSpend: float  # Total ad spend in USD
+    roas: float
+    roi: float
+    conversionValue: float
+    conversionValueOriginal: float  # Conversion value in original currency
+    costPerConversion: float
+    revenuePerUser: float
+    profitMargin: float
+    roasStatus: str
+    roiStatus: str
+    conversions: int
+    sessions: int
+    totalUsers: int
+    
+    # New ecommerce metrics
+    totalAdRevenue: float
+    totalAdRevenueOriginal: float  # Ad revenue in original currency
+    totalPurchasers: int
+    firstTimePurchasers: int
+    averagePurchaseRevenuePerActiveUser: float
+    activeUsers: int
+
+
+
+
+
+
+
+
+
+
 
 class GAMetrics(BaseModel):
     propertyId: str
@@ -242,29 +326,6 @@ class GACombinedROASROIMetrics(BaseModel):
     averagePurchaseRevenuePerActiveUser: float
     activeUsers: int
 
-class GAROASROIMetrics(BaseModel):
-    propertyId: str
-    propertyName: str
-    # Original metrics
-    totalRevenue: float
-    adSpend: float
-    roas: float
-    roi: float
-    conversionValue: float
-    costPerConversion: float
-    revenuePerUser: float
-    profitMargin: float
-    roasStatus: str
-    roiStatus: str
-    conversions: int
-    sessions: int
-    totalUsers: int
-    # New ecommerce metrics
-    totalAdRevenue: float
-    totalPurchasers: int
-    firstTimePurchasers: int
-    averagePurchaseRevenuePerActiveUser: float
-    activeUsers: int
     
 class GAROASROITimeSeriesData(BaseModel):
     date: str
@@ -363,4 +424,177 @@ class RawKeywordInsightsResponse(BaseModel):
     request_info: RequestInfo
     keyword_ideas_raw: RawKeywordIdeas
     historical_metrics_raw: RawHistoricalMetrics
+
+
+
+class ChannelRevenue(BaseModel):
+    channel: str
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    purchaseRevenue: float
+    purchaseRevenueUSD: Optional[float] = None
+    sessions: int
+    users: int
+    conversions: int
+    purchasers: int
+    revenuePerSession: float
+    conversionRate: float
+    revenuePercentage: float
+
+class SourceRevenue(BaseModel):
+    source: str
+    medium: str
+    sourceMedium: str
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    purchaseRevenue: float
+    purchaseRevenueUSD: Optional[float] = None
+    sessions: int
+    conversions: int
+    revenuePercentage: float
+
+class DeviceRevenue(BaseModel):
+    device: str
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    purchaseRevenue: float
+    purchaseRevenueUSD: Optional[float] = None
+    sessions: int
+    conversions: int
+    users: int
+    revenuePercentage: float
+
+class LocationRevenue(BaseModel):
+    country: str
+    city: str
+    location: str
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    purchaseRevenue: float
+    purchaseRevenueUSD: Optional[float] = None
+    sessions: int
+    users: int
+    revenuePercentage: float
+
+class PageRevenue(BaseModel):
+    landingPage: str
+    pageTitle: str
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    purchaseRevenue: float
+    purchaseRevenueUSD: Optional[float] = None
+    sessions: int
+    conversions: int
+    revenuePercentage: float
+
+class ChannelRevenueBreakdown(BaseModel):
+    channels: List[ChannelRevenue]
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    totalChannels: int
+
+class SourceRevenueBreakdown(BaseModel):
+    sources: List[SourceRevenue]
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    totalSources: int
+
+class DeviceRevenueBreakdown(BaseModel):
+    devices: List[DeviceRevenue]
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    totalDevices: int
+
+class LocationRevenueBreakdown(BaseModel):
+    locations: List[LocationRevenue]
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    totalLocations: int
+
+class PageRevenueBreakdown(BaseModel):
+    pages: List[PageRevenue]
+    totalRevenue: float
+    totalRevenueUSD: Optional[float] = None
+    totalPages: int
+
+class RevenueBreakdownSummary(BaseModel):
+    total_channels: int
+    total_sources: int
+    total_devices: int
+    total_locations: int
+    total_pages: int
+
+class CurrencyInfo(BaseModel):
+    original_currency: str
+    exchange_rates: Dict[str, float]
+
+class ComprehensiveRevenueBreakdown(BaseModel):
+    propertyId: str
+    period: str
+    currency_info: CurrencyInfo
+    breakdown_by_channel: ChannelRevenueBreakdown
+    breakdown_by_source: SourceRevenueBreakdown
+    breakdown_by_device: DeviceRevenueBreakdown
+    breakdown_by_location: LocationRevenueBreakdown
+    breakdown_by_page: PageRevenueBreakdown
+    summary: RevenueBreakdownSummary
+
+
+class ChannelDayData(BaseModel):
+    channel: str
+    totalRevenue: float
+    totalRevenueUSD: float
+    purchaseRevenue: float
+    purchaseRevenueUSD: float
+    sessions: int
+    users: int
+    conversions: int
+    revenuePercentage: float
+
+class DayTimeSeriesData(BaseModel):
+    date: str
+    channels: Dict[str, ChannelDayData]
+    total_revenue: float
+    total_revenue_usd: float
+    total_sessions: int
+    total_users: int
+    total_conversions: int
+
+class ChannelSummary(BaseModel):
+    channel: str
+    totalRevenue: float
+    totalRevenueUSD: float
+    totalSessions: int
+    totalUsers: int
+    totalConversions: int
+    days_active: int
+    avgDailyRevenue: float
+    avgDailyRevenueUSD: float
+    avgDailySessions: float
+
+class DateRangeInfo(BaseModel):
+    start_date: str
+    end_date: str
+    total_days: int
+
+class TimeSeriesTotal(BaseModel):
+    total_revenue: float
+    total_revenue_usd: float
+    total_sessions: int
+    total_users: int
+    total_conversions: int
+
+class ChannelRevenueTimeSeries(BaseModel):
+    propertyId: str
+    period: str
+    currency_info: CurrencyInfo
+    time_series: List[DayTimeSeriesData]
+    channel_summary: List[ChannelSummary]
+    channels_found: List[str]
+    date_range: DateRangeInfo
+    totals: TimeSeriesTotal
+
+class SpecificChannelsTimeSeries(ChannelRevenueTimeSeries):
+    channels_requested: List[str]
+    channels_not_found: Optional[List[str]] = []
 

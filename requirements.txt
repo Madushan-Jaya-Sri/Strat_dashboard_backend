@@ -30,3 +30,6 @@ pytest-asyncio==0.21.1
 
 httptools==0.6.1
 python-jose[cryptography]==3.3.0
+
+motor
+pymongo

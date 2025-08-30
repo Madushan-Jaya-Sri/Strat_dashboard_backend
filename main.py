@@ -20,8 +20,13 @@ from google_ads.ads_manager import GoogleAdsManager
 from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
 from models.response_models import *
-from utils.helpers import get_date_range, get_country_location_id, validate_timeframe
-from models.response_models import AdKeyStats, KeyStatMetric
+from models.response_models import AdKeyStats
+from models.response_models import EnhancedAdCampaign
+from database.mongo_manager import MongoManager
+
+
+
+mongo_manager = MongoManager()
 
 import sys
 import os
@@ -58,19 +63,90 @@ app.add_middleware(
 auth_manager = AuthManager()
 security = HTTPBearer()
 
+
+from functools import wraps
+
+def save_response(endpoint_name: str, cache_minutes: int = 0):
+    """
+    Decorator to save endpoint responses and optionally cache them
+    
+    Args:
+        endpoint_name: Name of the endpoint for logging/collection naming
+        cache_minutes: If > 0, try to return cached response instead of making API call
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            current_user = kwargs.get('current_user', {})
+            user_email = current_user.get('email', 'unknown')
+            customer_id = kwargs.get('customer_id')
+            property_id = kwargs.get('property_id')
+            request_params = {k: v for k, v in kwargs.items() if k != 'current_user'}
+            
+            # Try to get cached response if caching is enabled
+            if cache_minutes > 0:
+                try:
+                    cached_response = await mongo_manager.get_cached_response(
+                        endpoint=endpoint_name,
+                        user_email=user_email,
+                        request_params=request_params,
+                        customer_id=customer_id,
+                        property_id=property_id,
+                        max_age_minutes=cache_minutes
+                    )
+                    
+                    if cached_response:
+                        logger.info(f"Returning cached response for {endpoint_name}")
+                        return cached_response
+                except Exception as e:
+                    logger.warning(f"Cache lookup failed for {endpoint_name}: {e}")
+            
+            # Execute the original function
+            response_data = await func(*args, **kwargs)
+            
+            # Save/update in MongoDB
+            try:
+                await mongo_manager.save_endpoint_response(
+                    endpoint=endpoint_name,
+                    user_email=user_email,
+                    request_params=request_params,
+                    response_data=response_data,
+                    customer_id=customer_id,
+                    property_id=property_id
+                )
+            except Exception as e:
+                logger.warning(f"Failed to save response for {endpoint_name}: {e}")
+            
+            return response_data
+        return wrapper
+    return decorator
+
 # Dependency to get current user
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     """Get current authenticated user"""
     return auth_manager.verify_jwt_token(credentials.credentials)
+  
 
 # Health check
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    # Test MongoDB connection
+    mongodb_status = "healthy"
+    try:
+        await mongo_manager.client.admin.command('ping')
+    except Exception as e:
+        mongodb_status = f"unhealthy: {str(e)}"
+    
     return {
-        "status": "healthy",
+        "status": "healthy" if mongodb_status == "healthy" else "partial",
         "timestamp": datetime.now().isoformat(),
-        "services": ["google_ads", "google_analytics", "intent_insights"]
+        "services": {
+            "google_ads": "healthy",
+            "google_analytics": "healthy", 
+            "intent_insights": "healthy",
+            "mongodb": mongodb_status
+        }
     }
 
 # Authentication Routes
@@ -128,6 +204,7 @@ async def get_ads_customers(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/ads/key-stats/{customer_id}", response_model=AdKeyStats)
+@save_response("ads_key_stats")
 async def get_ads_key_stats(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -143,7 +220,8 @@ async def get_ads_key_stats(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/ads/campaigns/{customer_id}", response_model=List[AdCampaign])
+@app.get("/api/ads/campaigns/{customer_id}", response_model=List[EnhancedAdCampaign])
+@save_response("ads_campaigns")
 async def get_ads_campaigns(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -153,17 +231,19 @@ async def get_ads_campaigns(
     try:
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
         campaigns = ads_manager.get_campaigns_with_period(customer_id, period)
-        return [AdCampaign(**campaign) for campaign in campaigns]
+        return [EnhancedAdCampaign(**campaign) for campaign in campaigns]
     except Exception as e:
         logger.error(f"Error fetching campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/ads/keywords/{customer_id}", response_model=KeywordResponse)
+@save_response("ads_keywords")    
 async def get_ads_keywords(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
     offset: int = Query(0, ge=0),
-    limit: int = Query(10, ge=1, le=50),
+    limit: int = Query(10, ge=1, le=100),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads keywords data with pagination"""
@@ -182,6 +262,7 @@ async def get_ads_keywords(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ads/performance/{customer_id}", response_model=List[PerformanceMetric])
+@save_response("ads_performance")
 async def get_ads_performance(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -197,6 +278,7 @@ async def get_ads_performance(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ads/geographic/{customer_id}", response_model=List[GeographicPerformance])
+@save_response("ads_geographic_performance")
 async def get_ads_geographic(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -212,6 +294,7 @@ async def get_ads_geographic(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ads/device-performance/{customer_id}", response_model=List[DevicePerformance])
+@save_response("ads_device_performance")
 async def get_ads_device_performance(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -227,6 +310,7 @@ async def get_ads_device_performance(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ads/time-performance/{customer_id}", response_model=List[TimePerformance])
+@save_response("ads_time_performance")
 async def get_ads_time_performance(
     customer_id: str,
     period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
@@ -242,6 +326,7 @@ async def get_ads_time_performance(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ads/keyword-ideas/{customer_id}", response_model=KeywordIdeasResponse)
+@save_response("ads_keyword_ideas")
 async def get_keyword_ideas(
     customer_id: str,
     request_data: KeywordIdeasRequest,
@@ -267,6 +352,7 @@ async def get_keyword_ideas(
 
 # Google Analytics Routes
 @app.get("/api/analytics/properties", response_model=List[GAProperty])
+@save_response("ga_properties")
 async def get_ga_properties(current_user: dict = Depends(get_current_user)):
     """Get accessible GA4 properties"""
     try:
@@ -278,6 +364,7 @@ async def get_ga_properties(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/metrics/{property_id}", response_model=GAMetrics)
+@save_response("ga_metrics")
 async def get_ga_metrics(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -293,6 +380,7 @@ async def get_ga_metrics(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/traffic-sources/{property_id}", response_model=List[GATrafficSource])
+@save_response("ga_traffic_sources", cache_minutes=10)
 async def get_ga_traffic_sources(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -308,6 +396,7 @@ async def get_ga_traffic_sources(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/top-pages/{property_id}", response_model=List[GAPageData])
+@save_response("ga_top_pages")
 async def get_ga_top_pages(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -323,6 +412,7 @@ async def get_ga_top_pages(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/conversions/{property_id}", response_model=List[GAConversionData])
+@save_response("ga_conversions", cache_minutes=15)
 async def get_ga_conversions(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -338,6 +428,7 @@ async def get_ga_conversions(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/channel-performance/{property_id}", response_model=List[GAChannelPerformance])
+@save_response("ga_channel_performance")
 async def get_ga_channel_performance(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -353,6 +444,7 @@ async def get_ga_channel_performance(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/audience-insights/{property_id}", response_model=List[GAAudienceInsight])
+@save_response("ga_audience_insights")
 async def get_ga_audience_insights(
     property_id: str,
     dimension: str = Query("city", pattern="^(city|userAgeBracket|userGender|deviceCategory|browser)$"),
@@ -369,6 +461,7 @@ async def get_ga_audience_insights(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/time-series/{property_id}", response_model=List[GATimeSeriesData])
+@save_response("ga_time_series")
 async def get_ga_time_series(
     property_id: str,
     metric: str = Query("totalUsers", pattern="^(totalUsers|sessions|conversions|totalRevenue)$"),
@@ -385,6 +478,7 @@ async def get_ga_time_series(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/trends/{property_id}", response_model=List[GATrendData])
+@save_response("ga_trends")
 async def get_ga_trends(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -400,6 +494,7 @@ async def get_ga_trends(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/roas-roi-time-series/{property_id}", response_model=List[GAROASROITimeSeriesData])
+@save_response("ga_roas_roi_time_series")
 async def get_ga_roas_roi_time_series(
     property_id: str,
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
@@ -415,6 +510,7 @@ async def get_ga_roas_roi_time_series(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/combined/overview")
+@save_response("combined_overview")
 async def get_combined_overview(
     ads_customer_id: Optional[str] = Query(None),
     ga_property_id: Optional[str] = Query(None),
@@ -451,14 +547,50 @@ async def get_combined_overview(
         logger.error(f"Error fetching combined overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/combined/roas-roi-metrics", response_model=GACombinedROASROIMetrics)
-async def get_combined_roas_roi_metrics(
+
+@app.get("/api/combined/roas-roi-metrics", response_model=GAEnhancedCombinedROASROIMetrics)
+@save_response("combined_roas_roi_metrics")
+async def get_enhanced_combined_roas_roi_metrics(
+    ga_property_id: str = Query(..., description="GA4 Property ID"),
+    ads_customer_ids: str = Query(..., description="Comma-separated Google Ads Customer IDs"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get enhanced combined ROAS and ROI metrics from GA4 and multiple Google Ads accounts with proper currency handling"""
+    try:
+        # Parse comma-separated customer IDs
+        customer_ids_list = [cid.strip() for cid in ads_customer_ids.split(",") if cid.strip()]
+        
+        if not customer_ids_list:
+            raise HTTPException(status_code=400, detail="At least one Google Ads customer ID is required")
+        
+        if len(customer_ids_list) > 10:  # Reasonable limit
+            raise HTTPException(status_code=400, detail="Maximum 10 Google Ads customer IDs allowed")
+        
+        ga4_manager = GA4Manager(current_user["email"])
+        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(
+            ga_property_id, 
+            customer_ids_list, 
+            period
+        )
+        return GAEnhancedCombinedROASROIMetrics(**metrics)
+        
+    except Exception as e:
+        logger.error(f"Error fetching enhanced combined ROAS/ROI metrics: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Optional: Keep the old endpoint for backward compatibility
+@app.get("/api/combined/roas-roi-metrics-legacy", response_model=GACombinedROASROIMetrics)
+@save_response("combined_roas_roi_metrics_legacy")
+async def get_combined_roas_roi_metrics_legacy(
     ga_property_id: str = Query(..., description="GA4 Property ID"),
     ads_customer_id: str = Query(..., description="Google Ads Customer ID"),
     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get combined ROAS and ROI metrics from GA4 and Google Ads"""
+    """Legacy endpoint - Get combined ROAS and ROI metrics from GA4 and Google Ads (single customer)"""
     try:
         ga4_manager = GA4Manager(current_user["email"])
         metrics = ga4_manager.get_combined_roas_roi_metrics(ga_property_id, ads_customer_id, period)
@@ -467,52 +599,259 @@ async def get_combined_roas_roi_metrics(
         logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# # Intent Insights Routes with Enhanced Timeframe Validation
-# @app.post("/api/intent/keyword-insights/{customer_id}", response_model=KeywordInsightsResponse)
-# async def get_keyword_insights(
-#     customer_id: str,
-#     request_data: KeywordInsightRequest,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get comprehensive keyword insights with search volumes and trends"""
-#     try:
-#         # Validate seed keywords limit
-#         if len(request_data.seed_keywords) > 10:
-#             raise HTTPException(status_code=400, detail="Maximum 10 seed keywords allowed")
-        
-#         # Validate timeframe with enhanced validation
-#         if not validate_timeframe(request_data.timeframe, request_data.start_date, request_data.end_date):
-#             if request_data.timeframe == "custom":
-#                 current_month = datetime.now().strftime("%B %Y")
-#                 raise HTTPException(
-#                     status_code=400, 
-#                     detail=f"Invalid timeframe. Data for {current_month} is not yet complete. Please ensure your end date is before the current month."
-#                 )
-#             else:
-#                 raise HTTPException(status_code=400, detail="Invalid timeframe parameters")
-        
-#         intent_manager = IntentManager(current_user["email"], auth_manager)
-        
-#         insights = intent_manager.get_keyword_insights(
-#             customer_id,
-#             request_data.seed_keywords,
-#             request_data.country,
-#             request_data.timeframe,
-#             request_data.start_date,
-#             request_data.end_date
-#         )
-        
-#         return KeywordInsightsResponse(**insights)
-        
-#     except Exception as e:
-#         logger.error(f"Error fetching keyword insights: {e}")
-#         if isinstance(e, HTTPException):
-#             raise e
-#         raise HTTPException(status_code=500, detail=str(e))  
 
-# Alternative: Return raw JSON without Pydantic validation
+
+@app.get("/api/analytics/revenue-breakdown/channel/{property_id}", response_model=ChannelRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_channel")
+async def get_revenue_breakdown_by_channel(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by channel"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_revenue_breakdown_by_channel(property_id, period)
+        return ChannelRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching channel revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/revenue-breakdown/source/{property_id}", response_model=SourceRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_source")
+async def get_revenue_breakdown_by_source(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    limit: int = Query(20, ge=5, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by source/medium"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id, period, limit)
+        return SourceRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching source revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/revenue-breakdown/device/{property_id}", response_model=DeviceRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_device")
+async def get_revenue_breakdown_by_device(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by device category"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_revenue_breakdown_by_device(property_id, period)
+        return DeviceRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching device revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/revenue-breakdown/location/{property_id}", response_model=LocationRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_location")
+async def get_revenue_breakdown_by_location(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    limit: int = Query(15, ge=5, le=30),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by geographic location"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, period, limit)
+        return LocationRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching location revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/revenue-breakdown/page/{property_id}", response_model=PageRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_page")
+async def get_revenue_breakdown_by_page(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    limit: int = Query(20, ge=5, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by landing page"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id, period, limit)
+        return PageRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching page revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/revenue-breakdown/comprehensive/{property_id}", response_model=ComprehensiveRevenueBreakdown)
+@save_response("ga_revenue_breakdown_by_comprehensive")
+async def get_comprehensive_revenue_breakdown(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get comprehensive revenue breakdown across all dimensions"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        breakdown = ga4_manager.get_comprehensive_revenue_breakdown(property_id, period)
+        return ComprehensiveRevenueBreakdown(**breakdown)
+    except Exception as e:
+        logger.error(f"Error fetching comprehensive revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Alternative endpoint that returns raw JSON (useful for debugging)
+@app.get("/api/analytics/revenue-breakdown/raw/{property_id}")
+async def get_revenue_breakdown_raw(
+    property_id: str,
+    breakdown_type: str = Query("comprehensive", pattern="^(channel|source|device|location|page|comprehensive)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    limit: int = Query(20, ge=5, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown data in raw JSON format"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        
+        if breakdown_type == "channel":
+            breakdown = ga4_manager.get_revenue_breakdown_by_channel(property_id, period)
+        elif breakdown_type == "source":
+            breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id, period, limit)
+        elif breakdown_type == "device":
+            breakdown = ga4_manager.get_revenue_breakdown_by_device(property_id, period)
+        elif breakdown_type == "location":
+            breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, period, limit)
+        elif breakdown_type == "page":
+            breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id, period, limit)
+        else:  # comprehensive
+            breakdown = ga4_manager.get_comprehensive_revenue_breakdown(property_id, period)
+        
+        return breakdown
+        
+    except Exception as e:
+        logger.error(f"Error fetching raw revenue breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/analytics/channel-revenue-timeseries/{property_id}", response_model=ChannelRevenueTimeSeries)
+@save_response("ga_channel_revenue_time_series")
+async def get_channel_revenue_time_series(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by channel as time series data for the given period"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_channel_revenue_time_series(property_id, period)
+        
+        if 'error' in time_series:
+            raise HTTPException(status_code=500, detail=time_series['error'])
+            
+        return ChannelRevenueTimeSeries(**time_series)
+    except Exception as e:
+        logger.error(f"Error fetching channel revenue time series: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analytics/channel-revenue-timeseries/{property_id}/specific", response_model=SpecificChannelsTimeSeries)
+@save_response("ga_specific_channels_time_series")
+async def get_specific_channels_time_series(
+    property_id: str,
+    channels: List[str],  # Request body with list of channels
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get time series data for specific channels only"""
+    try:
+        if not channels or len(channels) == 0:
+            raise HTTPException(status_code=400, detail="At least one channel must be specified")
+        
+        if len(channels) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 channels allowed")
+        
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_specific_channels_time_series(property_id, channels, period)
+        
+        if 'error' in time_series:
+            raise HTTPException(status_code=500, detail=time_series['error'])
+            
+        return SpecificChannelsTimeSeries(**time_series)
+    except Exception as e:
+        logger.error(f"Error fetching specific channels time series: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/analytics/channel-revenue-timeseries/{property_id}/channels")
+@save_response("ga_available_channels")
+async def get_available_channels(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get list of available channels for the property (useful for frontend dropdowns)"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        
+        # Get channel breakdown to find available channels
+        breakdown = ga4_manager.get_revenue_breakdown_by_channel(property_id, period)
+        
+        channels = [
+            {
+                'channel': channel['channel'],
+                'totalRevenue': channel['totalRevenue'],
+                'revenuePercentage': channel['revenuePercentage']
+            }
+            for channel in breakdown.get('channels', [])
+        ]
+        
+        return {
+            'propertyId': property_id,
+            'period': period,
+            'channels': channels,
+            'total_channels': len(channels)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching available channels: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Raw endpoint for debugging or custom frontend handling
+@app.get("/api/analytics/channel-revenue-timeseries/{property_id}/raw")
+async def get_channel_revenue_time_series_raw(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    channels: Optional[str] = Query(None, description="Comma-separated list of specific channels"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get channel revenue time series in raw JSON format"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        
+        if channels:
+            # Parse comma-separated channels
+            channel_list = [ch.strip() for ch in channels.split(",") if ch.strip()]
+            if len(channel_list) > 20:
+                raise HTTPException(status_code=400, detail="Maximum 20 channels allowed")
+            time_series = ga4_manager.get_specific_channels_time_series(property_id, channel_list, period)
+        else:
+            time_series = ga4_manager.get_channel_revenue_time_series(property_id, period)
+        
+        return time_series
+        
+    except Exception as e:
+        logger.error(f"Error fetching raw channel revenue time series: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Intent Insights Routes
 
 @app.post("/api/intent/keyword-insights/{customer_id}")
+@save_response("intent_keyword_insights_raw")
 async def get_keyword_insights(
     customer_id: str,
     request_data: KeywordInsightRequest,
@@ -575,3 +914,6 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+
+

@@ -4,6 +4,7 @@ Handles all GA4 API operations
 """
 
 import logging
+import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException
@@ -589,6 +590,438 @@ class GA4Manager:
     #         return self.get_default_roas_roi_metrics(property_id)
 
 
+
+
+
+
+
+    # Enhanced methods for your GA4Manager class
+
+
+
+    def get_currency_rates(self) -> Dict[str, float]:
+            """Get current USD exchange rates from a free API"""
+            try:
+                # Using exchangerate-api.com (free tier)
+                response = requests.get("https://api.exchangerate-api.com/v4/latest/USD", timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get('rates', {})
+                else:
+                    # Fallback rates if API fails
+                    return self._get_fallback_rates()
+            except Exception as e:
+                logger.warning(f"Failed to fetch currency rates: {e}")
+                return self._get_fallback_rates()
+
+    def _get_fallback_rates(self) -> Dict[str, float]:
+        """Fallback exchange rates when API is unavailable"""
+        return {
+            'LKR': 325.0,   # 1 USD = 325 LKR (approximate)
+            'EUR': 0.92,    # 1 USD = 0.92 EUR
+            'GBP': 0.79,    # 1 USD = 0.79 GBP
+            'INR': 83.0,    # 1 USD = 83 INR
+            'AUD': 1.52,    # 1 USD = 1.52 AUD
+            'CAD': 1.37,    # 1 USD = 1.37 CAD
+            'JPY': 149.0,   # 1 USD = 149 JPY
+            'USD': 1.0      # 1 USD = 1 USD
+        }
+
+    def convert_to_usd(self, amount: float, from_currency: str, rates: Dict[str, float]) -> float:
+        """Convert amount from specified currency to USD"""
+        if from_currency == 'USD' or amount == 0:
+            return amount
+        
+        if from_currency in rates:
+            # For exchange rate APIs, rates are typically given as 1 USD = X foreign currency
+            # So to convert from foreign currency to USD: amount / rate
+            rate = rates[from_currency]
+            usd_amount = amount / rate
+            logger.debug(f"Converted {amount} {from_currency} to {usd_amount:.2f} USD (rate: {rate})")
+            return usd_amount
+        else:
+            logger.warning(f"Currency {from_currency} not found in rates, assuming USD")
+            return amount
+
+    def get_property_currency_from_api(self, property_id: str) -> str:
+        """Get currency code from GA4 property using Admin API"""
+        try:
+            credentials = self.auth_manager.get_user_credentials(self.user_email)
+            admin_service = build('analyticsadmin', 'v1alpha', credentials=credentials)
+            
+            # Get property details including currency
+            property_name = f"properties/{property_id}"
+            property_response = admin_service.properties().get(name=property_name).execute()
+            
+            # The currency is in the property details
+            currency_code = property_response.get('currencyCode', 'USD')
+            logger.info(f"Retrieved currency {currency_code} for property {property_id}")
+            return currency_code
+            
+        except Exception as e:
+            logger.warning(f"Could not get currency from property API for {property_id}: {e}")
+            return 'USD'
+
+    def get_property_currency_enhanced(self, property_id: str) -> str:
+        """Enhanced currency detection with caching"""
+        try:
+            # First, check cache
+            cached_info = self.get_cached_property_info(property_id)
+            if cached_info:
+                return cached_info.get('currency_code', 'USD')
+            
+            # If not cached, fetch from API
+            property_info = self.get_property_details_with_currency(property_id)
+            return property_info.get('currency_code', 'USD')
+            
+        except Exception as e:
+            logger.error(f"Enhanced currency detection failed for {property_id}: {e}")
+            return 'USD'
+
+    def get_property_details_with_currency(self, property_id: str) -> Dict[str, Any]:
+        """Get comprehensive property details including currency from GA4"""
+        try:
+            credentials = self.auth_manager.get_user_credentials(self.user_email)
+            admin_service = build('analyticsadmin', 'v1alpha', credentials=credentials)
+            
+            # Get property details
+            property_name = f"properties/{property_id}"
+            property_response = admin_service.properties().get(name=property_name).execute()
+            
+            # Extract currency and other useful info
+            property_info = {
+                'property_id': property_id,
+                'display_name': property_response.get('displayName', f'Property {property_id}'),
+                'currency_code': property_response.get('currencyCode', 'USD'),
+                'time_zone': property_response.get('timeZone', 'UTC'),
+                'industry_category': property_response.get('industryCategory', ''),
+                'website_url': property_response.get('websiteUrl', ''),
+                'create_time': property_response.get('createTime', ''),
+                'update_time': property_response.get('updateTime', '')
+            }
+            
+            # Cache this information for future use
+            self.cache_property_info(property_id, property_info)
+            
+            return property_info
+            
+        except Exception as e:
+            logger.error(f"Failed to get property details for {property_id}: {e}")
+            return {
+                'property_id': property_id,
+                'currency_code': 'USD',  # Safe default
+                'display_name': f'Property {property_id}'
+            }
+
+    def cache_property_info(self, property_id: str, property_info: Dict[str, Any]):
+        """Cache property information to avoid repeated API calls"""
+        # You can implement this with Redis, database, or in-memory cache
+        # For now, using a simple class-level cache
+        if not hasattr(self, '_property_cache'):
+            self._property_cache = {}
+        
+        self._property_cache[property_id] = {
+            'data': property_info,
+            'cached_at': datetime.now(),
+            'expires_at': datetime.now() + timedelta(hours=24)  # Cache for 24 hours
+        }
+
+    def get_cached_property_info(self, property_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached property information if still valid"""
+        if not hasattr(self, '_property_cache'):
+            return None
+        
+        cached = self._property_cache.get(property_id)
+        if cached and datetime.now() < cached['expires_at']:
+            return cached['data']
+        
+        # Remove expired cache
+        if cached:
+            del self._property_cache[property_id]
+        
+        return None
+
+    def get_ads_customer_currency(self, customer_id: str) -> str:
+        """Get currency for Google Ads customer"""
+        try:
+            from google_ads.ads_manager import GoogleAdsManager
+            ads_manager = GoogleAdsManager(self.user_email, self.auth_manager)
+            customer_info = ads_manager.get_customer_info(customer_id)
+            return customer_info.get('currency', 'USD')
+        except Exception as e:
+            logger.warning(f"Could not get currency for customer {customer_id}: {e}")
+            return "USD"
+
+    def get_multi_customer_ad_spend(self, ads_customer_ids: List[str], period: str) -> Dict[str, Any]:
+        """Get total ad spend from multiple Google Ads customers"""
+        try:
+            from google_ads.ads_manager import GoogleAdsManager
+            ads_manager = GoogleAdsManager(self.user_email, self.auth_manager)
+            
+            total_cost_usd = 0.0
+            currency_rates = self.get_currency_rates()
+            customer_costs = []
+            
+            for customer_id in ads_customer_ids:
+                try:
+                    # Get ad spend for this customer
+                    ads_period = self.convert_ga_period_to_ads_period(period)
+                    customer_cost = ads_manager.get_total_cost_for_period(customer_id, ads_period)
+                    
+                    # Get customer currency
+                    customer_currency = self.get_ads_customer_currency(customer_id)
+                    
+                    # Convert to USD
+                    customer_cost_usd = self.convert_to_usd(customer_cost, customer_currency, currency_rates)
+                    
+                    total_cost_usd += customer_cost_usd
+                    
+                    customer_costs.append({
+                        'customer_id': customer_id,
+                        'cost_original': customer_cost,
+                        'currency': customer_currency,
+                        'cost_usd': customer_cost_usd
+                    })
+                    
+                    logger.info(f"Customer {customer_id}: {customer_cost} {customer_currency} = {customer_cost_usd:.2f} USD")
+                    
+                except Exception as customer_error:
+                    logger.warning(f"Could not fetch costs for customer {customer_id}: {customer_error}")
+                    # Add zero-cost entry for failed customers
+                    customer_costs.append({
+                        'customer_id': customer_id,
+                        'cost_original': 0.0,
+                        'currency': 'USD',
+                        'cost_usd': 0.0,
+                        'error': str(customer_error)
+                    })
+                    continue
+            
+            logger.info(f"Total ad spend across {len(ads_customer_ids)} customers: ${total_cost_usd:.2f} USD")
+            
+            return {
+                'total_cost_usd': total_cost_usd,
+                'customer_breakdown': customer_costs,
+                'exchange_rates_used': currency_rates,
+                'customers_processed': len(customer_costs),
+                'customers_successful': len([c for c in customer_costs if 'error' not in c])
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching multi-customer ad spend: {e}")
+            return {
+                'total_cost_usd': 0.0,
+                'customer_breakdown': [],
+                'exchange_rates_used': {},
+                'customers_processed': 0,
+                'customers_successful': 0,
+                'error': str(e)
+            }
+        
+    def get_enhanced_combined_roas_roi_metrics(self, property_id: str, ads_customer_ids: List[str], period: str = "30d") -> Dict[str, Any]:
+        """Get ROAS and ROI metrics with proper currency handling and multiple ads accounts"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            currency_rates = self.get_currency_rates()
+            
+            # Get property currency using enhanced method
+            property_currency = self.get_property_currency_enhanced(property_id)
+            property_info = self.get_cached_property_info(property_id) or {'display_name': f'Property {property_id}'}
+            
+            logger.info(f"Processing property {property_id} with currency {property_currency}")
+            
+            # Get GA4 data
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="totalAdRevenue"),
+                    Metric(name="conversions"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers"),
+                    Metric(name="activeUsers"),
+                    Metric(name="totalPurchasers"),
+                    Metric(name="eventCount")
+                ],
+            )
+            
+            response = self.client.run_report(request)
+            
+            # Get PAID SEARCH revenue specifically
+            paid_search_request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue")
+                ],
+            )
+            
+            paid_search_response = self.client.run_report(paid_search_request)
+            
+            # Extract paid search revenue
+            paid_search_total_revenue = 0.0
+            paid_search_purchase_revenue = 0.0
+            
+            for row in paid_search_response.rows:
+                channel = row.dimension_values[0].value
+                if channel.lower() in ['paid search', 'google ads', 'cpc']:
+                    paid_search_total_revenue += self.safe_float(row.metric_values[0].value)
+                    paid_search_purchase_revenue += self.safe_float(row.metric_values[1].value)
+            
+            # Get first-time purchasers data
+            first_time_request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="newVsReturning")],
+                metrics=[
+                    Metric(name="totalPurchasers"),
+                    Metric(name="purchaseRevenue")
+                ],
+            )
+            
+            first_time_response = self.client.run_report(first_time_request)
+            
+            # Get multi-customer ad spend in USD
+            ad_spend_data = self.get_multi_customer_ad_spend(ads_customer_ids, period)
+            actual_ad_cost_usd = ad_spend_data['total_cost_usd']
+            
+            if response.rows:
+                row = response.rows[0]
+                metrics = row.metric_values
+                
+                # Get GA4 metrics in original currency (keeping original total revenue for other calculations)
+                total_revenue_original = self.safe_float(metrics[0].value)
+                purchase_revenue_original = self.safe_float(metrics[1].value)
+                total_ad_revenue_original = self.safe_float(metrics[2].value)
+                conversions = self.safe_float(metrics[3].value)
+                sessions = self.safe_int(metrics[4].value)
+                total_users = self.safe_int(metrics[5].value)
+                active_users = self.safe_int(metrics[6].value)
+                total_purchasers = self.safe_int(metrics[7].value)
+                
+                logger.info(f"GA4 Total Revenue: {total_revenue_original} {property_currency}")
+                logger.info(f"GA4 Paid Search Revenue: {paid_search_total_revenue} {property_currency}")
+                logger.info(f"Ad Spend: {actual_ad_cost_usd} USD")
+                
+                # Convert GA4 revenue metrics to USD
+                total_revenue_usd = self.convert_to_usd(total_revenue_original, property_currency, currency_rates)
+                purchase_revenue_usd = self.convert_to_usd(purchase_revenue_original, property_currency, currency_rates)
+                total_ad_revenue_usd = self.convert_to_usd(total_ad_revenue_original, property_currency, currency_rates)
+                
+                # Convert PAID SEARCH revenue to USD for ROAS/ROI calculations
+                paid_search_total_revenue_usd = self.convert_to_usd(paid_search_total_revenue, property_currency, currency_rates)
+                
+                # Process first-time purchasers data
+                first_time_purchasers = 0
+                if first_time_response.rows:
+                    for row in first_time_response.rows:
+                        user_type = row.dimension_values[0].value
+                        purchasers = self.safe_int(row.metric_values[0].value)
+                        if user_type == "new":
+                            first_time_purchasers = purchasers
+                
+                # Calculate ROAS/ROI using PAID SEARCH revenue instead of total revenue
+                roas = (paid_search_total_revenue_usd / actual_ad_cost_usd) if actual_ad_cost_usd > 0 else 0
+                roi = (((paid_search_total_revenue_usd - actual_ad_cost_usd) / actual_ad_cost_usd) * 100) if actual_ad_cost_usd > 0 else 0
+                
+                cost_per_conversion = actual_ad_cost_usd / conversions if conversions > 0 else 0
+                revenue_per_user = total_revenue_usd / total_users if total_users > 0 else 0
+                profit_margin = ((paid_search_total_revenue_usd - actual_ad_cost_usd) / paid_search_total_revenue_usd * 100) if paid_search_total_revenue_usd > 0 else 0
+                
+                # New calculations
+                average_purchase_revenue_per_active_user = purchase_revenue_usd / active_users if active_users > 0 else 0
+                
+                logger.info(f"ROAS (Paid Search): {roas:.2f}, ROI (Paid Search): {roi:.2f}%")
+                
+                return {
+                    'propertyId': property_id,
+                    'propertyName': property_info.get('display_name', f"Property {property_id}"),
+                    'adsCustomerIds': ads_customer_ids,
+                    'currency_info': {
+                        'property_currency': property_currency,
+                        'calculation_currency': 'USD',
+                        'exchange_rates': currency_rates,
+                        'ad_spend_breakdown': ad_spend_data['customer_breakdown'],
+                        'property_info': property_info,
+                        'customers_processed': ad_spend_data.get('customers_processed', 0),
+                        'customers_successful': ad_spend_data.get('customers_successful', 0)
+                    },
+                    # Original metrics in USD (totalRevenue still shows total, but ROAS/ROI calculated from paid search)
+                    'totalRevenue': round(total_revenue_usd, 2),
+                    'totalRevenueOriginal': round(total_revenue_original, 2),
+                    'adSpend': round(actual_ad_cost_usd, 2),
+                    'roas': round(roas, 2),
+                    'roi': round(roi, 2),
+                    'conversionValue': round(purchase_revenue_usd, 2),
+                    'conversionValueOriginal': round(purchase_revenue_original, 2),
+                    'costPerConversion': round(cost_per_conversion, 2),
+                    'revenuePerUser': round(revenue_per_user, 2),
+                    'profitMargin': round(profit_margin, 2),
+                    'roasStatus': self.get_roas_status(roas),
+                    'roiStatus': self.get_roi_status(roi),
+                    'conversions': int(conversions),
+                    'sessions': sessions,
+                    'totalUsers': total_users,
+                    # New ecommerce metrics
+                    'totalAdRevenue': round(total_ad_revenue_usd, 2),
+                    'totalAdRevenueOriginal': round(total_ad_revenue_original, 2),
+                    'totalPurchasers': total_purchasers,
+                    'firstTimePurchasers': first_time_purchasers,
+                    'averagePurchaseRevenuePerActiveUser': round(average_purchase_revenue_per_active_user, 2),
+                    'activeUsers': active_users
+                }
+            
+            return self.get_default_enhanced_combined_metrics(property_id, ads_customer_ids)
+            
+        except Exception as e:
+            logger.error(f"Error fetching enhanced combined ROAS/ROI metrics: {e}")
+            return self.get_default_enhanced_combined_metrics(property_id, ads_customer_ids)
+
+
+    def get_default_enhanced_combined_metrics(self, property_id: str, ads_customer_ids: List[str]) -> Dict[str, Any]:
+        """Return default enhanced combined metrics when no data available"""
+        return {
+            'propertyId': property_id,
+            'propertyName': f"Property {property_id}",
+            'adsCustomerIds': ads_customer_ids,
+            'currency_info': {
+                'property_currency': 'USD',
+                'calculation_currency': 'USD',
+                'exchange_rates': {},
+                'ad_spend_breakdown': [],
+                'property_info': {'display_name': f'Property {property_id}'},
+                'customers_processed': 0,
+                'customers_successful': 0
+            },
+            'totalRevenue': 0.0,
+            'totalRevenueOriginal': 0.0,
+            'adSpend': 0.0,
+            'roas': 0.0,
+            'roi': 0.0,
+            'conversionValue': 0.0,
+            'conversionValueOriginal': 0.0,
+            'costPerConversion': 0.0,
+            'revenuePerUser': 0.0,
+            'profitMargin': 0.0,
+            'roasStatus': "No Data",
+            'roiStatus': "No Data",
+            'conversions': 0,
+            'sessions': 0,
+            'totalUsers': 0,
+            'totalAdRevenue': 0.0,
+            'totalAdRevenueOriginal': 0.0,
+            'totalPurchasers': 0,
+            'firstTimePurchasers': 0,
+            'averagePurchaseRevenuePerActiveUser': 0.0,
+            'activeUsers': 0
+        }
+
+
+
     def get_combined_roas_roi_metrics(self, property_id: str, ads_customer_id: str, period: str = "30d") -> Dict[str, Any]:
         """Get ROAS and ROI metrics combining GA4 data with real Google Ads spend"""
         try:
@@ -660,7 +1093,7 @@ class GA4Manager:
                 
                 # Calculate metrics with real ad spend
                 roas = (total_revenue / actual_ad_cost) if actual_ad_cost > 0 else 0
-                roi = ((total_revenue - actual_ad_cost) / actual_ad_cost * 100) if actual_ad_cost > 0 else 0
+                roi = (((total_revenue - actual_ad_cost) / actual_ad_cost) * 100) if actual_ad_cost > 0 else 0
                 
                 cost_per_conversion = actual_ad_cost / conversions if conversions > 0 else 0
                 revenue_per_user = total_revenue / total_users if total_users > 0 else 0
@@ -763,6 +1196,7 @@ class GA4Manager:
             'averagePurchaseRevenuePerActiveUser': 0.0,
             'activeUsers': 0
         }
+    
     def get_roas_roi_time_series(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
         """Get ROAS and ROI time series data"""
         try:
@@ -1013,3 +1447,622 @@ class GA4Manager:
         except Exception as e:
             logger.error(f"Error fetching trends for property {property_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch trends: {str(e)}")
+        
+
+    # Add these methods to your GA4Manager class
+
+    def get_revenue_breakdown_by_channel(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers"),
+                    Metric(name="conversions"),
+                    Metric(name="totalPurchasers")
+                ],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)]
+            )
+            
+            response = self.client.run_report(request)
+            
+            channels = []
+            total_revenue_sum = 0
+            
+            for row in response.rows:
+                channel = row.dimension_values[0].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                users = self.safe_int(row.metric_values[3].value)
+                conversions = self.safe_float(row.metric_values[4].value)
+                purchasers = self.safe_int(row.metric_values[5].value)
+                
+                total_revenue_sum += total_revenue
+                
+                revenue_per_session = total_revenue / sessions if sessions > 0 else 0
+                conversion_rate = (conversions / sessions * 100) if sessions > 0 else 0
+                
+                channels.append({
+                    'channel': channel,
+                    'totalRevenue': total_revenue,
+                    'purchaseRevenue': purchase_revenue,
+                    'sessions': sessions,
+                    'users': users,
+                    'conversions': int(conversions),
+                    'purchasers': purchasers,
+                    'revenuePerSession': revenue_per_session,
+                    'conversionRate': conversion_rate
+                })
+            
+            # Calculate percentages
+            for channel in channels:
+                channel['revenuePercentage'] = (channel['totalRevenue'] / total_revenue_sum * 100) if total_revenue_sum > 0 else 0
+            
+            return {
+                'channels': channels,
+                'totalRevenue': total_revenue_sum,
+                'totalChannels': len(channels)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue breakdown by channel: {e}")
+            return {'channels': [], 'totalRevenue': 0, 'totalChannels': 0}
+
+    def get_revenue_breakdown_by_source_medium(self, property_id: str, period: str = "30d", limit: int = 20) -> Dict[str, Any]:
+        """Get revenue breakdown by source/medium"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[
+                    Dimension(name="sessionSource"),
+                    Dimension(name="sessionMedium")
+                ],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="conversions")
+                ],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)],
+                limit=limit
+            )
+            
+            response = self.client.run_report(request)
+            
+            sources = []
+            total_revenue_sum = 0
+            
+            for row in response.rows:
+                source = row.dimension_values[0].value
+                medium = row.dimension_values[1].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                conversions = self.safe_float(row.metric_values[3].value)
+                
+                total_revenue_sum += total_revenue
+                
+                sources.append({
+                    'source': source,
+                    'medium': medium,
+                    'sourceMedium': f"{source} / {medium}",
+                    'totalRevenue': total_revenue,
+                    'purchaseRevenue': purchase_revenue,
+                    'sessions': sessions,
+                    'conversions': int(conversions)
+                })
+            
+            # Calculate percentages
+            for source in sources:
+                source['revenuePercentage'] = (source['totalRevenue'] / total_revenue_sum * 100) if total_revenue_sum > 0 else 0
+            
+            return {
+                'sources': sources,
+                'totalRevenue': total_revenue_sum,
+                'totalSources': len(sources)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue breakdown by source/medium: {e}")
+            return {'sources': [], 'totalRevenue': 0, 'totalSources': 0}
+
+    def get_revenue_breakdown_by_device(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+        """Get revenue breakdown by device category"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[Dimension(name="deviceCategory")],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="conversions"),
+                    Metric(name="totalUsers")
+                ],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)]
+            )
+            
+            response = self.client.run_report(request)
+            
+            devices = []
+            total_revenue_sum = 0
+            
+            for row in response.rows:
+                device = row.dimension_values[0].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                conversions = self.safe_float(row.metric_values[3].value)
+                users = self.safe_int(row.metric_values[4].value)
+                
+                total_revenue_sum += total_revenue
+                
+                devices.append({
+                    'device': device,
+                    'totalRevenue': total_revenue,
+                    'purchaseRevenue': purchase_revenue,
+                    'sessions': sessions,
+                    'conversions': int(conversions),
+                    'users': users
+                })
+            
+            # Calculate percentages
+            for device in devices:
+                device['revenuePercentage'] = (device['totalRevenue'] / total_revenue_sum * 100) if total_revenue_sum > 0 else 0
+            
+            return {
+                'devices': devices,
+                'totalRevenue': total_revenue_sum,
+                'totalDevices': len(devices)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue breakdown by device: {e}")
+            return {'devices': [], 'totalRevenue': 0, 'totalDevices': 0}
+
+    def get_revenue_breakdown_by_location(self, property_id: str, period: str = "30d", limit: int = 15) -> Dict[str, Any]:
+        """Get revenue breakdown by geographic location"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[
+                    Dimension(name="country"),
+                    Dimension(name="city")
+                ],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers")
+                ],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)],
+                limit=limit
+            )
+            
+            response = self.client.run_report(request)
+            
+            locations = []
+            total_revenue_sum = 0
+            
+            for row in response.rows:
+                country = row.dimension_values[0].value
+                city = row.dimension_values[1].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                users = self.safe_int(row.metric_values[3].value)
+                
+                total_revenue_sum += total_revenue
+                
+                locations.append({
+                    'country': country,
+                    'city': city,
+                    'location': f"{city}, {country}" if city != "(not set)" else country,
+                    'totalRevenue': total_revenue,
+                    'purchaseRevenue': purchase_revenue,
+                    'sessions': sessions,
+                    'users': users
+                })
+            
+            # Calculate percentages
+            for location in locations:
+                location['revenuePercentage'] = (location['totalRevenue'] / total_revenue_sum * 100) if total_revenue_sum > 0 else 0
+            
+            return {
+                'locations': locations,
+                'totalRevenue': total_revenue_sum,
+                'totalLocations': len(locations)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue breakdown by location: {e}")
+            return {'locations': [], 'totalRevenue': 0, 'totalLocations': 0}
+
+    def get_revenue_breakdown_by_page(self, property_id: str, period: str = "30d", limit: int = 20) -> Dict[str, Any]:
+        """Get revenue breakdown by landing page"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[
+                    Dimension(name="landingPage"),
+                    Dimension(name="pageTitle")
+                ],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="conversions")
+                ],
+                order_bys=[OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)],
+                limit=limit
+            )
+            
+            response = self.client.run_report(request)
+            
+            pages = []
+            total_revenue_sum = 0
+            
+            for row in response.rows:
+                landing_page = row.dimension_values[0].value
+                page_title = row.dimension_values[1].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                conversions = self.safe_float(row.metric_values[3].value)
+                
+                total_revenue_sum += total_revenue
+                
+                pages.append({
+                    'landingPage': landing_page,
+                    'pageTitle': page_title,
+                    'totalRevenue': total_revenue,
+                    'purchaseRevenue': purchase_revenue,
+                    'sessions': sessions,
+                    'conversions': int(conversions)
+                })
+            
+            # Calculate percentages
+            for page in pages:
+                page['revenuePercentage'] = (page['totalRevenue'] / total_revenue_sum * 100) if total_revenue_sum > 0 else 0
+            
+            return {
+                'pages': pages,
+                'totalRevenue': total_revenue_sum,
+                'totalPages': len(pages)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue breakdown by page: {e}")
+            return {'pages': [], 'totalRevenue': 0, 'totalPages': 0}
+
+    def get_comprehensive_revenue_breakdown(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+        """Get comprehensive revenue breakdown across all dimensions"""
+        try:
+            property_currency = self.get_property_currency_enhanced(property_id)
+            currency_rates = self.get_currency_rates()
+            
+            # Get all breakdowns
+            channel_breakdown = self.get_revenue_breakdown_by_channel(property_id, period)
+            source_breakdown = self.get_revenue_breakdown_by_source_medium(property_id, period)
+            device_breakdown = self.get_revenue_breakdown_by_device(property_id, period)
+            location_breakdown = self.get_revenue_breakdown_by_location(property_id, period)
+            page_breakdown = self.get_revenue_breakdown_by_page(property_id, period)
+            
+            # Convert all revenue to USD
+            def convert_breakdown_to_usd(breakdown_data, revenue_fields):
+                if 'totalRevenue' in breakdown_data:
+                    breakdown_data['totalRevenueUSD'] = self.convert_to_usd(
+                        breakdown_data['totalRevenue'], property_currency, currency_rates
+                    )
+                
+                for item in breakdown_data.get('channels', []) + breakdown_data.get('sources', []) + \
+                        breakdown_data.get('devices', []) + breakdown_data.get('locations', []) + \
+                        breakdown_data.get('pages', []):
+                    for field in revenue_fields:
+                        if field in item:
+                            item[f"{field}USD"] = self.convert_to_usd(
+                                item[field], property_currency, currency_rates
+                            )
+            
+            revenue_fields = ['totalRevenue', 'purchaseRevenue']
+            convert_breakdown_to_usd(channel_breakdown, revenue_fields)
+            convert_breakdown_to_usd(source_breakdown, revenue_fields)
+            convert_breakdown_to_usd(device_breakdown, revenue_fields)
+            convert_breakdown_to_usd(location_breakdown, revenue_fields)
+            convert_breakdown_to_usd(page_breakdown, revenue_fields)
+            
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'currency_info': {
+                    'original_currency': property_currency,
+                    'exchange_rates': currency_rates
+                },
+                'breakdown_by_channel': channel_breakdown,
+                'breakdown_by_source': source_breakdown,
+                'breakdown_by_device': device_breakdown,
+                'breakdown_by_location': location_breakdown,
+                'breakdown_by_page': page_breakdown,
+                'summary': {
+                    'total_channels': channel_breakdown['totalChannels'],
+                    'total_sources': source_breakdown['totalSources'],
+                    'total_devices': device_breakdown['totalDevices'],
+                    'total_locations': location_breakdown['totalLocations'],
+                    'total_pages': page_breakdown['totalPages']
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting comprehensive revenue breakdown: {e}")
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'error': str(e)
+            }
+        
+
+    # Add these methods to your GA4Manager class
+
+    def get_channel_revenue_time_series(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+        """Get revenue breakdown by channel over time"""
+        try:
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[
+                    Dimension(name="date"),
+                    Dimension(name="sessionDefaultChannelGrouping")
+                ],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers"),
+                    Metric(name="conversions")
+                ],
+                order_bys=[
+                    OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date")),
+                    OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)
+                ]
+            )
+            
+            response = self.client.run_report(request)
+            
+            # Get property currency for conversion
+            property_currency = self.get_property_currency_enhanced(property_id)
+            currency_rates = self.get_currency_rates()
+            
+            # Organize data by date and channel
+            time_series_data = {}
+            channel_totals = {}
+            date_totals = {}
+            all_channels = set()
+            
+            for row in response.rows:
+                date = row.dimension_values[0].value
+                channel = row.dimension_values[1].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                users = self.safe_int(row.metric_values[3].value)
+                conversions = self.safe_float(row.metric_values[4].value)
+                
+                # Convert revenue to USD
+                total_revenue_usd = self.convert_to_usd(total_revenue, property_currency, currency_rates)
+                purchase_revenue_usd = self.convert_to_usd(purchase_revenue, property_currency, currency_rates)
+                
+                # Track all channels
+                all_channels.add(channel)
+                
+                # Initialize date if not exists
+                if date not in time_series_data:
+                    time_series_data[date] = {
+                        'date': date,
+                        'channels': {},
+                        'total_revenue': 0,
+                        'total_revenue_usd': 0,
+                        'total_sessions': 0,
+                        'total_users': 0,
+                        'total_conversions': 0
+                    }
+                
+                # Add channel data for this date
+                time_series_data[date]['channels'][channel] = {
+                    'channel': channel,
+                    'totalRevenue': total_revenue,
+                    'totalRevenueUSD': total_revenue_usd,
+                    'purchaseRevenue': purchase_revenue,
+                    'purchaseRevenueUSD': purchase_revenue_usd,
+                    'sessions': sessions,
+                    'users': users,
+                    'conversions': int(conversions)
+                }
+                
+                # Update date totals
+                time_series_data[date]['total_revenue'] += total_revenue
+                time_series_data[date]['total_revenue_usd'] += total_revenue_usd
+                time_series_data[date]['total_sessions'] += sessions
+                time_series_data[date]['total_users'] += users
+                time_series_data[date]['total_conversions'] += conversions
+                
+                # Update channel totals
+                if channel not in channel_totals:
+                    channel_totals[channel] = {
+                        'channel': channel,
+                        'totalRevenue': 0,
+                        'totalRevenueUSD': 0,
+                        'totalSessions': 0,
+                        'totalUsers': 0,
+                        'totalConversions': 0,
+                        'days_active': 0
+                    }
+                
+                channel_totals[channel]['totalRevenue'] += total_revenue
+                channel_totals[channel]['totalRevenueUSD'] += total_revenue_usd
+                channel_totals[channel]['totalSessions'] += sessions
+                channel_totals[channel]['totalUsers'] += users
+                channel_totals[channel]['totalConversions'] += conversions
+                channel_totals[channel]['days_active'] += 1
+            
+            # Calculate percentages and fill missing channel data for each date
+            for date_data in time_series_data.values():
+                # Fill missing channels with zero values
+                for channel in all_channels:
+                    if channel not in date_data['channels']:
+                        date_data['channels'][channel] = {
+                            'channel': channel,
+                            'totalRevenue': 0,
+                            'totalRevenueUSD': 0,
+                            'purchaseRevenue': 0,
+                            'purchaseRevenueUSD': 0,
+                            'sessions': 0,
+                            'users': 0,
+                            'conversions': 0
+                        }
+                
+                # Calculate percentages for each channel on this date
+                for channel_data in date_data['channels'].values():
+                    channel_data['revenuePercentage'] = (
+                        (channel_data['totalRevenue'] / date_data['total_revenue'] * 100)
+                        if date_data['total_revenue'] > 0 else 0
+                    )
+            
+            # Convert to list format sorted by date
+            time_series_list = sorted(time_series_data.values(), key=lambda x: x['date'])
+            
+            # Calculate channel averages
+            for channel_data in channel_totals.values():
+                days_active = channel_data['days_active']
+                if days_active > 0:
+                    channel_data['avgDailyRevenue'] = channel_data['totalRevenue'] / days_active
+                    channel_data['avgDailyRevenueUSD'] = channel_data['totalRevenueUSD'] / days_active
+                    channel_data['avgDailySessions'] = channel_data['totalSessions'] / days_active
+                else:
+                    channel_data['avgDailyRevenue'] = 0
+                    channel_data['avgDailyRevenueUSD'] = 0
+                    channel_data['avgDailySessions'] = 0
+            
+            # Sort channels by total revenue
+            sorted_channels = sorted(channel_totals.values(), key=lambda x: x['totalRevenueUSD'], reverse=True)
+            
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'currency_info': {
+                    'original_currency': property_currency,
+                    'exchange_rates': currency_rates
+                },
+                'time_series': time_series_list,
+                'channel_summary': sorted_channels,
+                'channels_found': list(all_channels),
+                'date_range': {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'total_days': len(time_series_list)
+                },
+                'totals': {
+                    'total_revenue': sum(day['total_revenue'] for day in time_series_list),
+                    'total_revenue_usd': sum(day['total_revenue_usd'] for day in time_series_list),
+                    'total_sessions': sum(day['total_sessions'] for day in time_series_list),
+                    'total_users': sum(day['total_users'] for day in time_series_list),
+                    'total_conversions': sum(day['total_conversions'] for day in time_series_list)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting channel revenue time series: {e}")
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'error': str(e),
+                'time_series': [],
+                'channel_summary': [],
+                'channels_found': []
+            }
+
+    def get_specific_channels_time_series(self, property_id: str, channels: List[str], period: str = "30d") -> Dict[str, Any]:
+        """Get time series data for specific channels only"""
+        try:
+            # Get full time series data
+            full_data = self.get_channel_revenue_time_series(property_id, period)
+            
+            if 'error' in full_data:
+                return full_data
+            
+            # Filter for specific channels
+            filtered_time_series = []
+            for day_data in full_data['time_series']:
+                filtered_day = {
+                    'date': day_data['date'],
+                    'channels': {},
+                    'total_revenue': 0,
+                    'total_revenue_usd': 0,
+                    'total_sessions': 0,
+                    'total_users': 0,
+                    'total_conversions': 0
+                }
+                
+                for channel in channels:
+                    if channel in day_data['channels']:
+                        channel_data = day_data['channels'][channel]
+                        filtered_day['channels'][channel] = channel_data
+                        filtered_day['total_revenue'] += channel_data['totalRevenue']
+                        filtered_day['total_revenue_usd'] += channel_data['totalRevenueUSD']
+                        filtered_day['total_sessions'] += channel_data['sessions']
+                        filtered_day['total_users'] += channel_data['users']
+                        filtered_day['total_conversions'] += channel_data['conversions']
+                
+                # Recalculate percentages based on filtered data
+                for channel_data in filtered_day['channels'].values():
+                    channel_data['revenuePercentage'] = (
+                        (channel_data['totalRevenue'] / filtered_day['total_revenue'] * 100)
+                        if filtered_day['total_revenue'] > 0 else 0
+                    )
+                
+                filtered_time_series.append(filtered_day)
+            
+            # Filter channel summary
+            filtered_summary = [
+                channel for channel in full_data['channel_summary']
+                if channel['channel'] in channels
+            ]
+            
+            return {
+                **full_data,
+                'time_series': filtered_time_series,
+                'channel_summary': filtered_summary,
+                'channels_found': [ch for ch in channels if ch in full_data['channels_found']],
+                'channels_requested': channels,
+                'channels_not_found': [ch for ch in channels if ch not in full_data['channels_found']]
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting specific channels time series: {e}")
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'error': str(e),
+                'channels_requested': channels
+            }
