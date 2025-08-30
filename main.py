@@ -24,7 +24,8 @@ from models.response_models import AdKeyStats
 from models.response_models import EnhancedAdCampaign
 from database.mongo_manager import MongoManager
 
-
+from chat.chat_manager import chat_manager
+from models.chat_models import *
 
 mongo_manager = MongoManager()
 
@@ -901,6 +902,139 @@ async def generic_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"error": "Internal server error", "detail": str(exc)}
     )
+
+
+
+
+# Chat endpoints
+@app.post("/api/chat/message", response_model=ChatResponse)
+async def send_chat_message(
+    chat_request: ChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Send a message to the chatbot"""
+    try:
+        response = await chat_manager.process_chat_message(
+            chat_request=chat_request,
+            user_email=current_user["email"]
+        )
+        
+        # If intent endpoint needs to be triggered, you can handle it here
+        # For now, we'll just return the response with the indication
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error processing chat message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/history/{module_type}", response_model=ChatHistoryResponse)
+async def get_chat_history(
+    module_type: ModuleType,
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get chat history for a module"""
+    try:
+        history = await chat_manager.get_chat_history(
+            user_email=current_user["email"],
+            module_type=module_type,
+            limit=limit
+        )
+        return history
+        
+    except Exception as e:
+        logger.error(f"Error getting chat history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat/delete")
+async def delete_chat_sessions(
+    delete_request: DeleteChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete chat sessions"""
+    try:
+        result = await chat_manager.delete_chat_sessions(
+            user_email=current_user["email"],
+            session_ids=delete_request.session_ids
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error deleting chat sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/sessions/{module_type}")
+async def get_chat_sessions_list(
+    module_type: ModuleType,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get list of chat sessions for a module (without full message history)"""
+    try:
+        collection = chat_manager.db.chat_sessions
+        
+        cursor = collection.find({
+            "user_email": current_user["email"],
+            "module_type": module_type.value,
+            "is_active": True
+        }, {
+            "session_id": 1,
+            "created_at": 1,
+            "last_activity": 1,
+            "customer_id": 1,
+            "property_id": 1,
+            "messages": {"$slice": 1}  # Only get first message for preview
+        }).sort("last_activity", -1)
+        
+        sessions = await cursor.to_list(length=50)
+        
+        # Format sessions for frontend
+        formatted_sessions = []
+        for session in sessions:
+            preview_message = ""
+            if session.get("messages") and len(session["messages"]) > 0:
+                preview_message = session["messages"][0].get("content", "")[:100]
+            
+            formatted_sessions.append({
+                "session_id": session["session_id"],
+                "created_at": session["created_at"],
+                "last_activity": session["last_activity"],
+                "customer_id": session.get("customer_id"),
+                "property_id": session.get("property_id"),
+                "preview": preview_message
+            })
+        
+        return {
+            "sessions": formatted_sessions,
+            "total": len(formatted_sessions),
+            "module_type": module_type.value
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting chat sessions list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/debug/{module_type}")
+async def debug_chat_data(
+    module_type: ModuleType,
+    customer_id: Optional[str] = Query(None),
+    property_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Debug endpoint to check what chat data is available"""
+    try:
+        debug_info = await chat_manager.debug_collections_and_data(
+            user_email=current_user["email"],
+            customer_id=customer_id,
+            property_id=property_id
+        )
+        
+        return debug_info
+        
+    except Exception as e:
+        logger.error(f"Error in chat debug: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")
