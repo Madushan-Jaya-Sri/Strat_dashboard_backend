@@ -27,7 +27,23 @@ class MongoManager:
             return {key: self._serialize_response_data(value) for key, value in data.items()}
         else:
             return data
-    
+        
+    def _serialize_request_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Serialize request parameters, handling Pydantic models"""
+        serialized = {}
+        for key, value in params.items():
+            if isinstance(value, BaseModel):
+                serialized[key] = value.dict()
+            elif isinstance(value, list):
+                serialized[key] = [item.dict() if isinstance(item, BaseModel) else item for item in value]
+            elif isinstance(value, dict):
+                serialized[key] = self._serialize_request_params(value)
+            else:
+                serialized[key] = value
+        return serialized
+
+
+
     async def save_endpoint_response(
         self, 
         endpoint: str, 
@@ -42,11 +58,9 @@ class MongoManager:
             collection_name = self._get_collection_name(endpoint)
             collection = self.db[collection_name]
             
-            # Serialize response data
+            # Serialize both request params and response data
+            serialized_request_params = self._serialize_request_params(request_params)
             serialized_data = self._serialize_response_data(response_data)
-            
-            # Extract period from request_params if it exists
-            period = request_params.get('period')
             
             # Create query filter based on the key attributes
             query_filter = {
@@ -54,14 +68,10 @@ class MongoManager:
                 "user_email": user_email,
                 "customer_id": customer_id,
                 "property_id": property_id,
-                "request_params": request_params
+                "request_params": serialized_request_params
             }
             
-            # If period exists, also include it in the filter
-            if period:
-                query_filter["request_params.period"] = period
-            
-            # Check if document with same key attributes exists
+            # Rest of your existing code...
             existing_doc = await collection.find_one(query_filter)
             
             if existing_doc:
@@ -85,7 +95,7 @@ class MongoManager:
                     "user_email": user_email,
                     "customer_id": customer_id,
                     "property_id": property_id,
-                    "request_params": request_params,
+                    "request_params": serialized_request_params,
                     "response_data": serialized_data,
                     "data_count": self._get_data_count(serialized_data),
                     "timestamp": datetime.utcnow(),
@@ -101,14 +111,15 @@ class MongoManager:
         except Exception as e:
             logger.error(f"Error saving/updating MongoDB document: {e}")
             return None
-    
+
     def _get_collection_name(self, endpoint: str) -> str:
         """Get meaningful collection name based on endpoint"""
         collection_mapping = {
             # Google Ads endpoints
+            'ads_customers': 'google_ads_customers_accounts',
             'ads_key_stats': 'google_ads_key_stats',
             'ads_campaigns': 'google_ads_campaigns',
-            'ads_keywords': 'google_ads_keywords',
+            'ads_keywords': 'google_ads_keywords_related_to_campaign',
             'ads_performance': 'google_ads_performance',
             'ads_geographic_performance': 'google_ads_geographic_performance',
             'ads_device_performance': 'google_ads_device_performance',
@@ -132,9 +143,8 @@ class MongoManager:
 
             # Combined endpoints
             'combined_overview': 'ads_ga_combined_overview_metrics',
-            'combined_roas_roi_metrics': 'combined_roas_roi_metrics',
-            'combined_roas_roi_metrics_legacy': 'combined_roas_roi_metrics_legacy',
-            'combined_enhanced_roas_roi': 'combined_enhanced_roas_roi_metrics',
+            'combined_roas_roi_metrics': 'ga_combined_roas_roi_metrics',
+            'combined_roas_roi_metrics_legacy': 'ga_combined_roas_roi_metrics_legacy',
 
             # Revenue breakdown endpoints
 

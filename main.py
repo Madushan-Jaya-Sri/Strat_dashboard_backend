@@ -192,6 +192,7 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 # Google Ads Routes
 @app.get("/api/ads/customers", response_model=List[AdCustomer])
+@save_response("ads_customers")
 async def get_ads_customers(current_user: dict = Depends(get_current_user)):
     """Get accessible Google Ads customer accounts"""
     try:
