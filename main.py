@@ -150,6 +150,10 @@ async def health_check():
         }
     }
 
+
+
+
+
 # Authentication Routes
 @app.get("/auth/login")
 async def login():
@@ -191,6 +195,12 @@ async def logout(current_user: dict = Depends(get_current_user)):
     """Logout user"""
     return await auth_manager.logout_user(current_user["email"])
 
+
+
+
+
+
+
 # Google Ads Routes
 @app.get("/api/ads/customers", response_model=List[AdCustomer])
 @save_response("ads_customers")
@@ -203,7 +213,6 @@ async def get_ads_customers(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error fetching ads customers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/ads/key-stats/{customer_id}", response_model=AdKeyStats)
 @save_response("ads_key_stats")
@@ -221,7 +230,6 @@ async def get_ads_key_stats(
         logger.error(f"Error fetching key stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/ads/campaigns/{customer_id}", response_model=List[EnhancedAdCampaign])
 @save_response("ads_campaigns")
 async def get_ads_campaigns(
@@ -237,7 +245,6 @@ async def get_ads_campaigns(
     except Exception as e:
         logger.error(f"Error fetching campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/api/ads/keywords/{customer_id}", response_model=KeywordResponse)
 @save_response("ads_keywords")    
@@ -351,6 +358,15 @@ async def get_keyword_ideas(
     except Exception as e:
         logger.error(f"Error fetching keyword ideas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+
+
+
+
 
 # Google Analytics Routes
 @app.get("/api/analytics/properties", response_model=List[GAProperty])
@@ -549,7 +565,6 @@ async def get_combined_overview(
         logger.error(f"Error fetching combined overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/combined/roas-roi-metrics", response_model=GAEnhancedCombinedROASROIMetrics)
 @save_response("combined_roas_roi_metrics")
 async def get_enhanced_combined_roas_roi_metrics(
@@ -600,8 +615,6 @@ async def get_combined_roas_roi_metrics_legacy(
     except Exception as e:
         logger.error(f"Error fetching combined ROAS/ROI metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 @app.get("/api/analytics/revenue-breakdown/channel/{property_id}", response_model=ChannelRevenueBreakdown)
 @save_response("ga_revenue_breakdown_by_channel")
@@ -734,7 +747,6 @@ async def get_revenue_breakdown_raw(
         logger.error(f"Error fetching raw revenue breakdown: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.get("/api/analytics/channel-revenue-timeseries/{property_id}", response_model=ChannelRevenueTimeSeries)
 @save_response("ga_channel_revenue_time_series")
 async def get_channel_revenue_time_series(
@@ -850,6 +862,9 @@ async def get_channel_revenue_time_series_raw(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+
 # Intent Insights Routes
 
 @app.post("/api/intent/keyword-insights/{customer_id}")
@@ -884,6 +899,8 @@ async def get_keyword_insights(
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 
