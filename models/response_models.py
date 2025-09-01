@@ -598,3 +598,6 @@ class SpecificChannelsTimeSeries(ChannelRevenueTimeSeries):
     channels_requested: List[str]
     channels_not_found: Optional[List[str]] = []
 
+class FunnelRequest(BaseModel):
+    selected_events: List[str]
+    conversions_data: List[Dict[str, Any]]  # Raw conversion data from the initial endpoint

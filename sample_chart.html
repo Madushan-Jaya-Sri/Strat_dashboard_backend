@@ -3,400 +3,184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Funnel Chart</title>
+    <title>Google Ads Chat - Marketing Dashboard</title>
     <style>
-        body {
+        * {
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #fef7ed, #eff6ff);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
             align-items: center;
+            justify-content: center;
         }
         
-        .container {
-            max-width: 1000px;
-            width: 100%;
+        .chat-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 600px;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            background: linear-gradient(135deg, #4285f4, #34a853);
+            color: white;
+            padding: 30px;
             text-align: center;
         }
         
-        h1 {
-            color: #1f2937;
-            font-size: 2rem;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
-        
-        .subtitle {
-            color: #6b7280;
-            margin-bottom: 2rem;
-        }
-        
-        .chart-container {
-            background: white;
-            border-radius: 0.75rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            padding: 2rem;
-            position: relative;
-            margin-bottom: 2rem;
-        }
-        
-        .side-stats {
-            position: absolute;
-            top: 100px;
-            font-size: 0.875rem;
-        }
-        
-        .side-stats.left {
-            left: 20px;
-            text-align: right;
-        }
-        
-        .side-stats.right {
-            right: 20px;
-            text-align: left;
-        }
-        
-        .stat-item {
-            margin-bottom: 40px;
-        }
-        
-        .stat-main {
+        .chat-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
             font-weight: 600;
-            color: #374151;
         }
         
-        .stat-sub {
-            font-size: 0.75rem;
-            color: #6b7280;
+        .chat-header p {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 20px;
         }
         
-        .summary {
-            background: white;
-            border-radius: 0.5rem;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-            padding: 1.5rem;
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1.5rem;
+        .module-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
         }
         
-        .summary-item {
-            text-align: center;
+        .chat-content {
+            padding: 40px 30px;
         }
         
-        .summary-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            margin-bottom: 0.25rem;
+        .sample-questions {
+            margin-bottom: 30px;
         }
         
-        .summary-label {
-            font-size: 0.875rem;
-            color: #6b7280;
+        .sample-questions h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 18px;
         }
         
-        .orange { color: #ea580c; }
-        .blue { color: #2563eb; }
-        .purple { color: #9333ea; }
+        .question-list {
+            list-style: none;
+        }
         
-        #funnelChart {
-            display: block;
-            margin: 0 auto;
+        .question-list li {
+            background: #f8f9fa;
+            margin-bottom: 10px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-left: 4px solid #4285f4;
+        }
+        
+        .question-list li:hover {
+            background: #e3f2fd;
+            transform: translateX(5px);
+        }
+        
+        .question-list li::before {
+            content: "💬";
+            margin-right: 10px;
+        }
+        
+        .chat-input-area {
+            border-top: 1px solid #eee;
+            padding: 20px 30px;
+            background: #fafafa;
+        }
+        
+        .chat-input {
+            width: 100%;
+            padding: 15px 20px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .chat-input:focus {
+            border-color: #4285f4;
+        }
+        
+        .send-button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            margin-left: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        .send-button:hover {
+            background: #3367d6;
+        }
+        
+        .input-container {
+            display: flex;
+            align-items: center;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>2D Funnel Analysis</h1>
-        <p class="subtitle" id="subtitle">Loading...</p>
-        
-        <div class="chart-container">
-            <svg id="funnelChart" width="800" height="600"></svg>
-            
-            <div class="side-stats left" id="leftStats"></div>
-            <div class="side-stats right" id="rightStats"></div>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="module-icon">💡</div>
+            <h1>Google Ads Chat</h1>
+            <p>Optimize your ad spend and boost campaign performance</p>
         </div>
         
-        <div class="summary">
-            <div class="summary-item">
-                <div class="summary-value orange" id="topFunnel">0</div>
-                <div class="summary-label">Top of Funnel</div>
+        <div class="chat-content">
+            <div class="sample-questions">
+                <h3>Get started with these questions:</h3>
+                <ul class="question-list">
+                    <li onclick="fillInput(this)">What's my overall ad performance this month?</li>
+                    <li onclick="fillInput(this)">Which campaigns are spending the most money and are they worth it?</li>
+                    <li onclick="fillInput(this)">Show me my cost per conversion and how to improve it</li>
+                    <li onclick="fillInput(this)">Which keywords are performing best and which should I pause?</li>
+                    <li onclick="fillInput(this)">How does my click-through rate compare and what can I optimize?</li>
+                </ul>
             </div>
-            <div class="summary-item">
-                <div class="summary-value blue" id="bottomFunnel">0</div>
-                <div class="summary-label">Bottom of Funnel</div>
-            </div>
-            <div class="summary-item">
-                <div class="summary-value purple" id="overallConversion">0%</div>
-                <div class="summary-label">Overall Conversion</div>
+        </div>
+        
+        <div class="chat-input-area">
+            <div class="input-container">
+                <input type="text" class="chat-input" placeholder="Ask about your Google Ads performance..." id="chatInput">
+                <button class="send-button" onclick="sendMessage()">Send</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Sample data - replace this with your own data
-        const funnelData = [
-            {
-                "eventName": "page_view",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 6478,
-                "eventCountRate": 6.2528957528957525
-            },
-            {
-                "eventName": "user_engagement",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 2883,
-                "eventCountRate": 2.7828185328185326
-            },
-            {
-                "eventName": "scroll",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 1643,
-                "eventCountRate": 1.585907335907336
-            },
-            {
-                "eventName": "session_start",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 1140,
-                "eventCountRate": 1.1003861003861004
-            },
-            {
-                "eventName": "first_visit",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 587,
-                "eventCountRate": 0.5666023166023166
-            },
-            {
-                "eventName": "form_start",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 18,
-                "eventCountRate": 0.017374517374517374
-            },
-            {
-                "eventName": "get_started",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 16,
-                "eventCountRate": 0.015444015444015444
-            },
-            {
-                "eventName": "click",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 7,
-                "eventCountRate": 0.006756756756756757
-            },
-            {
-                "eventName": "subscribe_button",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 2,
-                "eventCountRate": 0.0019305019305019305
-            },
-            {
-                "eventName": "lets_talk",
-                "conversions": 0,
-                "conversionRate": 0.0,
-                "conversionValue": 0.0,
-                "eventCount": 1,
-                "eventCountRate": 0.0009652509652509653
+        function fillInput(element) {
+            document.getElementById('chatInput').value = element.textContent;
+            document.getElementById('chatInput').focus();
+        }
+        
+        function sendMessage() {
+            const input = document.getElementById('chatInput');
+            if (input.value.trim()) {
+                alert('Message would be sent: ' + input.value);
+                input.value = '';
             }
-        ];
-
-        // Configuration
-        const numStages = funnelData.length;
-        const maxValue = Math.max(...funnelData.map(item => item.eventCount));
-        const width = 800;
-        const height = 600;
-        const centerX = width / 2;
-        const startY = 80;
-        const funnelHeight = 440;
-
-        // Helper functions
-        function getColorForStage(index, total) {
-            const ratio = index / Math.max(1, total - 1);
-            
-            // RGB values for gradient from light orange to dark blue
-            const startColor = { r: 244, g: 164, b: 96 };  // Light orange/peach
-            const endColor = { r: 72, g: 61, b: 139 };     // Dark slate blue
-            
-            const r = Math.round(startColor.r + (endColor.r - startColor.r) * ratio);
-            const g = Math.round(startColor.g + (endColor.g - startColor.g) * ratio);
-            const b = Math.round(startColor.b + (endColor.b - startColor.b) * ratio);
-            
-            return `rgb(${r}, ${g}, ${b})`;
         }
-
-        function formatEventName(eventName) {
-            return eventName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-        }
-
-        function createSVGElement(tag, attributes = {}) {
-            const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
-            Object.keys(attributes).forEach(key => {
-                element.setAttribute(key, attributes[key]);
-            });
-            return element;
-        }
-
-    function drawFunnel() {
-        const svg = document.getElementById('funnelChart');
-        svg.innerHTML = '';
-
-        const leftStats = document.getElementById('leftStats');
-        const rightStats = document.getElementById('rightStats');
-        leftStats.innerHTML = '';
-        rightStats.innerHTML = '';
-
-        const topWidth = 350;
-        const bottomWidth = 50;
-        const maxEllipseHeight = 35;
-        const minEllipseHeight = 10;
-
-        let currentY = startY;
-
-        funnelData.forEach((item, index) => {
-            const progress = index / Math.max(1, numStages - 1);
-
-            // Width decreases with stage
-            const currentWidth = topWidth - (topWidth - bottomWidth) * progress;
-            const rx = currentWidth / 2;
-
-            // Height decreases with stage
-            const ellipseHeight = maxEllipseHeight - (maxEllipseHeight - minEllipseHeight) * progress;
-            const ry = ellipseHeight;
-
-            const color = getColorForStage(index, numStages);
-
-            // Draw ellipse
-            const ellipse = createSVGElement('ellipse', {
-                cx: centerX,
-                cy: currentY + ry,
-                rx: rx,
-                ry: ry,
-                fill: color,
-                stroke: 'white',
-                'stroke-width': '2'
-            });
-            svg.appendChild(ellipse);
-
-            // Add left side stats (stage name & overall %)
-            const overallPercent = ((item.eventCount / funnelData[0].eventCount) * 100).toFixed(1);
-            let conversionPercent = '';
-            if (index > 0) {
-                conversionPercent = ((item.eventCount / funnelData[index - 1].eventCount) * 100).toFixed(1);
+        
+        document.getElementById('chatInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
             }
-
-            const leftItem = document.createElement('div');
-            leftItem.className = 'stat-item';
-            leftItem.innerHTML = `
-                <div class="stat-main">${formatEventName(item.eventName)}</div>
-                <div class="stat-sub">Overall: ${overallPercent}%</div>
-                ${conversionPercent ? `<div class="stat-sub">Step Conv: ${conversionPercent}%</div>` : ''}
-            `;
-            leftStats.appendChild(leftItem);
-
-            // Add right side stats (event count)
-            const rightItem = document.createElement('div');
-            rightItem.className = 'stat-item';
-            rightItem.innerHTML = `
-                <div class="stat-main">${item.eventCount.toLocaleString()}</div>
-                <div class="stat-sub">events</div>
-            `;
-            rightStats.appendChild(rightItem);
-
-            // Move Y down for next ellipse, making them touch
-            currentY += ry * 2; // height of current ellipse
         });
-    }
-
-        function updateSideStats() {
-            const leftStats = document.getElementById('leftStats');
-            const rightStats = document.getElementById('rightStats');
-            
-            leftStats.innerHTML = '';
-            rightStats.innerHTML = '';
-
-            funnelData.forEach((item, index) => {
-                // Left side - conversion percentages
-                const leftItem = document.createElement('div');
-                leftItem.className = 'stat-item';
-                
-                const overallPercent = ((item.eventCount / funnelData[0].eventCount) * 100).toFixed(1);
-                let conversionPercent = '';
-                if (index > 0) {
-                    conversionPercent = ((item.eventCount / funnelData[index - 1].eventCount) * 100).toFixed(1);
-                }
-                
-                leftItem.innerHTML = `
-                    <div class="stat-main">${overallPercent}%</div>
-                    ${conversionPercent ? `<div class="stat-sub">${conversionPercent}% conv</div>` : ''}
-                `;
-                leftStats.appendChild(leftItem);
-
-                // Right side - event counts
-                const rightItem = document.createElement('div');
-                rightItem.className = 'stat-item';
-                rightItem.innerHTML = `
-                    <div class="stat-main">${item.eventCount.toLocaleString()}</div>
-                    <div class="stat-sub">events</div>
-                `;
-                rightStats.appendChild(rightItem);
-            });
-        }
-
-        function updateSummary() {
-            const subtitle = document.getElementById('subtitle');
-            const topFunnel = document.getElementById('topFunnel');
-            const bottomFunnel = document.getElementById('bottomFunnel');
-            const overallConversion = document.getElementById('overallConversion');
-
-            subtitle.textContent = `Showing ${numStages} stages • Total events: ${funnelData[0]?.eventCount.toLocaleString() || 0}`;
-            topFunnel.textContent = funnelData[0]?.eventCount.toLocaleString() || '0';
-            bottomFunnel.textContent = funnelData[funnelData.length - 1]?.eventCount.toLocaleString() || '0';
-            
-            const conversionRate = funnelData.length > 1 
-                ? ((funnelData[funnelData.length - 1].eventCount / funnelData[0].eventCount) * 100).toFixed(1)
-                : '100.0';
-            overallConversion.textContent = `${conversionRate}%`;
-        }
-
-        // Initialize the chart
-        function init() {
-            drawFunnel();
-            updateSideStats();
-            updateSummary();
-        }
-
-        // Run when page loads
-        document.addEventListener('DOMContentLoaded', init);
-
-        // Function to update with new data (you can call this from external scripts)
-        window.updateFunnelData = function(newData) {
-            if (newData && Array.isArray(newData)) {
-                funnelData.length = 0; // Clear existing data
-                funnelData.push(...newData);
-                init(); // Redraw everything
-            }
-        };
     </script>
 </body>
 </html>

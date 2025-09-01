@@ -21,7 +21,7 @@ from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
 from models.response_models import *
 from models.response_models import AdKeyStats
-from models.response_models import EnhancedAdCampaign
+from models.response_models import EnhancedAdCampaign, FunnelRequest
 from database.mongo_manager import MongoManager
 
 from chat.chat_manager import chat_manager
@@ -443,6 +443,33 @@ async def get_ga_conversions(
         return [GAConversionData(**conv) for conv in conversions]
     except Exception as e:
         logger.error(f"Error fetching conversions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analytics/funnel/{property_id}")
+async def generate_engagement_funnel_with_llm(
+    property_id: str,
+    request: FunnelRequest,
+    period: str = Query("30d", description="Time period"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate engagement funnel from selected event names"""
+    try:
+        ga4_manager = GA4Manager(current_user['email'])
+        
+        funnel_data = ga4_manager.generate_engagement_funnel_with_llm(
+            property_id=property_id,
+            selected_event_names=request.selected_events,
+            conversions_raw_data=request.conversions_data,  # Fixed parameter name
+            period=period
+        )
+        
+        return {
+            "success": True,
+            "data": funnel_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in funnel generation endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/analytics/channel-performance/{property_id}", response_model=List[GAChannelPerformance])

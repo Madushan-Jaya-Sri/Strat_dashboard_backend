@@ -2,10 +2,13 @@
 Google Analytics 4 Manager
 Handles all GA4 API operations
 """
-
+import os
 import logging
 import requests
+import openai
+import json
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
@@ -22,6 +25,7 @@ from google_ads.ads_manager import GoogleAdsManager
 
 logger = logging.getLogger(__name__)
 
+load_dotenv(override=True)
 class GA4Manager:
     """Manager class for Google Analytics 4 API operations"""
     
@@ -486,108 +490,146 @@ class GA4Manager:
         except Exception as e:
             logger.error(f"Error fetching conversions for property {property_id}: {e}")
             return []
-    # def get_roas_roi_metrics(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
-    #     """Get ROAS and ROI metrics for a specific property with additional ecommerce metrics"""
-    #     try:
-    #         start_date, end_date = self.get_date_range(period)
+
+
+    def call_openai_api(self, prompt: str) -> str:
+        """Call OpenAI API"""
+        try:
+            os
+            client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             
-    #         # First request: Get basic revenue and user data
-    #         request = RunReportRequest(
-    #             property=f"properties/{property_id}",
-    #             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
-    #             metrics=[
-    #                 Metric(name="totalRevenue"),
-    #                 Metric(name="purchaseRevenue"),
-    #                 Metric(name="totalAdRevenue"),
-    #                 Metric(name="conversions"),
-    #                 Metric(name="sessions"),
-    #                 Metric(name="totalUsers"),
-    #                 Metric(name="activeUsers"),
-    #                 Metric(name="totalPurchasers"),
-    #                 Metric(name="eventCount")
-    #             ],
-    #         )
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a Google Analytics expert. Always respond with valid JSON only, no additional text."
+                    },
+                    {
+                        "role": "user", 
+                        "content": prompt
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=500
+            )
             
-    #         response = self.client.run_report(request=request)
+            return response.choices[0].message.content
             
-    #         # Second request: Get first-time purchasers data
-    #         first_time_request = RunReportRequest(
-    #             property=f"properties/{property_id}",
-    #             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
-    #             dimensions=[Dimension(name="newVsReturning")],
-    #             metrics=[
-    #                 Metric(name="totalPurchasers"),
-    #                 Metric(name="purchaseRevenue")
-    #             ],
-    #         )
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            raise Exception(f"Failed to get LLM analysis: {str(e)}")
+
+
+    def generate_engagement_funnel_with_llm(self, property_id: str, selected_event_names: List[str], conversions_raw_data: List[Dict[str, Any]], period: str = "30d") -> Dict[str, Any]:
+        """Generate engagement funnel using OpenAI LLM with selected events and raw conversion data"""
+        try:
+            # Filter raw data for selected events only
+            selected_events_data = [
+                event for event in conversions_raw_data 
+                if event['eventName'] in selected_event_names
+            ]
             
-    #         first_time_response = self.client.run_report(first_time_request)
+            if not selected_events_data:
+                return {
+                    'propertyId': property_id,
+                    'period': period,
+                    'error': 'No data found for selected events',
+                    'funnel_stages': []
+                }
             
-    #         if response.rows:
-    #             row = response.rows[0]
-    #             metrics = row.metric_values
-                
-    #             total_revenue = self.safe_float(metrics[0].value)
-    #             purchase_revenue = self.safe_float(metrics[1].value)
-    #             total_ad_revenue = self.safe_float(metrics[2].value)
-    #             conversions = self.safe_float(metrics[3].value)
-    #             sessions = self.safe_int(metrics[4].value)
-    #             total_users = self.safe_int(metrics[5].value)
-    #             active_users = self.safe_int(metrics[6].value)
-    #             total_purchasers = self.safe_int(metrics[7].value)
-                
-    #             # Process first-time purchasers data
-    #             first_time_purchasers = 0
-    #             if first_time_response.rows:
-    #                 for row in first_time_response.rows:
-    #                     user_type = row.dimension_values[0].value
-    #                     purchasers = self.safe_int(row.metric_values[0].value)
-    #                     if user_type == "new":
-    #                         first_time_purchasers = purchasers
-                
-    #             # Calculate metrics
-    #             estimated_ad_cost = total_revenue * 0.25  # Assuming 25% ad spend ratio
-    #             roas = (total_revenue / estimated_ad_cost) if estimated_ad_cost > 0 else 0
-    #             roi = ((total_revenue - estimated_ad_cost) / estimated_ad_cost * 100) if estimated_ad_cost > 0 else 0
-                
-    #             cost_per_conversion = estimated_ad_cost / conversions if conversions > 0 else 0
-    #             revenue_per_user = total_revenue / total_users if total_users > 0 else 0
-    #             profit_margin = ((total_revenue - estimated_ad_cost) / total_revenue * 100) if total_revenue > 0 else 0
-                
-    #             # New calculations
-    #             average_purchase_revenue_per_active_user = purchase_revenue / active_users if active_users > 0 else 0
-                
-    #             return {
-    #                 'propertyId': property_id,
-    #                 'propertyName': f"Property {property_id}",
-    #                 # Original metrics
-    #                 'totalRevenue': round(total_revenue, 2),
-    #                 'adSpend': round(estimated_ad_cost, 2),
-    #                 'roas': round(roas, 2),
-    #                 'roi': round(roi, 2),
-    #                 'conversionValue': round(purchase_revenue, 2),
-    #                 'costPerConversion': round(cost_per_conversion, 2),
-    #                 'revenuePerUser': round(revenue_per_user, 2),
-    #                 'profitMargin': round(profit_margin, 2),
-    #                 'roasStatus': self.get_roas_status(roas),
-    #                 'roiStatus': self.get_roi_status(roi),
-    #                 'conversions': int(conversions),
-    #                 'sessions': sessions,
-    #                 'totalUsers': total_users,
-    #                 # New ecommerce metrics
-    #                 'totalAdRevenue': round(total_ad_revenue, 2),
-    #                 'totalPurchasers': total_purchasers,
-    #                 'firstTimePurchasers': first_time_purchasers,
-    #                 'averagePurchaseRevenuePerActiveUser': round(average_purchase_revenue_per_active_user, 2),
-    #                 'activeUsers': active_users
-    #             }
+            # Prepare LLM prompt
+            llm_prompt = f"""
+            You are a Google Analytics expert creating a user engagement funnel from GA4 event data.
+
+            Selected Events: {selected_event_names}
+
+            Raw GA4 Conversion Data:
+            {json.dumps(selected_events_data, indent=2)}
+
+            Task: Create a logical user engagement funnel by:
+            1. Order these events from top of funnel (earliest user interaction) to bottom (final conversion) so that the eventCount values form a perfect funnel: each stage's count must be less than or equal to the previous stage (no negative drop-off percentages).
+            2. Calculate funnel metrics for each stage.
+
+            Consider typical user journey patterns:
+            - Entry events usually come first (session_start, page_view, first_visit)
+            - Engagement events in middle (scroll, user_engagement, view_item)
+            - Action/conversion events at bottom (form_submit, purchase, sign_up, click)
+            - If eventCount values do not follow a decreasing order, reorder the events so that the funnel is perfectly decreasing (no stage should have a higher count than the previous).
+            - If needed, drop events that break the funnel shape.
+
+            Return ONLY a JSON response in this exact format:
+            {{
+                "funnel_stages": [
+                    {{
+                        "stage_name": "event_name_here",
+                        "count": event_count_from_data,
+                        "percentage_of_total": percentage_relative_to_first_stage,
+                        "drop_off_percentage": percentage_dropped_from_previous_stage,
+                        "conversions": conversions_from_data,
+                        "conversion_rate": conversion_rate_from_data,
+                        "revenue": revenue_from_data
+                    }}
+                ],
+                "ordered_events": ["event1", "event2", "event3"]
+            }}
+
+            Notes:
+            - First stage should have percentage_of_total: 100.0 and drop_off_percentage: 0.0
+            - Use actual eventCount values from the data for 'count'
+            - Calculate drop_off_percentage as: ((previous_count - current_count) / previous_count) * 100
+            - Calculate percentage_of_total as: (current_count / first_stage_count) * 100
+            - Order events so that eventCount values strictly decrease from stage to stage (no negative drop-off).
+            - If any event breaks the funnel shape, exclude it from the funnel.
+            """
             
-    #         return self.get_default_roas_roi_metrics(property_id)
+            # Call OpenAI API
+            openai_response = self.call_openai_api(llm_prompt)
             
-    #     except Exception as e:
-    #         logger.error(f"Error fetching ROAS/ROI metrics for property {property_id}: {e}")
-    #         # Return default data instead of raising exception
-    #         return self.get_default_roas_roi_metrics(property_id)
+            # Parse LLM response
+            llm_data = json.loads(openai_response.strip())
+            
+            funnel_stages = llm_data.get('funnel_stages', [])
+            ordered_events = llm_data.get('ordered_events', [])
+            
+            # Calculate overall metrics
+            if funnel_stages:
+                first_stage = funnel_stages[0]
+                last_stage = funnel_stages[-1]
+                overall_conversion_rate = (last_stage['count'] / first_stage['count']) * 100 if first_stage['count'] > 0 else 0
+                total_drop_off = first_stage['count'] - last_stage['count']
+                total_users_entered = first_stage['count']
+                total_users_completed = last_stage['count']
+            else:
+                overall_conversion_rate = 0
+                total_drop_off = 0
+                total_users_entered = 0
+                total_users_completed = 0
+            
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'funnel_stages': funnel_stages,
+                'total_stages': len(funnel_stages),
+                'overall_conversion_rate': round(overall_conversion_rate, 2),
+                'total_users_entered': total_users_entered,
+                'total_users_completed': total_users_completed,
+                'total_drop_off': total_drop_off,
+                'selected_events': selected_event_names,
+                'ordered_events': ordered_events
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating engagement funnel with LLM: {e}")
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'error': str(e),
+                'funnel_stages': []
+            }
+
+
+
 
 
 
@@ -596,8 +638,6 @@ class GA4Manager:
 
 
     # Enhanced methods for your GA4Manager class
-
-
 
     def get_currency_rates(self) -> Dict[str, float]:
             """Get current USD exchange rates from a free API"""
