@@ -33,7 +33,7 @@ class AuthManager:
         # Facebook OAuth Configuration
         self.FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID")
         self.FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET")
-        self.FACEBOOK_REDIRECT_URI = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8000/auth/meta/callback")
+        self.FACEBOOK_REDIRECT_URI = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8000/auth/facebook/callback")
         
         # JWT Configuration
         self.JWT_SECRET = os.getenv("JWT_SECRET", "your-super-secret-jwt-key-change-this")
