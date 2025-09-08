@@ -166,6 +166,37 @@ class MongoManager:
 
             # Intent insights
             'intent_keyword_insights_raw': 'intent_keyword_insights',
+
+            # Add to _get_collection_name method in mongo_manager.py:
+
+            # Meta Ads endpoints
+            'meta_ad_accounts': 'meta_ad_accounts',
+            'meta_key_stats': 'meta_key_stats', 
+            'meta_campaigns': 'meta_campaigns',
+            'meta_placement_performance': 'meta_placement_performance',
+            'meta_demographic_performance': 'meta_demographic_performance',
+            'meta_time_series': 'meta_time_series',
+
+            # Facebook Pages endpoints
+            'facebook_pages': 'facebook_pages',
+            'facebook_page_insights': 'facebook_page_insights',
+            'facebook_page_posts': 'facebook_page_posts',
+            'facebook_post_insights': 'facebook_post_insights',
+            'facebook_audience_insights': 'facebook_audience_insights',
+            'facebook_performance_summary': 'facebook_performance_summary',
+
+            # Instagram endpoints
+            'instagram_accounts': 'instagram_accounts',
+            'instagram_account_insights': 'instagram_account_insights',
+            'instagram_account_media': 'instagram_account_media',
+            'instagram_stories': 'instagram_stories',
+            'instagram_audience_demographics': 'instagram_audience_demographics',
+            'instagram_hashtag_performance': 'instagram_hashtag_performance',
+            'instagram_performance_summary': 'instagram_performance_summary',
+
+            # Combined social media endpoints
+            'social_media_overview': 'social_media_overview',
+            'social_insights_summary': 'social_insights_summary'
         }
         
         return collection_mapping.get(endpoint, 'api_responses_misc')

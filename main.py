@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
+import requests
+import json
 import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -19,10 +21,24 @@ from auth.auth_manager import AuthManager
 from google_ads.ads_manager import GoogleAdsManager
 from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
+from meta.meta_manager import MetaManager
 from models.response_models import *
 from models.response_models import AdKeyStats
 from models.response_models import EnhancedAdCampaign, FunnelRequest
 from database.mongo_manager import MongoManager
+
+
+from models.meta_response_models import (
+    MetaAdAccount, MetaCampaign, MetaAdAccountKeyStats,
+    MetaPlacementPerformance, MetaDemographicPerformance, MetaTimeSeriesData,
+    FacebookPage, FacebookPageInsights, FacebookPost, FacebookPostInsights,
+    FacebookAudienceInsights, FacebookPagePerformanceSummary,
+    InstagramAccount, InstagramAccountInsights, InstagramMedia, InstagramStory,
+    InstagramAudienceDemographics, InstagramHashtagPerformance, InstagramAccountPerformanceSummary,
+    SocialMediaOverview, SocialMediaInsightsSummary, CrossPlatformEngagement,
+    FacebookUserInfo, FacebookAuthResponse
+)
+from models.chat_models import ModuleType
 
 from chat.chat_manager import chat_manager
 from models.chat_models import *
@@ -128,29 +144,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return auth_manager.verify_jwt_token(credentials.credentials)
   
 
-# Health check
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    # Test MongoDB connection
-    mongodb_status = "healthy"
-    try:
-        await mongo_manager.client.admin.command('ping')
-    except Exception as e:
-        mongodb_status = f"unhealthy: {str(e)}"
-    
-    return {
-        "status": "healthy" if mongodb_status == "healthy" else "partial",
-        "timestamp": datetime.now().isoformat(),
-        "services": {
-            "google_ads": "healthy",
-            "google_analytics": "healthy", 
-            "intent_insights": "healthy",
-            "mongodb": mongodb_status
-        }
-    }
-
-
 
 
 
@@ -196,9 +189,772 @@ async def logout(current_user: dict = Depends(get_current_user)):
     return await auth_manager.logout_user(current_user["email"])
 
 
+# =============================================================================
+# FACEBOOK AUTHENTICATION ROUTES
+# =============================================================================
+
+@app.get("/auth/facebook/login")
+async def facebook_login():
+    """Initiate Facebook OAuth login"""
+    return await auth_manager.initiate_facebook_login()
+
+@app.get("/auth/facebook/callback")
+async def facebook_auth_callback(code: str, state: Optional[str] = None):
+    """Handle Facebook OAuth callback"""
+    result = await auth_manager.handle_facebook_callback(code, state)
+    
+    # Return HTML with JavaScript to display token (similar to Google auth)
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Facebook Authentication Success</title></head>
+    <body>
+        <h2>Facebook Authentication Successful!</h2>
+        <p>Welcome, {result['user']['name']}!</p>
+        <p>Copy your JWT token:</p>
+        <textarea rows="10" cols="80">{result['token']}</textarea>
+        <script>
+            console.log('Facebook JWT Token:', '{result['token']}');
+            console.log('User Info:', {json.dumps(result['user'], indent=2)});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+@app.get("/auth/facebook/user")
+async def get_facebook_user_info(current_user: dict = Depends(get_current_user)):
+    """Get current Facebook user information"""
+    # Check if this is a Facebook authenticated user
+    if current_user.get("auth_provider") != "facebook":
+        raise HTTPException(status_code=400, detail="Not a Facebook authenticated user")
+    
+    return {
+        "id": current_user.get("id", ""),
+        "email": current_user["email"],
+        "name": current_user["name"],
+        "picture": current_user.get("picture", ""),
+        "auth_provider": "facebook"
+    }
+
+@app.post("/auth/facebook/logout")
+async def facebook_logout(current_user: dict = Depends(get_current_user)):
+    """Logout Facebook user"""
+    if current_user.get("auth_provider") != "facebook":
+        raise HTTPException(status_code=400, detail="Not a Facebook authenticated user")
+    
+    return await auth_manager.logout_user(current_user["email"], "facebook")
+
+@app.get("/auth/facebook/deauthorize")
+@app.post("/auth/facebook/deauthorize")
+async def facebook_deauthorize(request: Request):
+    """Handle Facebook app deauthorization (required by Facebook)"""
+    try:
+        # Get signed_request parameter
+        if request.method == "GET":
+            signed_request = request.query_params.get("signed_request", "")
+        else:
+            form_data = await request.form()
+            signed_request = form_data.get("signed_request", "")
+        
+        result = await auth_manager.handle_facebook_deauthorization(signed_request)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Facebook deauthorization error: {e}")
+        return {"status": "error", "message": "Deauthorization failed"}
+
+@app.get("/auth/facebook/data-deletion")
+@app.post("/auth/facebook/data-deletion") 
+async def facebook_data_deletion(request: Request):
+    """Handle Facebook data deletion request (required by Facebook)"""
+    try:
+        # Get signed_request parameter
+        if request.method == "GET":
+            signed_request = request.query_params.get("signed_request", "")
+        else:
+            form_data = await request.form()
+            signed_request = form_data.get("signed_request", "")
+        
+        # In production, you should:
+        # 1. Parse the signed_request to get user ID
+        # 2. Delete all user data from your systems
+        # 3. Return a confirmation URL
+        
+        logger.info("Facebook data deletion request received")
+        
+        return {
+            "url": f"{request.base_url}privacy",  # URL to your data deletion confirmation page
+            "confirmation_code": f"deletion_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        }
+        
+    except Exception as e:
+        logger.error(f"Facebook data deletion error: {e}")
+        return {"status": "error", "message": "Data deletion request failed"}
+
+# =============================================================================
+# ENHANCED CURRENT USER DEPENDENCY (Supporting both Google and Facebook)
+# =============================================================================
+
+async def get_current_user_enhanced(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Get current authenticated user (Google or Facebook)"""
+    user_data = auth_manager.verify_jwt_token(credentials.credentials)
+    
+    # Add auth provider information for easier handling
+    auth_provider = user_data.get("auth_provider", "google")
+    user_data["auth_provider"] = auth_provider
+    
+    return user_data
+
+# =============================================================================
+# FACEBOOK SPECIFIC USER DEPENDENCY
+# =============================================================================
+
+async def get_facebook_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Get current Facebook authenticated user only"""
+    user_data = auth_manager.verify_jwt_token(credentials.credentials)
+    
+    if user_data.get("auth_provider") != "facebook":
+        raise HTTPException(status_code=403, detail="Facebook authentication required")
+    
+    return user_data
+
+# =============================================================================
+# GOOGLE SPECIFIC USER DEPENDENCY  
+# =============================================================================
+
+async def get_google_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Get current Google authenticated user only"""
+    user_data = auth_manager.verify_jwt_token(credentials.credentials)
+    
+    if user_data.get("auth_provider") != "google":
+        raise HTTPException(status_code=403, detail="Google authentication required")
+    
+    return user_data
+
+# =============================================================================
+# UPDATE HEALTH CHECK TO INCLUDE SOCIAL MEDIA APIS
+# =============================================================================
+
+@app.get("/health")
+async def health_check():
+    """Enhanced health check endpoint with social media connectivity"""
+    # Test MongoDB connection
+    mongodb_status = "healthy"
+    try:
+        await mongo_manager.client.admin.command('ping')
+    except Exception as e:
+        mongodb_status = f"unhealthy: {str(e)}"
+    
+    # Test Facebook API connectivity
+    facebook_status = "not_configured"
+    if auth_manager.FACEBOOK_APP_ID:
+        try:
+            # Simple Facebook API test
+            test_url = f"https://graph.facebook.com/v18.0/me?access_token=test"
+            response = requests.get(test_url, timeout=5)
+            facebook_status = "configured" if response.status_code in [400, 401] else "connection_error"
+        except Exception:
+            facebook_status = "connection_error"
+    
+    return {
+        "status": "healthy" if mongodb_status == "healthy" else "partial",
+        "timestamp": datetime.now().isoformat(),
+        "services": {
+            "google_ads": "healthy",
+            "google_analytics": "healthy", 
+            "intent_insights": "healthy",
+            "mongodb": mongodb_status,
+            "facebook_auth": facebook_status,
+            "meta_ads_api": "depends_on_auth",
+            "facebook_pages_api": "depends_on_auth",
+            "instagram_business_api": "depends_on_auth"
+        },
+        "auth_providers": {
+            "google": "configured" if auth_manager.GOOGLE_CLIENT_ID else "not_configured",
+            "facebook": "configured" if auth_manager.FACEBOOK_APP_ID else "not_configured"
+        }
+    }
+
+
+# =============================================================================
+# TESTING AND DEBUG ENDPOINTS
+# =============================================================================
+
+@app.get("/api/meta/test-connection")
+async def test_meta_connection(current_user: dict = Depends(get_facebook_user)):
+    """Test Meta API connection and permissions"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Test basic API call
+        accounts = meta_manager.get_ad_accounts()
+        
+        return {
+            "status": "success",
+            "message": "Meta API connection successful",
+            "accounts_found": len(accounts),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Meta API connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/api/facebook/test-connection")
+async def test_facebook_connection(current_user: dict = Depends(get_facebook_user)):
+    """Test Facebook API connection and permissions"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        
+        # Test basic API call
+        pages = facebook_manager.get_user_pages()
+        
+        return {
+            "status": "success",
+            "message": "Facebook API connection successful",
+            "pages_found": len(pages),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Facebook API connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
+
+# =============================================================================
+# META ADS API ENDPOINTS
+# =============================================================================
+
+@app.get("/api/debug/clear-sessions")
+async def clear_sessions():
+    """Clear all sessions for testing"""
+    auth_manager.facebook_sessions.clear()
+    auth_manager.user_sessions.clear()
+    auth_manager.facebook_states.clear()
+    auth_manager.oauth_states.clear()
+    return {"message": "All sessions cleared"}
+
+
+@app.get("/api/meta/accounts", response_model=List[MetaAdAccount])
+@save_response("meta_ad_accounts")
+async def get_meta_ad_accounts(current_user: dict = Depends(get_facebook_user)):
+    """Get accessible Meta Ad accounts"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        accounts = meta_manager.get_ad_accounts()
+        return [MetaAdAccount(**account) for account in accounts]
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/facebook-raw")
+async def debug_facebook_raw(current_user: dict = Depends(get_facebook_user)):
+    """Debug raw Facebook API responses"""
+    try:
+        access_token = auth_manager.get_facebook_access_token(current_user["email"])
+        
+        # Test different Facebook API endpoints
+        me_url = f"https://graph.facebook.com/v18.0/me?access_token={access_token}"
+        accounts_url = f"https://graph.facebook.com/v18.0/me/accounts?access_token={access_token}"
+        permissions_url = f"https://graph.facebook.com/v18.0/me/permissions?access_token={access_token}"
+        
+        me_response = requests.get(me_url)
+        accounts_response = requests.get(accounts_url)
+        permissions_response = requests.get(permissions_url)
+        
+        return {
+            "me_status": me_response.status_code,
+            "me_data": me_response.json() if me_response.status_code == 200 else me_response.text,
+            
+            "accounts_status": accounts_response.status_code,
+            "accounts_data": accounts_response.json() if accounts_response.status_code == 200 else accounts_response.text,
+            
+            "permissions_status": permissions_response.status_code,
+            "permissions_data": permissions_response.json() if permissions_response.status_code == 200 else permissions_response.text,
+            
+            "access_token_preview": access_token[:30] + "..."
+        }
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+@app.get("/api/meta/key-stats/{account_id}", response_model=MetaAdAccountKeyStats)
+@save_response("meta_key_stats")
+async def get_meta_key_stats(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Meta Ads key statistics for dashboard cards"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        key_stats = meta_manager.get_account_key_stats(account_id, period)
+        return MetaAdAccountKeyStats(**key_stats)
+    except Exception as e:
+        logger.error(f"Error fetching Meta key stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/campaigns/{account_id}", response_model=List[MetaCampaign])
+@save_response("meta_campaigns")
+async def get_meta_campaigns(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Meta Ads campaigns for an account"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        campaigns = meta_manager.get_campaigns(account_id, period)
+        return [MetaCampaign(**campaign) for campaign in campaigns]
+    except Exception as e:
+        logger.error(f"Error fetching Meta campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/performance/placement/{account_id}", response_model=List[MetaPlacementPerformance])
+@save_response("meta_placement_performance")
+async def get_meta_placement_performance(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Meta Ads performance by placement"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        placements = meta_manager.get_performance_by_placement(account_id, period)
+        return [MetaPlacementPerformance(**placement) for placement in placements]
+    except Exception as e:
+        logger.error(f"Error fetching Meta placement performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/performance/demographics/{account_id}", response_model=List[MetaDemographicPerformance])
+@save_response("meta_demographic_performance")
+async def get_meta_demographic_performance(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Meta Ads performance by demographics"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        demographics = meta_manager.get_performance_by_age_gender(account_id, period)
+        return [MetaDemographicPerformance(**demo) for demo in demographics]
+    except Exception as e:
+        logger.error(f"Error fetching Meta demographic performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/performance/timeseries/{account_id}", response_model=List[MetaTimeSeriesData])
+@save_response("meta_time_series")
+async def get_meta_time_series(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Meta Ads time series performance data"""
+    try:
+        from meta.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        time_series = meta_manager.get_time_series_data(account_id, period)
+        return [MetaTimeSeriesData(**ts) for ts in time_series]
+    except Exception as e:
+        logger.error(f"Error fetching Meta time series: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# FACEBOOK PAGES API ENDPOINTS
+# =============================================================================
+
+@app.get("/api/facebook/pages", response_model=List[FacebookPage])
+@save_response("facebook_pages")
+async def get_facebook_pages(current_user: dict = Depends(get_facebook_user)):
+    """Get accessible Facebook Pages"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        pages = facebook_manager.get_user_pages()
+        return [FacebookPage(**page) for page in pages]
+    except Exception as e:
+        logger.error(f"Error fetching Facebook pages: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/facebook/insights/{page_id}", response_model=FacebookPageInsights)
+@save_response("facebook_page_insights")
+async def get_facebook_page_insights(
+    page_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Facebook Page insights"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        insights = facebook_manager.get_page_insights(page_id, period)
+        return FacebookPageInsights(**insights)
+    except Exception as e:
+        logger.error(f"Error fetching Facebook page insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/facebook/posts/{page_id}", response_model=List[FacebookPost])
+@save_response("facebook_page_posts")
+async def get_facebook_page_posts(
+    page_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Facebook Page posts with engagement data"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        posts = facebook_manager.get_page_posts(page_id, limit, period)
+        return [FacebookPost(**post) for post in posts]
+    except Exception as e:
+        logger.error(f"Error fetching Facebook page posts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/facebook/post-insights/{post_id}", response_model=FacebookPostInsights)
+@save_response("facebook_post_insights")
+async def get_facebook_post_insights(
+    post_id: str,
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get detailed insights for a specific Facebook post"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        insights = facebook_manager.get_post_insights(post_id)
+        return FacebookPostInsights(**insights)
+    except Exception as e:
+        logger.error(f"Error fetching Facebook post insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/facebook/audience/{page_id}", response_model=FacebookAudienceInsights)
+@save_response("facebook_audience_insights")
+async def get_facebook_audience_insights(
+    page_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Facebook Page audience demographics"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        audience = facebook_manager.get_audience_insights(page_id, period)
+        return FacebookAudienceInsights(**audience)
+    except Exception as e:
+        logger.error(f"Error fetching Facebook audience insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/facebook/performance-summary/{page_id}", response_model=FacebookPagePerformanceSummary)
+@save_response("facebook_performance_summary")
+async def get_facebook_performance_summary(
+    page_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get comprehensive Facebook Page performance summary"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        summary = facebook_manager.get_page_performance_summary(page_id, period)
+        return FacebookPagePerformanceSummary(**summary)
+    except Exception as e:
+        logger.error(f"Error fetching Facebook performance summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# INSTAGRAM API ENDPOINTS
+# =============================================================================
+
+@app.get("/api/instagram/accounts", response_model=List[InstagramAccount])
+@save_response("instagram_accounts")
+async def get_instagram_accounts(current_user: dict = Depends(get_facebook_user)):
+    """Get Instagram Business accounts"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        accounts = instagram_manager.get_instagram_business_accounts()
+        return [InstagramAccount(**account) for account in accounts]
+    except Exception as e:
+        logger.error(f"Error fetching Instagram accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/instagram/insights/{account_id}", response_model=InstagramAccountInsights)
+@save_response("instagram_account_insights")
+async def get_instagram_account_insights(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Instagram Business account insights"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        insights = instagram_manager.get_account_insights(account_id, period)
+        return InstagramAccountInsights(**insights)
+    except Exception as e:
+        logger.error(f"Error fetching Instagram account insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/instagram/media/{account_id}", response_model=List[InstagramMedia])
+@save_response("instagram_account_media")
+async def get_instagram_account_media(
+    account_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Instagram account media with insights"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        media = instagram_manager.get_account_media(account_id, limit, period)
+        return [InstagramMedia(**post) for post in media]
+    except Exception as e:
+        logger.error(f"Error fetching Instagram media: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/instagram/stories/{account_id}", response_model=List[InstagramStory])
+@save_response("instagram_stories")
+async def get_instagram_stories(
+    account_id: str,
+    period: str = Query("7d", pattern="^(1d|7d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Instagram Stories insights (limited to 7 days)"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        stories = instagram_manager.get_story_insights(account_id, period)
+        return [InstagramStory(**story) for story in stories]
+    except Exception as e:
+        logger.error(f"Error fetching Instagram stories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/instagram/audience/{account_id}", response_model=InstagramAudienceDemographics)
+@save_response("instagram_audience_demographics")
+async def get_instagram_audience_demographics(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get Instagram audience demographics"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        demographics = instagram_manager.get_audience_demographics(account_id, period)
+        return InstagramAudienceDemographics(**demographics)
+    except Exception as e:
+        logger.error(f"Error fetching Instagram audience demographics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/instagram/hashtag-performance/{account_id}", response_model=List[InstagramHashtagPerformance])
+@save_response("instagram_hashtag_performance")
+async def get_instagram_hashtag_performance(
+    account_id: str,
+    hashtags: List[str],
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get hashtag performance analysis"""
+    try:
+        if len(hashtags) > 20:
+            raise HTTPException(status_code=400, detail="Maximum 20 hashtags allowed")
+        
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        performance = instagram_manager.get_hashtag_performance(account_id, hashtags, period)
+        return [InstagramHashtagPerformance(**hashtag) for hashtag in performance]
+    except Exception as e:
+        logger.error(f"Error fetching Instagram hashtag performance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/instagram/performance-summary/{account_id}", response_model=InstagramAccountPerformanceSummary)
+@save_response("instagram_performance_summary")
+async def get_instagram_performance_summary(
+    account_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get comprehensive Instagram account performance summary"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        summary = instagram_manager.get_account_performance_summary(account_id, period)
+        return InstagramAccountPerformanceSummary(**summary)
+    except Exception as e:
+        logger.error(f"Error fetching Instagram performance summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =============================================================================
+# COMBINED SOCIAL MEDIA ENDPOINTS
+# =============================================================================
+
+@app.get("/api/social/overview", response_model=SocialMediaOverview)
+@save_response("social_media_overview")
+async def get_social_media_overview(current_user: dict = Depends(get_facebook_user)):
+    """Get combined overview of all social media platforms"""
+    try:
+        from meta.meta_manager import MetaManager
+        from facebook.facebook_manager import FacebookManager
+        from instagram.instagram_manager import InstagramManager
+        
+        # Get data from all platforms
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        
+        meta_accounts = meta_manager.get_ad_accounts()
+        facebook_pages = facebook_manager.get_user_pages()
+        instagram_accounts = instagram_manager.get_instagram_business_accounts()
+        
+        # Calculate totals
+        total_followers = sum(page.get('followers_count', 0) for page in facebook_pages)
+        total_followers += sum(account.get('followers_count', 0) for account in instagram_accounts)
+        
+        return SocialMediaOverview(
+            facebook_pages=[FacebookPage(**page) for page in facebook_pages],
+            instagram_accounts=[InstagramAccount(**account) for account in instagram_accounts],
+            meta_ad_accounts=[MetaAdAccount(**account) for account in meta_accounts],
+            total_followers=total_followers,
+            total_reach=0,  # Would need to aggregate from insights
+            total_engagement=0,  # Would need to aggregate from insights
+            generated_at=datetime.now().isoformat()
+        )
+    except Exception as e:
+        logger.error(f"Error fetching social media overview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/social/insights-summary", response_model=SocialMediaInsightsSummary)
+@save_response("social_insights_summary")
+async def get_social_insights_summary(
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_facebook_user)
+):
+    """Get cross-platform social media insights summary"""
+    try:
+        from facebook.facebook_manager import FacebookManager
+        from instagram.instagram_manager import InstagramManager
+        
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        
+        platforms = []
+        total_reach = 0
+        total_engagement = 0
+        
+        # Get Facebook data
+        try:
+            facebook_pages = facebook_manager.get_user_pages()
+            for page in facebook_pages:
+                insights = facebook_manager.get_page_insights(page['id'], period)
+                platform_data = CrossPlatformEngagement(
+                    platform=f"Facebook - {page['name']}",
+                    followers=page.get('followers_count', 0),
+                    engagement_rate=insights.get('engagement_rate', 0),
+                    total_engagement=insights.get('post_engagements', 0),
+                    reach=insights.get('total_reach', 0),
+                    impressions=insights.get('total_impressions', 0)
+                )
+                platforms.append(platform_data)
+                total_reach += insights.get('total_reach', 0)
+                total_engagement += insights.get('post_engagements', 0)
+        except Exception as e:
+            logger.warning(f"Could not fetch Facebook data: {e}")
+        
+        # Get Instagram data
+        try:
+            instagram_accounts = instagram_manager.get_instagram_business_accounts()
+            for account in instagram_accounts:
+                insights = instagram_manager.get_account_insights(account['id'], period)
+                summary = instagram_manager.get_account_performance_summary(account['id'], period)
+                
+                platform_data = CrossPlatformEngagement(
+                    platform=f"Instagram - {account['username']}",
+                    followers=account.get('followers_count', 0),
+                    engagement_rate=summary.get('overall_engagement_rate', 0),
+                    total_engagement=summary.get('total_media_engagement', 0),
+                    reach=insights.get('reach', 0),
+                    impressions=insights.get('impressions', 0)
+                )
+                platforms.append(platform_data)
+                total_reach += insights.get('reach', 0)
+                total_engagement += summary.get('total_media_engagement', 0)
+        except Exception as e:
+            logger.warning(f"Could not fetch Instagram data: {e}")
+        
+        # Calculate overall metrics
+        overall_engagement_rate = 0
+        top_platform = ""
+        
+        if platforms:
+            # Find top performing platform by engagement rate
+            top_platform_data = max(platforms, key=lambda x: x.engagement_rate)
+            top_platform = top_platform_data.platform
+            
+            # Calculate weighted average engagement rate
+            total_followers = sum(p.followers for p in platforms)
+            if total_followers > 0:
+                weighted_engagement = sum(p.engagement_rate * p.followers for p in platforms)
+                overall_engagement_rate = weighted_engagement / total_followers
+        
+        return SocialMediaInsightsSummary(
+            period=period,
+            platforms=platforms,
+            top_performing_platform=top_platform,
+            overall_engagement_rate=round(overall_engagement_rate, 2),
+            total_social_reach=total_reach,
+            total_social_engagement=total_engagement,
+            generated_at=datetime.now().isoformat()
+        )
+    except Exception as e:
+        logger.error(f"Error fetching social insights summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
+@app.get("/api/instagram/test-connection")
+async def test_instagram_connection(current_user: dict = Depends(get_facebook_user)):
+    """Test Instagram API connection and permissions"""
+    try:
+        from instagram.instagram_manager import InstagramManager
+        instagram_manager = InstagramManager(current_user["email"], auth_manager)
+        
+        # Test basic API call
+        accounts = instagram_manager.get_instagram_business_accounts()
+        
+        return {
+            "status": "success",
+            "message": "Instagram API connection successful",
+            "accounts_found": len(accounts),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Instagram API connection test failed: {e}")
+        return {
+            "status": "error",
+            "message": str(e),
+            "user_email": current_user["email"],
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 # Google Ads Routes
@@ -954,10 +1710,19 @@ async def generic_exception_handler(request: Request, exc: Exception):
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(
     chat_request: ChatRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user_enhanced)  # Updated to support both auth types
 ):
-    """Send a message to the chatbot"""
+    """Enhanced chat message endpoint supporting Meta module"""
     try:
+        # Validate auth provider for module type
+        auth_provider = current_user.get("auth_provider", "google")
+        
+        if chat_request.module_type == ModuleType.META and auth_provider != "facebook":
+            raise HTTPException(status_code=403, detail="Facebook authentication required for Meta module")
+        
+        if chat_request.module_type in [ModuleType.GOOGLE_ADS, ModuleType.GOOGLE_ANALYTICS] and auth_provider != "google":
+            raise HTTPException(status_code=403, detail="Google authentication required for this module")
+        
         response = await chat_manager.process_chat_message(
             chat_request=chat_request,
             user_email=current_user["email"]
