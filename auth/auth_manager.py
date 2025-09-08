@@ -219,18 +219,22 @@ class AuthManager:
             state = secrets.token_urlsafe(32)
             self.facebook_states[state] = datetime.now().isoformat()
             
-            # Build Facebook OAuth URL
+            # ADD YOUR CONFIG_ID HERE (get this from your Business Configuration)
+            config_id = os.getenv("FACEBOOK_CONFIG_ID", "YOUR_CONFIG_ID_FROM_BUSINESS_CONFIGURATION")
+            
+            # Build Facebook OAuth URL with config_id
             scopes = ",".join(self.FACEBOOK_SCOPES)
             auth_url = (
                 f"https://www.facebook.com/v18.0/dialog/oauth?"
                 f"client_id={self.FACEBOOK_APP_ID}&"
                 f"redirect_uri={self.FACEBOOK_REDIRECT_URI}&"
+                f"config_id={config_id}&"  # THIS IS CRUCIAL
                 f"scope={scopes}&"
                 f"state={state}&"
                 f"response_type=code"
             )
             
-            logger.info(f"Generated Facebook OAuth URL with state: {state}")
+            logger.info(f"Generated Facebook OAuth URL with config_id: {config_id}")
             return {"auth_url": auth_url, "state": state}
             
         except Exception as e:
