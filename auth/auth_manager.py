@@ -61,6 +61,9 @@ class AuthManager:
         
         self.FACEBOOK_SCOPES = [
             'email',
+            'ads_read',
+            'ads_management',
+            'business_management',
             'public_profile',
             'pages_show_list',           # Required to see pages
             'pages_read_engagement',     # Required to read page data
