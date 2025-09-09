@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta Insights - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 16px;
+            padding: 50px 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .logo {
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            color: #1877f2;
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .logo p {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .welcome-text {
+            margin-bottom: 30px;
+        }
+
+        .welcome-text h2 {
+            color: #333;
+            font-size: 1.6rem;
+            margin-bottom: 10px;
+        }
+
+        .welcome-text p {
+            color: #666;
+            line-height: 1.5;
+        }
+
+        .login-btn {
+            background: #1877f2;
+            color: white;
+            border: none;
+            padding: 16px 30px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .login-btn:hover {
+            background: #166fe5;
+            transform: translateY(-2px);
+        }
+
+        .features {
+            margin-top: 30px;
+            text-align: left;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: #f8f9ff;
+            border-radius: 6px;
+        }
+
+        .feature-icon {
+            font-size: 1.2rem;
+        }
+
+        .feature-text {
+            color: #555;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>📊 Meta Insights</h1>
+            <p>Marketing Dashboard</p>
+        </div>
+
+        <div class="welcome-text">
+            <h2>Sign In</h2>
+            <p>Connect your Facebook account to view your marketing insights</p>
+        </div>
+
+        <a href="dashboard.html" class="login-btn">
+            Sign in with Facebook
+        </a>
+
+        <div class="features">
+            <div class="feature-item">
+                <div class="feature-icon">🎯</div>
+                <div class="feature-text">View campaign performance</div>
+            </div>
+            
+            <div class="feature-item">
+                <div class="feature-icon">📱</div>
+                <div class="feature-text">Monitor page insights</div>
+            </div>
+            
+            <div class="feature-item">
+                <div class="feature-icon">📊</div>
+                <div class="feature-text">Track audience metrics</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

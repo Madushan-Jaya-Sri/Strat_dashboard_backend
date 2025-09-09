@@ -6,7 +6,7 @@ Combines Google Ads and Google Analytics data in a single FastAPI application
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 import requests
@@ -1844,6 +1844,26 @@ async def debug_chat_data(
         logger.error(f"Error in chat debug: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Add these two route functions anywhere in your main.py file
+
+@app.get("/privacy")
+async def serve_privacy_policy():
+    """Serve the privacy policy page"""
+    file_path = os.path.join(os.path.dirname(__file__), "privacy.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Privacy policy page not found")
+
+@app.get("/terms")
+async def serve_terms_of_service():
+    """Serve the terms of service page"""
+    file_path = os.path.join(os.path.dirname(__file__), "terms.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Terms of service page not found")
+    
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")

@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Content Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f5f7ff;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
+            color: white;
+            padding: 20px;
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.9;
+        }
+
+        .breadcrumb a {
+            color: white;
+            text-decoration: none;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1877f2;
+            font-weight: bold;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .page-header {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .page-title {
+            font-size: 1.8rem;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .page-subtitle {
+            color: #666;
+        }
+
+        .permission-banner {
+            background: linear-gradient(135deg, #e8f5e8, #f0f8f0);
+            border: 1px solid #4caf50;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            color: #2e7d32;
+        }
+
+        .permission-banner h3 {
+            margin-bottom: 10px;
+            color: #1b5e20;
+        }
+
+        .permissions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .permission-item {
+            background: rgba(76, 175, 80, 0.1);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .user-profile-section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .profile-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .profile-card {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #1877f2;
+        }
+
+        .profile-card h4 {
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .profile-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .profile-item:last-child {
+            border-bottom: none;
+        }
+
+        .profile-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .profile-value {
+            color: #333;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .content-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            border-left: 4px solid #1877f2;
+        }
+
+        .content-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .content-stat {
+            text-align: center;
+            padding: 12px;
+            background: #f8f9ff;
+            border-radius: 6px;
+        }
+
+        .content-stat-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #1877f2;
+            margin-bottom: 3px;
+        }
+
+        .content-stat-label {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .friends-section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .friends-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .friend-card {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .friend-avatar {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #1877f2, #42a5f5);
+            border-radius: 50%;
+            margin: 0 auto 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .friend-name {
+            font-size: 0.85rem;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .likes-section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .likes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .like-item {
+            background: #f8f9ff;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #e0e0e0;
+            font-size: 0.9rem;
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .profile-grid, .content-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .friends-grid {
+                grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <h1>📊 Meta Insights</h1>
+            </div>
+            <div class="breadcrumb">
+                <a href="dashboard.html">Dashboard</a>
+                <span>></span>
+                <span>User Content Analysis</span>
+            </div>
+            <div class="user-info">
+                <span>John Doe</span>
+                <div class="user-avatar">JD</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title">📸 User Content Analysis</h1>
+            <p class="page-subtitle">Analyze user profile data, posts, photos, videos and social connections</p>
+        </div>
+
+        <div class="permission-banner">
+            <h3>✅ Facebook Permissions Successfully Granted</h3>
+            <p>The following user data permissions are being utilized in this dashboard:</p>
+            <div class="permissions-grid">
+                <div class="permission-item">👤 user_age_range</div>
+                <div class="permission-item">🎂 user_birthday</div>
+                <div class="permission-item">👥 user_friends</div>
+                <div class="permission-item">⚥ user_gender</div>
+                <div class="permission-item">🏠 user_hometown</div>
+                <div class="permission-item">❤️ user_likes</div>
+                <div class="permission-item">🔗 user_link</div>
+                <div class="permission-item">📍 user_location</div>
+                <div class="permission-item">📷 user_photos</div>
+                <div class="permission-item">📝 user_posts</div>
+                <div class="permission-item">🎬 user_videos</div>
+            </div>
+        </div>
+
+        <div class="user-profile-section">
+            <h2 class="section-title">👤 User Profile Data</h2>
+            <div class="profile-grid">
+                <div class="profile-card">
+                    <h4>📊 Demographics</h4>
+                    <div class="profile-item">
+                        <span class="profile-label">Age Range:</span>
+                        <span class="profile-value">25-34</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">Gender:</span>
+                        <span class="profile-value">Male</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">Birthday:</span>
+                        <span class="profile-value">March 15, 1992</span>
+                    </div>
+                </div>
+
+                <div class="profile-card">
+                    <h4>📍 Location Data</h4>
+                    <div class="profile-item">
+                        <span class="profile-label">Current Location:</span>
+                        <span class="profile-value">San Francisco, CA</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">Hometown:</span>
+                        <span class="profile-value">New York, NY</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">Country:</span>
+                        <span class="profile-value">United States</span>
+                    </div>
+                </div>
+
+                <div class="profile-card">
+                    <h4>🔗 Links & Connections</h4>
+                    <div class="profile-item">
+                        <span class="profile-label">Website:</span>
+                        <span class="profile-value">johndoe.com</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">LinkedIn:</span>
+                        <span class="profile-value">linkedin.com/in/johndoe</span>
+                    </div>
+                    <div class="profile-item">
+                        <span class="profile-label">Total Friends:</span>
+                        <span class="profile-value">487</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="user-profile-section">
+            <h2 class="section-title">📱 Content Analytics</h2>
+            <div class="content-grid">
+                <div class="content-card">
+                    <h4 class="section-title">📝 Posts Analysis</h4>
+                    <p style="color: #666; margin-bottom: 15px;">User posting behavior and engagement patterns</p>
+                    <div class="content-stats">
+                        <div class="content-stat">
+                            <div class="content-stat-value">23</div>
+                            <div class="content-stat-label">Total Posts</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">1.2K</div>
+                            <div class="content-stat-label">Total Likes</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">156</div>
+                            <div class="content-stat-label">Comments</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">89</div>
+                            <div class="content-stat-label">Shares</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <h4 class="section-title">📷 Photos Analysis</h4>
+                    <p style="color: #666; margin-bottom: 15px;">Photo sharing and visual content insights</p>
+                    <div class="content-stats">
+                        <div class="content-stat">
+                            <div class="content-stat-value">145</div>
+                            <div class="content-stat-label">Total Photos</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">3.4K</div>
+                            <div class="content-stat-label">Photo Likes</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">234</div>
+                            <div class="content-stat-label">Tagged Photos</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">67</div>
+                            <div class="content-stat-label">Albums</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <h4 class="section-title">🎬 Videos Analysis</h4>
+                    <p style="color: #666; margin-bottom: 15px;">Video content performance and engagement</p>
+                    <div class="content-stats">
+                        <div class="content-stat">
+                            <div class="content-stat-value">12</div>
+                            <div class="content-stat-label">Total Videos</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">892</div>
+                            <div class="content-stat-label">Video Views</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">45</div>
+                            <div class="content-stat-label">Video Likes</div>
+                        </div>
+                        <div class="content-stat">
+                            <div class="content-stat-value">23</div>
+                            <div class="content-stat-label">Video Shares</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="friends-section">
+            <h2 class="section-title">👥 Friends Network (Sample)</h2>
+            <p style="color: #666; margin-bottom: 15px;">Top connections from user's friends list (487 total friends)</p>
+            <div class="friends-grid">
+                <div class="friend-card">
+                    <div class="friend-avatar">SA</div>
+                    <div class="friend-name">Sarah Adams</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">MJ</div>
+                    <div class="friend-name">Mike Johnson</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">EB</div>
+                    <div class="friend-name">Emily Brown</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">DW</div>
+                    <div class="friend-name">David Wilson</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">LM</div>
+                    <div class="friend-name">Lisa Miller</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">RT</div>
+                    <div class="friend-name">Robert Taylor</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">JD</div>
+                    <div class="friend-name">Jennifer Davis</div>
+                </div>
+                <div class="friend-card">
+                    <div class="friend-avatar">CG</div>
+                    <div class="friend-name">Chris Garcia</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="likes-section">
+            <h2 class="section-title">❤️ User Likes & Interests</h2>
+            <p style="color: #666; margin-bottom: 15px;">Pages and content the user has liked on Facebook</p>
+            <div class="likes-grid">
+                <div class="like-item">🍕 Pizza Lovers</div>
+                <div class="like-item">💻 TechCrunch</div>
+                <div class="like-item">🎵 Spotify</div>
+                <div class="like-item">📱 Apple</div>
+                <div class="like-item">🏀 NBA</div>
+                <div class="like-item">🎬 Netflix</div>
+                <div class="like-item">☕ Starbucks</div>
+                <div class="like-item">🚗 Tesla</div>
+                <div class="like-item">📸 National Geographic</div>
+                <div class="like-item">🎮 PlayStation</div>
+                <div class="like-item">✈️ Airbnb</div>
+                <div class="like-item">🏃 Nike</div>
+                <div class="like-item">📚 Harvard Business Review</div>
+                <div class="like-item">🌟 TED Talks</div>
+                <div class="like-item">🍔 McDonald's</div>
+                <div class="like-item">📺 YouTube</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

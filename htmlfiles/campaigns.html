@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meta Campaign Insights</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f5f7ff;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
+            color: white;
+            padding: 20px;
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0.9;
+        }
+
+        .breadcrumb a {
+            color: white;
+            text-decoration: none;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1877f2;
+            font-weight: bold;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+
+        .page-header {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .page-title {
+            font-size: 1.8rem;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .page-subtitle {
+            color: #666;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+            text-align: center;
+            border-left: 4px solid #1877f2;
+        }
+
+        .stat-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #1877f2;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .campaigns-table {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #f8f9ff;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e0e0e0;
+            font-size: 0.9rem;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .campaign-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #e8f5e8;
+            color: #4caf50;
+        }
+
+        .status-paused {
+            background: #fff3e0;
+            color: #ff9800;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .stats-row {
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            }
+            
+            table {
+                font-size: 0.85rem;
+            }
+            
+            th, td {
+                padding: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <h1>📊 Meta Insights</h1>
+            </div>
+            <div class="breadcrumb">
+                <a href="dashboard.html">Dashboard</a>
+                <span>></span>
+                <span>Campaign Insights</span>
+            </div>
+            <div class="user-info">
+                <span>John Doe</span>
+                <div class="user-avatar">JD</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="page-header">
+            <h1 class="page-title">Meta Campaign Insights</h1>
+            <p class="page-subtitle">View your ad campaign performance and metrics</p>
+        </div>
+
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-value">8</div>
+                <div class="stat-label">Active Campaigns</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">$24,567</div>
+                <div class="stat-label">Total Spend</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">4.2x</div>
+                <div class="stat-label">Average ROAS</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">89.2K</div>
+                <div class="stat-label">Total Clicks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">3,456</div>
+                <div class="stat-label">Conversions</div>
+            </div>
+        </div>
+
+        <div class="campaigns-table">
+            <h3 class="section-title">Campaign Performance</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Campaign Name</th>
+                        <th>Status</th>
+                        <th>Budget</th>
+                        <th>Spend</th>
+                        <th>Impressions</th>
+                        <th>Clicks</th>
+                        <th>ROAS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="campaign-name">Summer Sale 2024</td>
+                        <td><span class="status status-active">Active</span></td>
+                        <td class="metric-value">$500/day</td>
+                        <td class="metric-value">$12,340</td>
+                        <td class="metric-value">450,230</td>
+                        <td class="metric-value">8,901</td>
+                        <td class="metric-value">4.8x</td>
+                    </tr>
+                    <tr>
+                        <td class="campaign-name">Brand Awareness Q1</td>
+                        <td><span class="status status-active">Active</span></td>
+                        <td class="metric-value">$300/day</td>
+                        <td class="metric-value">$8,120</td>
+                        <td class="metric-value">320,150</td>
+                        <td class="metric-value">5,234</td>
+                        <td class="metric-value">3.2x</td>
+                    </tr>
+                    <tr>
+                        <td class="campaign-name">Holiday Collection</td>
+                        <td><span class="status status-paused">Paused</span></td>
+                        <td class="metric-value">$200/day</td>
+                        <td class="metric-value">$4,567</td>
+                        <td class="metric-value">180,450</td>
+                        <td class="metric-value">2,890</td>
+                        <td class="metric-value">2.9x</td>
+                    </tr>
+                    <tr>
+                        <td class="campaign-name">Retargeting Campaign</td>
+                        <td><span class="status status-active">Active</span></td>
+                        <td class="metric-value">$150/day</td>
+                        <td class="metric-value">$3,890</td>
+                        <td class="metric-value">95,670</td>
+                        <td class="metric-value">4,123</td>
+                        <td class="metric-value">5.4x</td>
+                    </tr>
+                    <tr>
+                        <td class="campaign-name">New Product Launch</td>
+                        <td><span class="status status-active">Active</span></td>
+                        <td class="metric-value">$800/day</td>
+                        <td class="metric-value">$19,450</td>
+                        <td class="metric-value">780,340</td>
+                        <td class="metric-value">12,567</td>
+                        <td class="metric-value">4.1x</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
