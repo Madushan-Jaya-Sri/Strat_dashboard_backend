@@ -61,11 +61,11 @@ class AuthManager:
         
         self.FACEBOOK_SCOPES = [
             'email',
-            # 'ads_read',
-            # 'ads_management',
+            'ads_read',
+            'ads_management',
             # 'business_management',
             'public_profile',
-            # 'pages_show_list',           # Required to see pages
+            'pages_show_list',           # Required to see pages
             # 'pages_read_engagement',     # Required to read page data
             # 'instagram_basic'            # For Instagram Business accounts
         ]
@@ -254,11 +254,11 @@ class AuthManager:
             }
             
             # Add config_id if available
-            # if self.FACEBOOK_CONFIG_ID:
-            #     params["config_id"] = self.FACEBOOK_CONFIG_ID
-            #     logger.info(f"   - Including config_id: {self.FACEBOOK_CONFIG_ID}")
-            # else:
-            #     logger.warning("⚠️  No config_id provided - this may limit external user access")
+            if self.FACEBOOK_CONFIG_ID:
+                params["config_id"] = self.FACEBOOK_CONFIG_ID
+                logger.info(f"   - Including config_id: {self.FACEBOOK_CONFIG_ID}")
+            else:
+                logger.warning("⚠️  No config_id provided - this may limit external user access")
             
             # Construct final URL
             auth_url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
