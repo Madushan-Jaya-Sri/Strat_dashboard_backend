@@ -3,381 +3,586 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pages Insights</title>
+    <title>Internal Dashboard - Facebook Pages Management</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #f5f7ff;
-            color: #333;
-        }
-
-        .header {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1877f2 0%, #42a5f5 100%);
-            color: white;
+            min-height: 100vh;
             padding: 20px;
         }
-
-        .header-content {
-            max-width: 1200px;
+        
+        .container {
+            max-width: 1400px;
             margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .logo h1 {
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-
-        .breadcrumb {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            opacity: 0.9;
-        }
-
-        .breadcrumb a {
-            color: white;
-            text-decoration: none;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .user-avatar {
-            width: 35px;
-            height: 35px;
             background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(45deg, #1877f2, #42a5f5);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+        
+        .login-section {
+            padding: 50px;
+            text-align: center;
+            display: block;
+        }
+        
+        .login-section.hidden {
+            display: none;
+        }
+        
+        .facebook-login-btn {
+            background: #1877f2;
+            color: white;
+            border: none;
+            padding: 18px 35px;
+            border-radius: 10px;
+            font-size: 18px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.3s;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(24, 119, 242, 0.3);
+        }
+        
+        .facebook-login-btn:hover {
+            background: #166fe5;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(24, 119, 242, 0.4);
+        }
+        
+        .dashboard {
+            display: none;
+            padding: 30px;
+        }
+        
+        .dashboard.active {
+            display: block;
+        }
+        
+        .user-info {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .user-avatar {
+            width: 60px;
+            height: 60px;
             border-radius: 50%;
+            background: #1877f2;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #1877f2;
+            color: white;
             font-weight: bold;
+            font-size: 20px;
         }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 30px 20px;
-        }
-
-        .page-header {
-            background: white;
-            border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-        }
-
-        .page-title {
-            font-size: 1.8rem;
-            color: #333;
-            margin-bottom: 8px;
-        }
-
-        .page-subtitle {
-            color: #666;
-        }
-
-        .overview-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: white;
-            border-radius: 12px;
+        
+        .permission-notice {
+            background: #e8f5e8;
+            border: 2px solid #28a745;
+            border-radius: 10px;
             padding: 20px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-            text-align: center;
-            border-left: 4px solid #1877f2;
+            margin: 25px 0;
+            color: #155724;
         }
-
-        .stat-icon {
-            font-size: 1.8rem;
+        
+        .permission-notice h3 {
             margin-bottom: 10px;
+            color: #0d4017;
         }
-
-        .stat-value {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #1877f2;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            color: #666;
-            font-size: 0.9rem;
-        }
-
+        
         .pages-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 25px;
+            margin: 30px 0;
         }
-
+        
         .page-card {
             background: white;
+            border: 2px solid #e9ecef;
             border-radius: 12px;
             padding: 25px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-            border-left: 4px solid #1877f2;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
         }
-
-        .page-header-info {
+        
+        .page-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            border-color: #1877f2;
+        }
+        
+        .page-header {
             display: flex;
             align-items: center;
             gap: 15px;
             margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #f0f0f0;
         }
-
+        
         .page-avatar {
             width: 50px;
             height: 50px;
-            background: linear-gradient(135deg, #1877f2, #42a5f5);
-            border-radius: 10px;
+            border-radius: 8px;
+            background: linear-gradient(45deg, #1877f2, #42a5f5);
             display: flex;
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 1.2rem;
             font-weight: bold;
+            font-size: 18px;
         }
-
-        .page-avatar.instagram {
-            background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);
-        }
-
+        
         .page-info h3 {
-            font-size: 1.1rem;
-            color: #333;
+            color: #1d2129;
             margin-bottom: 5px;
+            font-size: 1.2rem;
         }
-
-        .page-type {
-            color: #666;
-            font-size: 0.85rem;
+        
+        .page-category {
+            color: #65676b;
+            font-size: 0.9rem;
         }
-
+        
         .page-stats {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(2, 1fr);
             gap: 15px;
+            margin: 20px 0;
         }
-
-        .page-stat {
+        
+        .stat-item {
             text-align: center;
-            padding: 12px;
-            background: #f8f9ff;
+            padding: 15px;
+            background: #f8f9fa;
             border-radius: 8px;
         }
-
-        .page-stat-value {
-            font-size: 1.2rem;
-            font-weight: 700;
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: bold;
             color: #1877f2;
-            margin-bottom: 3px;
+            margin-bottom: 5px;
         }
-
-        .page-stat-label {
+        
+        .stat-label {
             font-size: 0.8rem;
-            color: #666;
+            color: #65676b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
-
-        .section-title {
-            font-size: 1.2rem;
-            color: #333;
-            margin-bottom: 20px;
+        
+        .page-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .action-btn {
+            flex: 1;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
             font-weight: 600;
+            transition: all 0.3s;
         }
-
-        @media (max-width: 768px) {
-            .pages-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .overview-stats {
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            }
+        
+        .view-insights {
+            background: #1877f2;
+            color: white;
+        }
+        
+        .view-insights:hover {
+            background: #166fe5;
+        }
+        
+        .manage-page {
+            background: #42b883;
+            color: white;
+        }
+        
+        .manage-page:hover {
+            background: #369870;
+        }
+        
+        .role-badge {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .role-admin {
+            background: #ffeaa7;
+            color: #2d3436;
+        }
+        
+        .role-editor {
+            background: #a7f3d0;
+            color: #065f46;
+        }
+        
+        .role-analyst {
+            background: #ddd6fe;
+            color: #4c1d95;
+        }
+        
+        .api-info {
+            background: #e3f2fd;
+            border: 2px solid #2196f3;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 25px 0;
+            color: #0d47a1;
+        }
+        
+        .api-info h3 {
+            margin-bottom: 10px;
+            color: #1565c0;
+        }
+        
+        .api-info code {
+            background: #bbdefb;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1877f2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .no-pages {
+            text-align: center;
+            padding: 60px 20px;
+            color: #65676b;
+        }
+        
+        .no-pages h3 {
+            margin-bottom: 15px;
+            color: #1d2129;
+        }
+        
+        .security-note {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 25px 0;
+            color: #856404;
+        }
+        
+        .security-note h3 {
+            margin-bottom: 10px;
+            color: #664d03;
         }
     </style>
 </head>
 <body>
-    <header class="header">
-        <div class="header-content">
-            <div class="logo">
-                <h1>📊 Meta Insights</h1>
-            </div>
-            <div class="breadcrumb">
-                <a href="dashboard.html">Dashboard</a>
-                <span>></span>
-                <span>Pages Insights</span>
-            </div>
-            <div class="user-info">
-                <span>John Doe</span>
-                <div class="user-avatar">JD</div>
-            </div>
-        </div>
-    </header>
-
     <div class="container">
-        <div class="page-header">
-            <h1 class="page-title">Pages Insights</h1>
-            <p class="page-subtitle">Monitor your Facebook Pages and Instagram performance</p>
+        <div class="header">
+            <h1>Internal Dashboard - Facebook Pages Management</h1>
+            <p>Securely access and manage your Facebook Pages with authorized permissions</p>
         </div>
-
-        <div class="overview-stats">
-            <div class="stat-card">
-                <div class="stat-icon">👥</div>
-                <div class="stat-value">108.5K</div>
-                <div class="stat-label">Total Followers</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">📈</div>
-                <div class="stat-value">234.7K</div>
-                <div class="stat-label">Total Reach</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">❤️</div>
-                <div class="stat-value">18.9K</div>
-                <div class="stat-label">Total Engagement</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">📝</div>
-                <div class="stat-value">47</div>
-                <div class="stat-label">Posts This Month</div>
+        
+        <!-- Login Section -->
+        <div class="login-section" id="loginSection">
+            <h2 style="margin-bottom: 20px; color: #1d2129;">Connect Your Facebook Account</h2>
+            <p style="margin-bottom: 30px; color: #65676b; max-width: 600px; margin-left: auto; margin-right: auto;">
+                Log in with Facebook to access the Pages you manage. We'll only show Pages you have permission to view and manage.
+            </p>
+            <button class="facebook-login-btn" onclick="simulateLogin()">
+                <span style="font-size: 1.2em;">📘</span>
+                Continue with Facebook
+            </button>
+            
+            <div class="api-info">
+                <h3>Permission Request: pages_show_list</h3>
+                <p>This permission allows our app to retrieve the list of Facebook Pages that you already have access to manage. We use the <code>/me/accounts</code> endpoint to fetch only the Pages you're authorized for, ensuring secure and appropriate access control.</p>
             </div>
         </div>
-
-        <h2 class="section-title">Your Pages</h2>
-        <div class="pages-grid">
-            <div class="page-card">
-                <div class="page-header-info">
-                    <div class="page-avatar">TC</div>
-                    <div class="page-info">
-                        <h3>TechCorp Official</h3>
-                        <div class="page-type">Facebook Business Page</div>
+        
+        <!-- Dashboard Section -->
+        <div class="dashboard" id="dashboard">
+            <div class="user-info">
+                <div class="user-avatar">SM</div>
+                <div>
+                    <h3>Sarah Miller</h3>
+                    <p style="color: #65676b; margin: 5px 0;">sarah.miller@company.com</p>
+                    <small style="color: #28a745; font-weight: 600;">✓ Connected to Facebook Pages API</small>
+                </div>
+            </div>
+            
+            <div class="permission-notice">
+                <h3>✓ pages_show_list Permission Active</h3>
+                <p>Successfully retrieved your managed Facebook Pages. Only Pages you have administrative or content management access to are displayed below. This ensures proper authorization and security compliance.</p>
+            </div>
+            
+            <!-- Loading State -->
+            <div class="loading" id="loadingState">
+                <div class="loading-spinner"></div>
+                <p>Fetching your Facebook Pages using pages_show_list permission...</p>
+                <small style="color: #65676b;">Calling Facebook Graph API: /me/accounts</small>
+            </div>
+            
+            <!-- Pages Grid -->
+            <div class="pages-grid" id="pagesGrid" style="display: none;">
+                <div class="page-card">
+                    <div class="role-badge role-admin">Admin</div>
+                    <div class="page-header">
+                        <div class="page-avatar">TC</div>
+                        <div class="page-info">
+                            <h3>TechCorp Official</h3>
+                            <div class="page-category">Technology Company</div>
+                        </div>
+                    </div>
+                    <div class="page-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">45.2K</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">2.8K</div>
+                            <div class="stat-label">This Week</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">89%</div>
+                            <div class="stat-label">Engagement</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">156</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
+                    </div>
+                    <div class="page-actions">
+                        <button class="action-btn view-insights">View Insights</button>
+                        <button class="action-btn manage-page">Manage</button>
                     </div>
                 </div>
-                <div class="page-stats">
-                    <div class="page-stat">
-                        <div class="page-stat-value">45.2K</div>
-                        <div class="page-stat-label">Page Likes</div>
+                
+                <div class="page-card">
+                    <div class="role-badge role-editor">Editor</div>
+                    <div class="page-header">
+                        <div class="page-avatar">MM</div>
+                        <div class="page-info">
+                            <h3>Marketing Maven</h3>
+                            <div class="page-category">Marketing Agency</div>
+                        </div>
                     </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">28.9K</div>
-                        <div class="page-stat-label">Weekly Reach</div>
+                    <div class="page-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">28.7K</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">1.9K</div>
+                            <div class="stat-label">This Week</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">76%</div>
+                            <div class="stat-label">Engagement</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">203</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
                     </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">1.2K</div>
-                        <div class="page-stat-label">Engagements</div>
+                    <div class="page-actions">
+                        <button class="action-btn view-insights">View Insights</button>
+                        <button class="action-btn manage-page">Manage</button>
                     </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">4.8%</div>
-                        <div class="page-stat-label">Engagement Rate</div>
+                </div>
+                
+                <div class="page-card">
+                    <div class="role-badge role-analyst">Analyst</div>
+                    <div class="page-header">
+                        <div class="page-avatar">LS</div>
+                        <div class="page-info">
+                            <h3>Local Store Chain</h3>
+                            <div class="page-category">Retail Business</div>
+                        </div>
+                    </div>
+                    <div class="page-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">12.1K</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">856</div>
+                            <div class="stat-label">This Week</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">92%</div>
+                            <div class="stat-label">Engagement</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">67</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
+                    </div>
+                    <div class="page-actions">
+                        <button class="action-btn view-insights">View Insights</button>
+                        <button class="action-btn manage-page">Manage</button>
+                    </div>
+                </div>
+                
+                <div class="page-card">
+                    <div class="role-badge role-admin">Admin</div>
+                    <div class="page-header">
+                        <div class="page-avatar">NP</div>
+                        <div class="page-info">
+                            <h3>Non-Profit Initiative</h3>
+                            <div class="page-category">Non-Profit Organization</div>
+                        </div>
+                    </div>
+                    <div class="page-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">8.9K</div>
+                            <div class="stat-label">Followers</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">1.2K</div>
+                            <div class="stat-label">This Week</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">95%</div>
+                            <div class="stat-label">Engagement</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">89</div>
+                            <div class="stat-label">Posts</div>
+                        </div>
+                    </div>
+                    <div class="page-actions">
+                        <button class="action-btn view-insights">View Insights</button>
+                        <button class="action-btn manage-page">Manage</button>
                     </div>
                 </div>
             </div>
-
-            <div class="page-card">
-                <div class="page-header-info">
-                    <div class="page-avatar instagram">IG</div>
-                    <div class="page-info">
-                        <h3>@techcorp</h3>
-                        <div class="page-type">Instagram Business</div>
-                    </div>
-                </div>
-                <div class="page-stats">
-                    <div class="page-stat">
-                        <div class="page-stat-value">32.8K</div>
-                        <div class="page-stat-label">Followers</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">42.4K</div>
-                        <div class="page-stat-label">Weekly Reach</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">2.1K</div>
-                        <div class="page-stat-label">Profile Visits</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">6.2%</div>
-                        <div class="page-stat-label">Engagement Rate</div>
-                    </div>
-                </div>
+            
+            <div class="security-note">
+                <h3>🔒 Security & Authorization</h3>
+                <p>The <strong>pages_show_list</strong> permission ensures that users can only see and access Facebook Pages they already have legitimate access to manage. This maintains proper authorization boundaries and prevents unauthorized access to Pages the user doesn't control. Each Page card shows the user's specific role (Admin, Editor, Analyst) as returned by the Facebook API.</p>
             </div>
-
-            <div class="page-card">
-                <div class="page-header-info">
-                    <div class="page-avatar">TS</div>
-                    <div class="page-info">
-                        <h3>TechCorp Support</h3>
-                        <div class="page-type">Facebook Page</div>
-                    </div>
-                </div>
-                <div class="page-stats">
-                    <div class="page-stat">
-                        <div class="page-stat-value">12.1K</div>
-                        <div class="page-stat-label">Page Likes</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">3.2K</div>
-                        <div class="page-stat-label">Weekly Reach</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">567</div>
-                        <div class="page-stat-label">Messages</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">96%</div>
-                        <div class="page-stat-label">Response Rate</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="page-card">
-                <div class="page-header-info">
-                    <div class="page-avatar instagram">TL</div>
-                    <div class="page-info">
-                        <h3>@techcorp_lifestyle</h3>
-                        <div class="page-type">Instagram Creator</div>
-                    </div>
-                </div>
-                <div class="page-stats">
-                    <div class="page-stat">
-                        <div class="page-stat-value">18.5K</div>
-                        <div class="page-stat-label">Followers</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">27.8K</div>
-                        <div class="page-stat-label">Weekly Reach</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">890</div>
-                        <div class="page-stat-label">Story Views</div>
-                    </div>
-                    <div class="page-stat">
-                        <div class="page-stat-value">7.1%</div>
-                        <div class="page-stat-label">Engagement Rate</div>
-                    </div>
-                </div>
+            
+            <div class="api-info">
+                <h3>📊 How This Works</h3>
+                <p><strong>API Call:</strong> <code>GET /me/accounts?fields=name,category,access_token,perms</code></p>
+                <p><strong>Purpose:</strong> Retrieve only Facebook Pages that the authenticated user has permission to manage, along with their specific role permissions.</p>
+                <p><strong>Data Security:</strong> No manual Page ID input required - only authorized Pages are accessible, ensuring campaign teams can safely access their designated Pages for insights and optimization.</p>
             </div>
         </div>
     </div>
+    
+    <script>
+        function simulateLogin() {
+            const loginBtn = document.querySelector('.facebook-login-btn');
+            loginBtn.innerHTML = '<span style="font-size: 1.2em;">🔄</span> Connecting to Facebook...';
+            loginBtn.disabled = true;
+            
+            setTimeout(() => {
+                // Hide login section
+                document.getElementById('loginSection').classList.add('hidden');
+                // Show dashboard
+                document.getElementById('dashboard').classList.add('active');
+                
+                // Show loading state
+                setTimeout(() => {
+                    document.getElementById('loadingState').style.display = 'none';
+                    document.getElementById('pagesGrid').style.display = 'grid';
+                }, 2500);
+            }, 1500);
+        }
+        
+        // Add click handlers for page actions
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('view-insights')) {
+                const pageName = e.target.closest('.page-card').querySelector('h3').textContent;
+                alert(`Viewing insights for "${pageName}" - This would open detailed analytics and performance metrics for this specific Page.`);
+            }
+            
+            if (e.target.classList.contains('manage-page')) {
+                const pageName = e.target.closest('.page-card').querySelector('h3').textContent;
+                alert(`Managing "${pageName}" - This would open Page management tools based on the user's specific permissions for this Page.`);
+            }
+        });
+        
+        // Simulate real-time data updates
+        setInterval(() => {
+            const stats = document.querySelectorAll('.stat-value');
+            const randomStat = stats[Math.floor(Math.random() * stats.length)];
+            if (randomStat && Math.random() > 0.98) {
+                randomStat.style.animation = 'flash 0.5s ease-in-out';
+                setTimeout(() => {
+                    randomStat.style.animation = '';
+                }, 500);
+            }
+        }, 2000);
+        
+        // Add flash animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes flash {
+                0% { background-color: #e3f2fd; }
+                50% { background-color: #bbdefb; }
+                100% { background-color: transparent; }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
 </body>
 </html>

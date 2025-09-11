@@ -153,26 +153,44 @@ async def login():
     """Initiate Google OAuth login"""
     return await auth_manager.initiate_login()
 
+# @app.get("/auth/callback")
+# async def auth_callback(code: str, state: Optional[str] = None):
+#     result = await auth_manager.handle_callback(code, state)
+    
+#     # Return HTML with JavaScript to display token
+#     html_content = f"""
+#     <!DOCTYPE html>
+#     <html>
+#     <head><title>Authentication Success</title></head>
+#     <body>
+#         <h2>Authentication Successful!</h2>
+#         <p>Copy your JWT token:</p>
+#         <textarea rows="10" cols="80">{result['token']}</textarea>
+#         <script>
+#             console.log('JWT Token:', '{result['token']}');
+#         </script>
+#     </body>
+#     </html>
+#     """
+#     return HTMLResponse(content=html_content)
+
+
 @app.get("/auth/callback")
 async def auth_callback(code: str, state: Optional[str] = None):
-    result = await auth_manager.handle_callback(code, state)
-    
-    # Return HTML with JavaScript to display token
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Authentication Success</title></head>
-    <body>
-        <h2>Authentication Successful!</h2>
-        <p>Copy your JWT token:</p>
-        <textarea rows="10" cols="80">{result['token']}</textarea>
-        <script>
-            console.log('JWT Token:', '{result['token']}');
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    try:
+        result = await auth_manager.handle_callback(code, state)
+        
+        # Get frontend URL based on environment
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")  # Default to dev URL
+        
+        # Redirect to frontend with token as URL parameter
+        return RedirectResponse(url=f"{frontend_url}/?token={result['token']}")
+        
+    except Exception as e:
+        # On error, redirect to frontend with error parameter
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        error_message = str(e).replace(" ", "%20")  # URL encode spaces
+        return RedirectResponse(url=f"{frontend_url}/?error={error_message}")
 
 @app.get("/auth/user")
 async def get_user_info(current_user: dict = Depends(get_current_user)):
