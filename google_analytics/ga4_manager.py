@@ -1365,16 +1365,61 @@ class GA4Manager:
         except Exception as e:
             logger.error(f"Error fetching channel performance for property {property_id}: {e}")
             return []
-    
+        
+    def get_coordinates(self, city: str, country: str) -> tuple:
+        """Get latitude and longitude for a city/country"""
+        try:
+            # Handle cases where city is actually a country name
+            if city in ["(not set)", "unknown"]:
+                return 0.0, 0.0
+            
+            # If city appears to be a country name (no comma in the original value), use just the city as the query
+            if country in ["(not set)", "unknown"] or city == country:
+                query = city  # Use just the location name
+            else:
+                query = f"{city}, {country}"  # Use city, country format
+            
+            # Use free Nominatim API
+            url = "https://nominatim.openstreetmap.org/search"
+            params = {
+                'q': query,
+                'format': 'json',
+                'limit': 1
+            }
+            headers = {
+                'User-Agent': 'Marketing-Dashboard/1.0'
+            }
+            
+            response = requests.get(url, params=params, headers=headers, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if data:
+                    return float(data[0]['lat']), float(data[0]['lon'])
+            
+            return 0.0, 0.0
+            
+        except Exception as e:
+            logger.warning(f"Geocoding failed for {city}, {country}: {e}")
+            return 0.0, 0.0
+        
     def get_audience_insights(self, property_id: str, dimension: str = "city", period: str = "30d") -> List[Dict[str, Any]]:
         """Get audience insights for a specific dimension"""
         try:
             start_date, end_date = self.get_date_range(period)
             
+            # For geographic dimensions, get both city and country
+            if dimension in ["city", "country"]:
+                dimensions = [
+                    Dimension(name="city"),
+                    Dimension(name="country")
+                ]
+            else:
+                dimensions = [Dimension(name=dimension)]
+            
             request = RunReportRequest(
                 property=f"properties/{property_id}",
                 date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
-                dimensions=[Dimension(name=dimension)],
+                dimensions=dimensions,
                 metrics=[
                     Metric(name="totalUsers"),
                     Metric(name="engagementRate"),
@@ -1390,14 +1435,39 @@ class GA4Manager:
             for row in response.rows:
                 users = self.safe_int(row.metric_values[0].value)
                 percentage = (users / total_users * 100) if total_users > 0 else 0
+                engagement_rate = self.safe_float(row.metric_values[1].value) * 100
                 
-                insights.append({
-                    'dimension': dimension,
-                    'value': row.dimension_values[0].value,
-                    'users': users,
-                    'percentage': round(percentage, 2),
-                    'engagementRate': self.safe_float(row.metric_values[1].value) * 100
-                })
+                if dimension in ["city", "country"]:
+                    city = row.dimension_values[0].value
+                    country = row.dimension_values[1].value
+                    
+                    # Create clean display value
+                    if city == "(not set)" or city == country:
+                        display_value = country
+                    else:
+                        display_value = f"{city}, {country}"
+                    
+                    latitude, longitude = self.get_coordinates(city, country)
+                    
+                    insights.append({
+                        'dimension': dimension,
+                        'value': display_value,
+                        'latitude': latitude,
+                        'longitude': longitude,
+                        'users': users,
+                        'percentage': round(percentage, 2),
+                        'engagementRate': round(engagement_rate, 2)
+                    })
+                else:
+                    insights.append({
+                        'dimension': dimension,
+                        'value': row.dimension_values[0].value,
+                        'latitude': 0.0,
+                        'longitude': 0.0,
+                        'users': users,
+                        'percentage': round(percentage, 2),
+                        'engagementRate': round(engagement_rate, 2)
+                    })
             
             return insights
             

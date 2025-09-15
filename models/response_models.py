@@ -601,3 +601,13 @@ class SpecificChannelsTimeSeries(ChannelRevenueTimeSeries):
 class FunnelRequest(BaseModel):
     selected_events: List[str]
     conversions_data: List[Dict[str, Any]]  # Raw conversion data from the initial endpoint
+
+
+class GAAudienceInsight(BaseModel):
+    dimension: str
+    value: str
+    latitude: float
+    longitude: float
+    users: int
+    percentage: float
+    engagementRate: float
