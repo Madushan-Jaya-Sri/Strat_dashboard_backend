@@ -1779,31 +1779,33 @@ async def send_chat_message(
 @app.get("/api/chat/conversation/{session_id}")
 async def get_conversation(
     session_id: str,
-    module_type: ModuleType = Query(...),  # Make this required
+    module_type: ModuleType = Query(...),
     current_user: dict = Depends(get_current_user)
 ):
     """Get specific conversation by session ID"""
     try:
-        conversation = await chat_manager.get_conversation_by_session_id(
-            user_email=current_user["email"],
-            session_id=session_id,
-            module_type=module_type
-        )
+        # Query the chat_sessions collection directly (not user_chats)
+        collection = chat_manager.db.chat_sessions
+        
+        conversation = await collection.find_one({
+            "session_id": session_id,
+            "user_email": current_user["email"],
+            "module_type": module_type.value
+        })
         
         if not conversation:
+            logger.error(f"Conversation not found: session_id={session_id}, user={current_user['email']}, module={module_type.value}")
             raise HTTPException(status_code=404, detail="Conversation not found")
         
-        # Return the conversation in the expected format
-        return {
-            "session_id": conversation["session_id"],
-            "messages": conversation.get("messages", []),
-            "customer_id": conversation.get("customer_id"),
-            "property_id": conversation.get("property_id"),
-            "period": conversation.get("period"),
-            "created_at": conversation["created_at"],
-            "last_activity": conversation["last_activity"]
-        }
+        # Convert ObjectId to string for JSON serialization
+        conversation["_id"] = str(conversation["_id"])
         
+        logger.info(f"Found conversation with {len(conversation.get('messages', []))} messages")
+        
+        return conversation
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting conversation: {e}")
         raise HTTPException(status_code=500, detail=str(e))

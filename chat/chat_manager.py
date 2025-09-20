@@ -935,7 +935,7 @@ class ChatManager:
         module_type: ModuleType
     ) -> Optional[Dict[str, Any]]:
         """Get specific conversation by session ID - simple format"""
-        collection = self.db.chat_sessions
+        collection = self.db.chat_sessions  # Use chat_sessions, not user_chats
         
         session = await collection.find_one({
             "session_id": session_id,
@@ -943,8 +943,15 @@ class ChatManager:
             "module_type": module_type.value
         })
         
+        if session:
+            # Convert ObjectId to string for JSON serialization
+            session["_id"] = str(session["_id"])
+            logger.info(f"Found session with {len(session.get('messages', []))} messages")
+        else:
+            logger.warning(f"No session found for session_id={session_id}, user={user_email}, module={module_type.value}")
+        
         return session
-
+    
     async def delete_chat_sessions(
         self,
         user_email: str,
