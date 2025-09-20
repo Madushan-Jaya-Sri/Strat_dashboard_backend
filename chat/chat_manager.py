@@ -5,10 +5,13 @@ from datetime import datetime, timedelta
 import logging
 import uuid
 import json
+import asyncio
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from fastapi import HTTPException
 
 from models.chat_models import *
 from database.mongo_manager import mongo_manager
+from auth.auth_manager import AuthManager
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,7 @@ class ChatManager:
                 'ga_available_channels'
             ]
         }
+
 
     async def debug_collections_and_data(
         self,
@@ -217,6 +221,11 @@ class ChatManager:
             logger.info(f"USING FALLBACK COLLECTIONS: {fallback_collections}")
             return fallback_collections
 
+    async def send_status_update(self, status: str, details: str = ""):
+        """Send status update (in real implementation, this would use WebSocket)"""
+        logger.info(f"STATUS: {status} - {details}")
+        # For now, just log. In production, you'd send via WebSocket
+        return {"status": status, "details": details, "timestamp": datetime.utcnow()}
 
     def _get_collection_description(self, collection_name: str) -> str:
         """Get human-readable description of what each collection contains"""
@@ -266,7 +275,6 @@ class ChatManager:
             'intent_keyword_insights': 'Search volume trends and keyword opportunity analysis'
         }
         return descriptions.get(collection_name, 'Marketing data collection')
-
 
     async def get_comprehensive_context(
         self,
@@ -388,47 +396,6 @@ class ChatManager:
         
         return context
 
-
-    async def create_or_get_session(
-        self,
-        user_email: str,
-        module_type: ModuleType,
-        session_id: Optional[str] = None,
-        customer_id: Optional[str] = None,
-        property_id: Optional[str] = None
-    ) -> str:
-        """Create new session or get existing one"""
-        collection = self.db.chat_sessions
-        
-        if session_id:
-            # Try to get existing session
-            existing_session = await collection.find_one({"session_id": session_id})
-            if existing_session:
-                # Update last activity
-                await collection.update_one(
-                    {"session_id": session_id},
-                    {"$set": {"last_activity": datetime.utcnow()}}
-                )
-                return session_id
-        
-        # Create new session
-        new_session_id = str(uuid.uuid4())
-        session_doc = {
-            "session_id": new_session_id,
-            "user_email": user_email,
-            "module_type": module_type.value,
-            "customer_id": customer_id,
-            "property_id": property_id,
-            "messages": [],
-            "created_at": datetime.utcnow(),
-            "last_activity": datetime.utcnow(),
-            "is_active": True
-        }
-        
-        await collection.insert_one(session_doc)
-        logger.info(f"Created new chat session: {new_session_id}")
-        return new_session_id
-
     def _should_trigger_intent_endpoint(self, message: str) -> bool:
         """Determine if message requires keyword insights"""
         intent_keywords = [
@@ -454,85 +421,204 @@ class ChatManager:
             "suggested_keywords": keywords[:2] if keywords else ["marketing", "digital"],
             "original_query": message
         }
+
+    async def create_or_get_simple_session(
+        self,
+        user_email: str,
+        module_type: ModuleType,
+        session_id: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        property_id: Optional[str] = None,
+        period: str = "LAST_7_DAYS"
+    ) -> str:
+        """Create new session or get existing one - simple format"""
+        collection = self.db.chat_sessions
+        
+        if session_id:
+            # Try to get existing session and verify it belongs to user
+            existing_session = await collection.find_one({
+                "session_id": session_id,
+                "user_email": user_email  # Add user verification
+            })
+            if existing_session:
+                # Update last activity and return existing session
+                await collection.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"last_activity": datetime.utcnow()}}
+                )
+                logger.info(f"Using existing session: {session_id}")
+                return session_id
+            else:
+                logger.warning(f"Session {session_id} not found for user {user_email}")
+        
+        # Create new session ONLY if no valid existing session
+        new_session_id = str(uuid.uuid4())
+        session_doc = {
+            "session_id": new_session_id,
+            "user_email": user_email,
+            "module_type": module_type.value,
+            "customer_id": customer_id,
+            "property_id": property_id,
+            "created_at": datetime.utcnow(),
+            "last_activity": datetime.utcnow(),
+            "is_active": True,
+            "messages": []  # Start with empty messages array
+        }
+        
+        await collection.insert_one(session_doc)
+        logger.info(f"Created new chat session: {new_session_id}")
+        return new_session_id
     
-    async def add_message_to_session(
+    async def add_message_to_simple_session(
         self,
         session_id: str,
         message: ChatMessage
     ):
-        """Add message to chat session"""
+        """Add message to simple session format"""
         collection = self.db.chat_sessions
+        
+        message_dict = {
+            "role": message.role.value,
+            "content": message.content,
+            "timestamp": message.timestamp
+        }
         
         await collection.update_one(
             {"session_id": session_id},
             {
-                "$push": {"messages": message.dict()},
+                "$push": {"messages": message_dict},
                 "$set": {"last_activity": datetime.utcnow()}
             }
         )
-    # ... (keep all the other methods unchanged: create_or_get_session, add_message_to_session, 
-    # _should_trigger_intent_endpoint, _extract_keywords_from_message, etc.)
 
+    async def _generate_enhanced_ai_response_simple(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        module_type: ModuleType,
+        session_id: str
+    ) -> str:
+        """Generate AI response using simple session format"""
+        
+        # Get conversation history from session
+        collection = self.db.chat_sessions
+        session = await collection.find_one({"session_id": session_id})
+        
+        conversation_history = []
+        if session and session.get("messages"):
+            # Get last 6 messages for context
+            recent_messages = session["messages"][-6:]
+            for msg in recent_messages:
+                conversation_history.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+        
+        # Create enhanced system prompt
+        system_prompt = self._get_enhanced_system_prompt_v2(module_type, context)
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(conversation_history)
+        messages.append({"role": "user", "content": message})
+        
+        logger.info(f"SENDING TO AI - System prompt length: {len(system_prompt)} chars")
+        logger.info(f"CONVERSATION HISTORY: {len(conversation_history)} messages")
+        
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            
+            ai_response = response.choices[0].message.content
+            logger.info(f"AI RESPONSE GENERATED - Length: {len(ai_response)} chars")
+            return ai_response
+            
+        except Exception as e:
+            logger.error(f"ERROR GENERATING AI RESPONSE: {e}")
+            return "I apologize, but I'm having trouble analyzing your data right now. Please try again."
+        
     async def process_chat_message(
         self,
         chat_request: ChatRequest,
         user_email: str
     ) -> ChatResponse:
-        """Enhanced process chat message with debugging"""
+        """Process chat message with simple session-based storage"""
         
         logger.info(f"🚀 Processing chat message for user: {user_email}")
         logger.info(f"💬 Message: '{chat_request.message}'")
         logger.info(f"📱 Module: {chat_request.module_type.value}")
         
-        # FIRST: Run debug check to see what data exists
-        debug_info = await self.debug_collections_and_data(
-            user_email=user_email,
-            customer_id=chat_request.customer_id,
-            property_id=chat_request.property_id
-        )
-        logger.info(f"🔍 Debug info: Found {len(debug_info['collections_found'])} collections with data")
+        # Status 1: Message received
+        await self.send_status_update("Message received", "Processing your question...")
         
-        # Create or get session
-        session_id = await self.create_or_get_session(
-            user_email=user_email,
-            module_type=chat_request.module_type,
-            session_id=chat_request.session_id,
-            customer_id=chat_request.customer_id,
-            property_id=chat_request.property_id
-        )
+        # ✅ CORRECT - Handle session continuation properly
+        if chat_request.session_id:
+            # Continue existing session
+            session_id = chat_request.session_id
+            # Update last activity
+            await self.db.chat_sessions.update_one(
+                {"session_id": session_id},
+                {"$set": {"last_activity": datetime.utcnow()}}
+            )
+        else:
+            # Create new session only if no session_id provided
+            session_id = await self.create_or_get_simple_session(
+                user_email=user_email,
+                module_type=chat_request.module_type,
+                session_id=None,  # Force new session
+                customer_id=chat_request.customer_id,
+                property_id=chat_request.property_id,
+                period=chat_request.period or "LAST_7_DAYS"
+            )
         
         # Add user message to session
-        user_message = ChatMessage(role=MessageRole.USER, content=chat_request.message)
-        await self.add_message_to_session(session_id, user_message)
+        user_message = ChatMessage(
+            role=MessageRole.USER,
+            content=chat_request.message,
+            timestamp=datetime.utcnow()
+        )
+        await self.add_message_to_simple_session(session_id, user_message)
         
-        # Step 1: Select relevant collections using AI agent
+        # Status 2: Agent working
+        await self.send_status_update("Agent analyzing", "AI agent is examining your question...")
+        
+        # Rest of the processing logic...
         selected_collections = await self.select_relevant_collections(
             user_message=chat_request.message,
             module_type=chat_request.module_type
         )
         
-        # Step 2: Get comprehensive context from selected collections
-        context = await self.get_comprehensive_context(
-            user_email=user_email,
-            selected_collections=selected_collections,
-            customer_id=chat_request.customer_id,
-            property_id=chat_request.property_id,
-            limit_per_collection=3
-        )
+        await self.send_status_update("Collections identified", f"Found {len(selected_collections)} relevant data sources")
         
-        # Log context before sending to AI
-        logger.info(f"🧠 Sending context to AI with {len(context['full_data'])} data sources")
+        search_criteria = {
+            "user_email": user_email,
+            "customer_id": chat_request.customer_id,
+            "property_id": chat_request.property_id,
+            "period": chat_request.period or "LAST_7_DAYS",
+            "selected_collections": selected_collections
+        }
         
-        # Check if we need to trigger intent endpoint
-        triggered_endpoint = None
-        endpoint_data = None
+        await self.send_status_update("Searching data", "Looking for existing data in your account...")
+        search_results = await self.search_documents_in_collections(search_criteria)
         
-        if self._should_trigger_intent_endpoint(chat_request.message):
-            triggered_endpoint = "intent_keyword_insights"
-            endpoint_data = self._extract_keywords_from_message(chat_request.message)
+        # Handle missing data and trigger endpoints
+        missing_collections = [col for col, result in search_results.items() if not result.get("found", False)]
+        if missing_collections:
+            await self.send_status_update("Triggering endpoints", f"Fetching fresh data from {len(missing_collections)} APIs...")
+            await self.trigger_missing_endpoints(user_email, missing_collections, search_criteria)
+            await asyncio.sleep(2)
+            search_results = await self.search_documents_in_collections(search_criteria)
         
-        # Step 3: Generate AI response with comprehensive context
-        ai_response = await self._generate_enhanced_ai_response(
+        await self.send_status_update("Analyzing data", "Processing and analyzing your marketing data...")
+        context = await self.build_context_from_search_results(search_results, selected_collections)
+        
+        await self.send_status_update("Finalizing response", "AI is preparing your insights...")
+        
+        # Generate AI response
+        ai_response = await self._generate_enhanced_ai_response_simple(
             message=chat_request.message,
             context=context,
             module_type=chat_request.module_type,
@@ -540,36 +626,67 @@ class ChatManager:
         )
         
         # Add AI response to session
-        ai_message = ChatMessage(role=MessageRole.ASSISTANT, content=ai_response)
-        await self.add_message_to_session(session_id, ai_message)
+        ai_message = ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content=ai_response,
+            timestamp=datetime.utcnow()
+        )
+        await self.add_message_to_simple_session(session_id, ai_message)
         
-        logger.info(f"✅ Chat processing complete. Response length: {len(ai_response)} chars")
+        await self.send_status_update("Complete", "Analysis ready!")
         
         return ChatResponse(
             response=ai_response,
             session_id=session_id,
-            triggered_endpoint=triggered_endpoint,
-            endpoint_data=endpoint_data,
+            triggered_endpoint=None,
+            endpoint_data=None,
             module_type=chat_request.module_type
         )
 
-
+    async def build_context_from_search_results(
+        self,
+        search_results: Dict[str, Any],
+        selected_collections: List[str]
+    ) -> Dict[str, Any]:
+        """Build context from search results"""
+        context = {
+            "selected_collections": selected_collections,
+            "data_summary": {},
+            "full_data": {}
+        }
+        
+        for collection_name, result in search_results.items():
+            if result.get("found", False):
+                context["full_data"][collection_name] = [{
+                    "timestamp": result.get("last_updated"),
+                    "request_params": result.get("request_params", {}),
+                    "response_data": result.get("data", {})
+                }]
+                
+                context["data_summary"][collection_name] = {
+                    "total_documents": 1,
+                    "data_entries": 1,
+                    "latest_update": result.get("last_updated"),
+                    "description": self._get_collection_description(collection_name)
+                }
+        
+        return context
+    
     async def _generate_enhanced_ai_response(
         self,
         message: str,
         context: Dict[str, Any],
         module_type: ModuleType,
-        session_id: str
+        conversation_context: Dict[str, Any]  # Changed from session_id
     ) -> str:
         """Generate enhanced AI response with better data formatting"""
         
-        # Get conversation history
-        collection = self.db.chat_sessions
-        session = await collection.find_one({"session_id": session_id})
-        
+        # Get conversation history from the conversation context
         conversation_history = []
-        if session and session.get("messages"):
-            for msg in session["messages"][-6:]:
+        if conversation_context and conversation_context.get("messages"):
+            # Get last 6 messages for context
+            recent_messages = conversation_context["messages"][-6:]
+            for msg in recent_messages:
                 conversation_history.append({
                     "role": msg["role"],
                     "content": msg["content"]
@@ -601,9 +718,7 @@ class ChatManager:
         except Exception as e:
             logger.error(f"ERROR GENERATING AI RESPONSE: {e}")
             return "I apologize, but I'm having trouble analyzing your data right now. Please try again."
-
-
-
+        
     def _get_enhanced_system_prompt(self, module_type: ModuleType, context: Dict[str, Any]) -> str:
         """Get enhanced system prompt with comprehensive context"""
         
@@ -754,6 +869,11 @@ class ChatManager:
         
         return final_prompt
 
+    async def send_status_update(self, status: str, details: str = ""):
+        """Send status update for logging"""
+        logger.info(f"STATUS: {status} - {details}")
+        # In future, this could send real-time updates via WebSocket
+        return {"status": status, "details": details, "timestamp": datetime.utcnow()}
 
     async def get_chat_history(
         self,
@@ -761,7 +881,7 @@ class ChatManager:
         module_type: ModuleType,
         limit: int = 20
     ) -> ChatHistoryResponse:
-        """Get chat history for a user and module"""
+        """Get chat history from simple session format"""
         collection = self.db.chat_sessions
         
         cursor = collection.find({
@@ -781,7 +901,14 @@ class ChatManager:
         session_objects = []
         for session in sessions:
             # Convert messages
-            messages = [ChatMessage(**msg) for msg in session.get("messages", [])]
+            messages = []
+            for msg in session.get("messages", []):
+                messages.append(ChatMessage(
+                    role=MessageRole(msg["role"]),
+                    content=msg["content"],
+                    timestamp=msg["timestamp"]
+                ))
+            
             session_obj = ChatSession(
                 session_id=session["session_id"],
                 user_email=session["user_email"],
@@ -800,17 +927,33 @@ class ChatManager:
             total_sessions=total_sessions,
             module_type=module_type
         )
-    
-    
+
+    async def get_conversation_by_session_id(
+        self,
+        user_email: str,
+        session_id: str,
+        module_type: ModuleType
+    ) -> Optional[Dict[str, Any]]:
+        """Get specific conversation by session ID - simple format"""
+        collection = self.db.chat_sessions
+        
+        session = await collection.find_one({
+            "session_id": session_id,
+            "user_email": user_email,
+            "module_type": module_type.value
+        })
+        
+        return session
+
     async def delete_chat_sessions(
         self,
         user_email: str,
         session_ids: List[str]
     ) -> Dict[str, Any]:
-        """Delete chat sessions"""
+        """Delete chat sessions - simple format"""
         collection = self.db.chat_sessions
         
-        # Mark sessions as inactive instead of deleting
+        # Mark sessions as inactive
         result = await collection.update_many(
             {
                 "session_id": {"$in": session_ids},
@@ -829,6 +972,275 @@ class ChatManager:
             "requested_sessions": len(session_ids),
             "success": result.modified_count > 0
         }
+
+    def _normalize_period(self, period: str) -> str:
+        """Normalize different period formats to a standard format"""
+        period_mapping = {
+            # Frontend formats
+            'LAST_7_DAYS': '7d',
+            'LAST_30_DAYS': '30d', 
+            'LAST_90_DAYS': '90d',
+            'LAST_365_DAYS': '365d',
+            'LAST_3_MONTHS': '90d',
+            'LAST_1_YEAR': '365d',
+            
+            # Analytics formats
+            '7d': '7d',
+            '30d': '30d',
+            '90d': '90d', 
+            '365d': '365d',
+            '12m': '365d'
+        }
+        return period_mapping.get(period, period)
+
+    async def search_documents_in_collections(
+        self,
+        search_criteria: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Search for documents across selected collections"""
+        results = {}
+        
+        for collection_name in search_criteria['selected_collections']:
+            try:
+                collection = self.db[collection_name]
+                
+                # Build search query
+                query = {"user_email": search_criteria['user_email']}
+                
+                if search_criteria.get('customer_id'):
+                    query["customer_id"] = search_criteria['customer_id']
+                if search_criteria.get('property_id'): 
+                    query["property_id"] = search_criteria['property_id']
+                
+                # Search for documents with normalized period
+                normalized_period = self._normalize_period(search_criteria['period'])
+                
+                # Try multiple period formats in request_params
+                period_queries = [
+                    {**query, "request_params.period": search_criteria['period']},
+                    {**query, "request_params.period": normalized_period},
+                ]
+                
+                document = None
+                for period_query in period_queries:
+                    document = await collection.find_one(period_query)
+                    if document:
+                        break
+                
+                if document:
+                    results[collection_name] = {
+                        "found": True,
+                        "data": document.get("response_data", {}),
+                        "last_updated": document.get("last_updated"),
+                        "request_params": document.get("request_params", {})
+                    }
+                    logger.info(f"Found data in {collection_name}")
+                else:
+                    results[collection_name] = {
+                        "found": False,
+                        "needs_api_call": True
+                    }
+                    logger.info(f"No data found in {collection_name}, will need API call")
+                    
+            except Exception as e:
+                logger.error(f"Error searching in {collection_name}: {e}")
+                results[collection_name] = {
+                    "found": False,
+                    "error": str(e)
+                }
+        
+        return results
+
+    async def trigger_missing_endpoints(
+        self,
+        user_email: str,
+        missing_collections: List[str],
+        search_criteria: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Trigger API endpoints for missing data"""
+        
+        # Collection to endpoint mapping
+        endpoint_mapping = {
+            # Google Ads endpoints
+            'google_ads_key_stats': {
+                'endpoint': 'ads_key_stats',
+                'method': 'GET',
+                'url_template': '/api/ads/key-stats/{customer_id}',
+                'requires': ['customer_id']
+            },
+            'google_ads_campaigns': {
+                'endpoint': 'ads_campaigns', 
+                'method': 'GET',
+                'url_template': '/api/ads/campaigns/{customer_id}',
+                'requires': ['customer_id']
+            },
+            'google_ads_keywords_related_to_campaign': {
+                'endpoint': 'ads_keywords',
+                'method': 'GET', 
+                'url_template': '/api/ads/keywords/{customer_id}',
+                'requires': ['customer_id']
+            },
+            'google_ads_performance': {
+                'endpoint': 'ads_performance',
+                'method': 'GET',
+                'url_template': '/api/ads/performance/{customer_id}',
+                'requires': ['customer_id']
+            },
+            'google_ads_geographic_performance': {
+                'endpoint': 'ads_geographic_performance',
+                'method': 'GET',
+                'url_template': '/api/ads/geographic/{customer_id}', 
+                'requires': ['customer_id']
+            },
+            'google_ads_device_performance': {
+                'endpoint': 'ads_device_performance',
+                'method': 'GET',
+                'url_template': '/api/ads/device-performance/{customer_id}',
+                'requires': ['customer_id']
+            },
+            'google_ads_time_performance': {
+                'endpoint': 'ads_time_performance', 
+                'method': 'GET',
+                'url_template': '/api/ads/time-performance/{customer_id}',
+                'requires': ['customer_id']
+            },
+            
+            # Google Analytics endpoints
+            'google_analytics_metrics': {
+                'endpoint': 'ga_metrics',
+                'method': 'GET',
+                'url_template': '/api/analytics/metrics/{property_id}',
+                'requires': ['property_id']
+            },
+            'google_analytics_conversions': {
+                'endpoint': 'ga_conversions',
+                'method': 'GET', 
+                'url_template': '/api/analytics/conversions/{property_id}',
+                'requires': ['property_id']
+            },
+            'google_analytics_traffic_sources': {
+                'endpoint': 'ga_traffic_sources',
+                'method': 'GET',
+                'url_template': '/api/analytics/traffic-sources/{property_id}',
+                'requires': ['property_id']
+            },
+            'google_analytics_top_pages': {
+                'endpoint': 'ga_top_pages',
+                'method': 'GET',
+                'url_template': '/api/analytics/top-pages/{property_id}',
+                'requires': ['property_id']
+            },
+            'google_analytics_channel_performance': {
+                'endpoint': 'ga_channel_performance',
+                'method': 'GET',
+                'url_template': '/api/analytics/channel-performance/{property_id}',
+                'requires': ['property_id']
+            },
+            'ga_revenue_breakdown_by_channel': {
+                'endpoint': 'ga_revenue_breakdown_by_channel',
+                'method': 'GET',
+                'url_template': '/api/analytics/revenue-breakdown/channel/{property_id}',
+                'requires': ['property_id']
+            },
+            'ga_revenue_breakdown_by_source': {
+                'endpoint': 'ga_revenue_breakdown_by_source', 
+                'method': 'GET',
+                'url_template': '/api/analytics/revenue-breakdown/source/{property_id}',
+                'requires': ['property_id']
+            }
+        }
+        
+        triggered_results = {}
+        
+        for collection_name in missing_collections:
+            if collection_name not in endpoint_mapping:
+                logger.warning(f"No endpoint mapping found for collection: {collection_name}")
+                continue
+                
+            endpoint_config = endpoint_mapping[collection_name]
+            
+            # Check if we have required parameters
+            missing_params = []
+            for required_param in endpoint_config['requires']:
+                if not search_criteria.get(required_param):
+                    missing_params.append(required_param)
+                    
+            if missing_params:
+                logger.warning(f"Missing required parameters {missing_params} for {collection_name}")
+                triggered_results[collection_name] = {
+                    "triggered": False,
+                    "error": f"Missing required parameters: {missing_params}"
+                }
+                continue
+            
+            try:
+                # Import the required managers based on endpoint type
+                if 'ads' in collection_name:
+                    from google_ads.ads_manager import GoogleAdsManager
+                    auth_manager_instance = AuthManager()
+                    ads_manager = GoogleAdsManager(user_email, auth_manager_instance)
+                
+                    
+                    # Call the appropriate method based on endpoint
+                    if endpoint_config['endpoint'] == 'ads_key_stats':
+                        result = ads_manager.get_overall_key_stats(
+                            search_criteria['customer_id'], 
+                            search_criteria['period']
+                        )
+                    elif endpoint_config['endpoint'] == 'ads_campaigns':
+                        result = ads_manager.get_campaigns_with_period(
+                            search_criteria['customer_id'],
+                            search_criteria['period'] 
+                        )
+                    # Add more endpoint calls as needed...
+                    
+                elif 'analytics' in collection_name or 'ga_' in collection_name:
+                    from google_analytics.ga4_manager import GA4Manager
+                    ga4_manager = GA4Manager(user_email)
+                    
+                    # Convert period format for analytics
+                    analytics_period = self._convert_period_for_analytics(search_criteria['period'])
+                    
+                    if endpoint_config['endpoint'] == 'ga_metrics':
+                        result = ga4_manager.get_metrics(
+                            search_criteria['property_id'],
+                            analytics_period
+                        )
+                    elif endpoint_config['endpoint'] == 'ga_conversions':
+                        result = ga4_manager.get_conversions(
+                            search_criteria['property_id'],
+                            analytics_period
+                        )
+                    # Add more endpoint calls as needed...
+                
+                triggered_results[collection_name] = {
+                    "triggered": True,
+                    "data": result
+                }
+                logger.info(f"Successfully triggered endpoint for {collection_name}")
+                
+            except Exception as e:
+                logger.error(f"Error triggering endpoint for {collection_name}: {e}")
+                triggered_results[collection_name] = {
+                    "triggered": False,
+                    "error": str(e)
+                }
+        
+        return triggered_results
+
+    def _convert_period_for_analytics(self, period: str) -> str:
+        """Convert period format for analytics API"""
+        conversion_map = {
+            'LAST_7_DAYS': '7d',
+            'LAST_30_DAYS': '30d', 
+            'LAST_90_DAYS': '90d',
+            'LAST_365_DAYS': '365d',
+            '7d': '7d',
+            '30d': '30d',
+            '90d': '90d', 
+            '365d': '365d'
+        }
+        return conversion_map.get(period, '30d')
 
 
 # Create singleton instance

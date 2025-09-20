@@ -2176,3 +2176,196 @@ class GA4Manager:
                 'error': str(e),
                 'channels_requested': channels
             }
+        
+    def get_revenue_time_series(self, property_id: str, period: str = "30d", breakdown_by: str = "channel") -> Dict[str, Any]:
+        """Get revenue breakdown by specified dimension over time (e.g., channel, source, device, location)"""
+        try:
+            # Map breakdown_by to GA4 dimension name
+            dimension_map = {
+                "channel": "sessionDefaultChannelGrouping",
+                "source": "sessionSource",  # Or "sessionSourceMedium" if preferred
+                "device": "deviceCategory",
+                "location": "country"  # Or "region" or "city" for more granularity
+            }
+            if breakdown_by not in dimension_map:
+                raise ValueError(f"Invalid breakdown_by: {breakdown_by}. Supported: {list(dimension_map.keys())}")
+            
+            group_dimension = dimension_map[breakdown_by]
+            
+            start_date, end_date = self.get_date_range(period)
+            
+            request = RunReportRequest(
+                property=f"properties/{property_id}",
+                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                dimensions=[
+                    Dimension(name="date"),
+                    Dimension(name=group_dimension)
+                ],
+                metrics=[
+                    Metric(name="totalRevenue"),
+                    Metric(name="purchaseRevenue"),
+                    Metric(name="sessions"),
+                    Metric(name="totalUsers"),
+                    Metric(name="conversions")
+                ],
+                order_bys=[
+                    OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date")),
+                    OrderBy(metric=OrderBy.MetricOrderBy(metric_name="totalRevenue"), desc=True)
+                ]
+            )
+            
+            response = self.client.run_report(request)
+            
+            # Get property currency for conversion
+            property_currency = self.get_property_currency_enhanced(property_id)
+            currency_rates = self.get_currency_rates()
+            
+            # Organize data by date and group (e.g., source/device/location)
+            time_series_data = {}
+            group_totals = {}
+            date_totals = {}
+            all_groups = set()
+            
+            for row in response.rows:
+                date = row.dimension_values[0].value
+                group = row.dimension_values[1].value
+                total_revenue = self.safe_float(row.metric_values[0].value)
+                purchase_revenue = self.safe_float(row.metric_values[1].value)
+                sessions = self.safe_int(row.metric_values[2].value)
+                users = self.safe_int(row.metric_values[3].value)
+                conversions = self.safe_float(row.metric_values[4].value)
+                
+                # Convert revenue to USD
+                total_revenue_usd = self.convert_to_usd(total_revenue, property_currency, currency_rates)
+                purchase_revenue_usd = self.convert_to_usd(purchase_revenue, property_currency, currency_rates)
+                
+                # Track all groups
+                all_groups.add(group)
+                
+                # Initialize date if not exists
+                if date not in time_series_data:
+                    time_series_data[date] = {
+                        'date': date,
+                        'groups': {},
+                        'total_revenue': 0,
+                        'total_revenue_usd': 0,
+                        'total_sessions': 0,
+                        'total_users': 0,
+                        'total_conversions': 0
+                    }
+                
+                # Add group data for this date
+                time_series_data[date]['groups'][group] = {
+                    'group': group,
+                    'totalRevenue': total_revenue,
+                    'totalRevenueUSD': total_revenue_usd,
+                    'purchaseRevenue': purchase_revenue,
+                    'purchaseRevenueUSD': purchase_revenue_usd,
+                    'sessions': sessions,
+                    'users': users,
+                    'conversions': int(conversions)
+                }
+                
+                # Update date totals
+                time_series_data[date]['total_revenue'] += total_revenue
+                time_series_data[date]['total_revenue_usd'] += total_revenue_usd
+                time_series_data[date]['total_sessions'] += sessions
+                time_series_data[date]['total_users'] += users
+                time_series_data[date]['total_conversions'] += conversions
+                
+                # Update group totals
+                if group not in group_totals:
+                    group_totals[group] = {
+                        'group': group,
+                        'totalRevenue': 0,
+                        'totalRevenueUSD': 0,
+                        'totalSessions': 0,
+                        'totalUsers': 0,
+                        'totalConversions': 0,
+                        'days_active': 0
+                    }
+                
+                group_totals[group]['totalRevenue'] += total_revenue
+                group_totals[group]['totalRevenueUSD'] += total_revenue_usd
+                group_totals[group]['totalSessions'] += sessions
+                group_totals[group]['totalUsers'] += users
+                group_totals[group]['totalConversions'] += conversions
+                group_totals[group]['days_active'] += 1
+            
+            # Calculate percentages and fill missing group data for each date
+            for date_data in time_series_data.values():
+                # Fill missing groups with zero values
+                for group in all_groups:
+                    if group not in date_data['groups']:
+                        date_data['groups'][group] = {
+                            'group': group,
+                            'totalRevenue': 0,
+                            'totalRevenueUSD': 0,
+                            'purchaseRevenue': 0,
+                            'purchaseRevenueUSD': 0,
+                            'sessions': 0,
+                            'users': 0,
+                            'conversions': 0
+                        }
+                
+                # Calculate percentages for each group on this date
+                for group_data in date_data['groups'].values():
+                    group_data['revenuePercentage'] = (
+                        (group_data['totalRevenue'] / date_data['total_revenue'] * 100)
+                        if date_data['total_revenue'] > 0 else 0
+                    )
+            
+            # Convert to list format sorted by date
+            time_series_list = sorted(time_series_data.values(), key=lambda x: x['date'])
+            
+            # Calculate group averages
+            for group_data in group_totals.values():
+                days_active = group_data['days_active']
+                if days_active > 0:
+                    group_data['avgDailyRevenue'] = group_data['totalRevenue'] / days_active
+                    group_data['avgDailyRevenueUSD'] = group_data['totalRevenueUSD'] / days_active
+                    group_data['avgDailySessions'] = group_data['totalSessions'] / days_active
+                else:
+                    group_data['avgDailyRevenue'] = 0
+                    group_data['avgDailyRevenueUSD'] = 0
+                    group_data['avgDailySessions'] = 0
+            
+            # Sort groups by total revenue
+            sorted_groups = sorted(group_totals.values(), key=lambda x: x['totalRevenueUSD'], reverse=True)
+            
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'breakdown_by': breakdown_by,
+                'currency_info': {
+                    'original_currency': property_currency,
+                    'exchange_rates': currency_rates
+                },
+                'time_series': time_series_list,
+                'group_summary': sorted_groups,
+                'groups_found': list(all_groups),
+                'date_range': {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'total_days': len(time_series_list)
+                },
+                'totals': {
+                    'total_revenue': sum(day['total_revenue'] for day in time_series_list),
+                    'total_revenue_usd': sum(day['total_revenue_usd'] for day in time_series_list),
+                    'total_sessions': sum(day['total_sessions'] for day in time_series_list),
+                    'total_users': sum(day['total_users'] for day in time_series_list),
+                    'total_conversions': sum(day['total_conversions'] for day in time_series_list)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting revenue time series by {breakdown_by}: {e}")
+            return {
+                'propertyId': property_id,
+                'period': period,
+                'breakdown_by': breakdown_by,
+                'error': str(e),
+                'time_series': [],
+                'group_summary': [],
+                'groups_found': []
+            }

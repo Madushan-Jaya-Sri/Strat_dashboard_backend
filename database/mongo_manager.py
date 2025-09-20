@@ -42,8 +42,6 @@ class MongoManager:
                 serialized[key] = value
         return serialized
 
-
-
     async def save_endpoint_response(
         self, 
         endpoint: str, 
@@ -55,7 +53,7 @@ class MongoManager:
     ):
         """Save or update endpoint response in MongoDB based on key attributes"""
         try:
-            collection_name = self._get_collection_name(endpoint)
+            collection_name = self._get_collection_name(endpoint, request_params)
             collection = self.db[collection_name]
             
             # Serialize both request params and response data
@@ -71,7 +69,6 @@ class MongoManager:
                 "request_params": serialized_request_params
             }
             
-            # Rest of your existing code...
             existing_doc = await collection.find_one(query_filter)
             
             if existing_doc:
@@ -112,8 +109,8 @@ class MongoManager:
             logger.error(f"Error saving/updating MongoDB document: {e}")
             return None
 
-    def _get_collection_name(self, endpoint: str) -> str:
-        """Get meaningful collection name based on endpoint"""
+    def _get_collection_name(self, endpoint: str, request_params: Dict[str, Any] = None) -> str:
+        """Get meaningful collection name based on endpoint and optional request parameters"""
         collection_mapping = {
             # Google Ads endpoints
             'ads_customers': 'google_ads_customers_accounts',
@@ -138,16 +135,12 @@ class MongoManager:
             'ga_trends': 'google_analytics_trends',
             'ga_roas_roi_time_series': 'google_analytics_roas_roi_time_series',
             
-
-            
-
             # Combined endpoints
             'combined_overview': 'ads_ga_combined_overview_metrics',
             'combined_roas_roi_metrics': 'ga_combined_roas_roi_metrics',
             'combined_roas_roi_metrics_legacy': 'ga_combined_roas_roi_metrics_legacy',
 
             # Revenue breakdown endpoints
-
             'ga_revenue_breakdown_by_channel': 'ga_revenue_breakdown_by_channel',
             'ga_revenue_breakdown_by_source': 'ga_revenue_breakdown_by_source',
             'ga_revenue_breakdown_by_device': 'ga_revenue_breakdown_by_device',
@@ -155,19 +148,13 @@ class MongoManager:
             'ga_revenue_breakdown_by_page': 'ga_revenue_breakdown_by_page',
             'ga_revenue_breakdown_by_comprehensive': 'ga_revenue_breakdown_by_comprehensive',
             
-
-
             'ga_available_channels': 'ga_available_channels',
             
             # Channel revenue time series
-
-            'ga_channel_revenue_time_series': 'ga_channel_revenue_time_series',
             'ga_specific_channels_time_series': 'ga_specific_channels_time_series',
-
+            
             # Intent insights
             'intent_keyword_insights_raw': 'intent_keyword_insights',
-
-            # Add to _get_collection_name method in mongo_manager.py:
 
             # Meta Ads endpoints
             'meta_ad_accounts': 'meta_ad_accounts',
@@ -198,7 +185,18 @@ class MongoManager:
             'social_media_overview': 'social_media_overview',
             'social_insights_summary': 'social_insights_summary'
         }
-        
+
+        # Special handling for revenue-timeseries endpoint
+        if endpoint == 'ga_revenue_time_series' and request_params and 'breakdown_by' in request_params:
+            breakdown_by = request_params['breakdown_by']
+            collection_map = {
+                'channel': 'ga_revenue_time_series_by_channel',
+                'device': 'ga_revenue_time_series_by_device',
+                'location': 'ga_revenue_time_series_by_location',
+                'source': 'ga_revenue_time_series_by_source'  # Note: 'session' was likely meant to be 'source'
+            }
+            return collection_map.get(breakdown_by, 'ga_revenue_time_series_by_channel')  # Default to channel if invalid
+
         return collection_mapping.get(endpoint, 'api_responses_misc')
     
     def _get_data_count(self, data: Any) -> int:
@@ -207,7 +205,7 @@ class MongoManager:
             return len(data)
         elif isinstance(data, dict):
             # For objects with arrays, try to find the main data array
-            for key in ['campaigns', 'keywords', 'conversions', 'channels', 'pages', 'sources', 'time_series', 'breakdown']:
+            for key in ['campaigns', 'keywords', 'conversions', 'channels', 'pages', 'sources', 'time_series', 'breakdown', 'groups']:
                 if key in data and isinstance(data[key], list):
                     return len(data[key])
             return 1
@@ -225,7 +223,7 @@ class MongoManager:
     ) -> Optional[Dict[str, Any]]:
         """Get cached response if it exists and is recent enough"""
         try:
-            collection_name = self._get_collection_name(endpoint)
+            collection_name = self._get_collection_name(endpoint, request_params)
             collection = self.db[collection_name]
             
             query_filter = {

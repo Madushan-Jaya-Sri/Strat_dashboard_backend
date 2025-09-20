@@ -12,6 +12,7 @@ import uvicorn
 import requests
 import json
 import logging
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
@@ -1663,7 +1664,28 @@ async def get_channel_revenue_time_series_raw(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
+@app.get("/api/analytics/revenue-timeseries/{property_id}", response_model=RevenueTimeSeries)
+@save_response("ga_revenue_time_series")
+async def get_revenue_time_series(
+    property_id: str,
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    breakdown_by: str = Query("channel", pattern="^(channel|device|location|source)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get revenue breakdown by specified dimension (channel, device, location, source) as time series data for the given period"""
+    try:
+        ga4_manager = GA4Manager(current_user["email"])
+        time_series = ga4_manager.get_revenue_time_series(property_id, period, breakdown_by)
+        
+        if 'error' in time_series:
+            raise HTTPException(status_code=500, detail=time_series['error'])
+            
+        return RevenueTimeSeries(**time_series)
+    except Exception as e:
+        logger.error(f"Error fetching revenue time series for {breakdown_by}: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Intent Insights Routes
@@ -1725,12 +1747,13 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 
 # Chat endpoints
+
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(
     chat_request: ChatRequest,
-    current_user: dict = Depends(get_current_user_enhanced)  # Updated to support both auth types
+    current_user: dict = Depends(get_current_user_enhanced)
 ):
-    """Enhanced chat message endpoint supporting Meta module"""
+    """Enhanced chat message endpoint with intelligent document search and endpoint triggering"""
     try:
         # Validate auth provider for module type
         auth_provider = current_user.get("auth_provider", "google")
@@ -1746,13 +1769,43 @@ async def send_chat_message(
             user_email=current_user["email"]
         )
         
-        # If intent endpoint needs to be triggered, you can handle it here
-        # For now, we'll just return the response with the indication
-        
         return response
         
     except Exception as e:
         logger.error(f"Error processing chat message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add new endpoint to get specific conversation
+@app.get("/api/chat/conversation/{session_id}")
+async def get_conversation(
+    session_id: str,
+    module_type: ModuleType = Query(...),  # Make this required
+    current_user: dict = Depends(get_current_user)
+):
+    """Get specific conversation by session ID"""
+    try:
+        conversation = await chat_manager.get_conversation_by_session_id(
+            user_email=current_user["email"],
+            session_id=session_id,
+            module_type=module_type
+        )
+        
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Return the conversation in the expected format
+        return {
+            "session_id": conversation["session_id"],
+            "messages": conversation.get("messages", []),
+            "customer_id": conversation.get("customer_id"),
+            "property_id": conversation.get("property_id"),
+            "period": conversation.get("period"),
+            "created_at": conversation["created_at"],
+            "last_activity": conversation["last_activity"]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting conversation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat/history/{module_type}", response_model=ChatHistoryResponse)

@@ -611,3 +611,15 @@ class GAAudienceInsight(BaseModel):
     users: int
     percentage: float
     engagementRate: float
+
+class RevenueTimeSeries(BaseModel):
+    propertyId: str
+    period: str
+    breakdown_by: str
+    currency_info: Dict[str, Any]
+    time_series: list
+    group_summary: list
+    groups_found: list
+    date_range: Dict[str, Any]
+    totals: Dict[str, Any]
+    error: str | None = None

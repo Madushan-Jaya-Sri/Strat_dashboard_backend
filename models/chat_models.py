@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
 
+
 class ModuleType(str, Enum):
     GOOGLE_ADS = "google_ads"
     GOOGLE_ANALYTICS = "google_analytics" 
@@ -27,7 +28,8 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
+    period: Optional[str] = None  # ✅ Make sure this exists
+    context: Optional[Dict[str, Any]] = {}
 
 class ChatResponse(BaseModel):
     response: str
@@ -55,3 +57,32 @@ class ChatHistoryResponse(BaseModel):
 
 class DeleteChatRequest(BaseModel):
     session_ids: List[str]
+
+
+class UserChatDocument(BaseModel):
+    """Document structure for storing all user chats"""
+    user_email: str
+    module_type: str  # 'google_ads', 'google_analytics', 'intent_insights'
+    conversations: List[Dict[str, Any]] = []  # List of conversation objects
+    created_at: datetime
+    last_activity: datetime
+
+class ConversationSession(BaseModel):
+    """Individual conversation session within a user document"""
+    session_id: str
+    customer_id: Optional[str] = None
+    property_id: Optional[str] = None
+    period: str
+    context: Dict[str, Any] = {}
+    messages: List[ChatMessage] = []
+    created_at: datetime
+    last_activity: datetime
+    is_active: bool = True
+
+class DocumentSearchCriteria(BaseModel):
+    """Criteria for searching documents in MongoDB collections"""
+    user_email: str
+    customer_id: Optional[str] = None
+    property_id: Optional[str] = None
+    period: str
+    selected_collections: List[str]
