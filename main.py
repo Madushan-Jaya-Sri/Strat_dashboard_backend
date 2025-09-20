@@ -1937,6 +1937,20 @@ async def serve_terms_of_service():
     else:
         raise HTTPException(status_code=404, detail="Terms of service page not found")
     
+@app.get("/api/chat/test/{session_id}")
+async def test_conversation_endpoint(
+    session_id: str,
+    module_type: str = Query(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Test endpoint to verify routing works"""
+    return {
+        "message": "Endpoint reached successfully",
+        "session_id": session_id,
+        "module_type": module_type,
+        "user_email": current_user["email"]
+    }
+
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")
