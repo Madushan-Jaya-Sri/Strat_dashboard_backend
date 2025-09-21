@@ -1859,42 +1859,35 @@ async def get_chat_sessions_list(
             "user_email": current_user["email"],
             "module_type": module_type.value,
             "is_active": True
-        }, {
-            "session_id": 1,
-            "created_at": 1,
-            "last_activity": 1,
-            "customer_id": 1,
-            "property_id": 1,
-            "messages": {"$slice": 1}  # Only get first message for preview
         }).sort("last_activity", -1)
         
         sessions = await cursor.to_list(length=50)
         
-        # Format sessions for frontend
+        # Format sessions to match the expected structure
         formatted_sessions = []
         for session in sessions:
-            preview_message = ""
-            if session.get("messages") and len(session["messages"]) > 0:
-                preview_message = session["messages"][0].get("content", "")[:100]
-            
             formatted_sessions.append({
                 "session_id": session["session_id"],
-                "created_at": session["created_at"],
-                "last_activity": session["last_activity"],
+                "user_email": session["user_email"],
+                "module_type": session["module_type"],
                 "customer_id": session.get("customer_id"),
                 "property_id": session.get("property_id"),
-                "preview": preview_message
+                "created_at": session["created_at"],
+                "last_activity": session["last_activity"],
+                "is_active": session.get("is_active", True),
+                "messages": session.get("messages", [])
             })
         
+        # Return in the same format as chat history
         return {
             "sessions": formatted_sessions,
-            "total": len(formatted_sessions),
+            "total_sessions": len(formatted_sessions),
             "module_type": module_type.value
         }
         
     except Exception as e:
         logger.error(f"Error getting chat sessions list: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) 
 
 @app.get("/api/chat/debug/{module_type}")
 async def debug_chat_data(
