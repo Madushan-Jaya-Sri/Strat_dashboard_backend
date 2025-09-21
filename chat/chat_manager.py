@@ -1,11 +1,10 @@
 import openai
 import os
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 import uuid
 import json
-import asyncio
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from fastapi import HTTPException
 
@@ -22,170 +21,51 @@ class ChatManager:
         
         self.collection_mapping = {
             'google_ads': [
-                'google_ads_customers_accounts',
                 'google_ads_key_stats',
                 'google_ads_campaigns', 
                 'google_ads_keywords_related_to_campaign',
-                'google_ads_performance',
-                'google_ads_geographic_performance',
-                'google_ads_device_performance',
-                'google_ads_time_performance',
-                'google_ads_keyword_ideas'
+                'google_ads_performance'
             ],
             'google_analytics': [
-                'google_analytics_properties',
                 'google_analytics_metrics',
                 'google_analytics_conversions',
                 'google_analytics_traffic_sources',
-                'google_analytics_top_pages',
-                'google_analytics_channel_performance',
-                'google_analytics_audience_insights',
-                'google_analytics_time_series',
-                'google_analytics_trends',
-                'google_analytics_roas_roi_time_series'
+                'google_analytics_top_pages'
             ],
             'intent_insights': [
                 'intent_keyword_insights'
-            ],
-            'revenue_analysis': [
-                'ga_revenue_breakdown_by_channel',
-                'ga_revenue_breakdown_by_source',
-                'ga_revenue_breakdown_by_device',
-                'ga_revenue_breakdown_by_location',
-                'ga_revenue_breakdown_by_page',
-                'ga_revenue_breakdown_by_comprehensive',
-                'ga_combined_roas_roi_metrics',
-            ],
-            'combined_metrics': [
-                'ads_ga_combined_overview_metrics',
-                'ga_combined_roas_roi_metrics_legacy'
-            ],
-            'channel_timeseries': [
-                'ga_channel_revenue_time_series',
-                'ga_specific_channels_time_series',
-                'ga_available_channels'
             ]
         }
 
     async def select_relevant_collections(self, user_message: str, module_type: ModuleType) -> List[str]:
-        """Use AI agent to select relevant collections based on user query"""
+        """Select relevant collections based on user query"""
         
         available_collections = []
         if module_type == ModuleType.GOOGLE_ADS:
-            available_collections.extend(self.collection_mapping['google_ads'])
+            available_collections = self.collection_mapping['google_ads']
         elif module_type == ModuleType.GOOGLE_ANALYTICS:
-            available_collections.extend(self.collection_mapping['google_analytics'])
-            available_collections.extend(self.collection_mapping['revenue_analysis'])
-            available_collections.extend(self.collection_mapping['channel_timeseries'])
+            available_collections = self.collection_mapping['google_analytics']
         elif module_type == ModuleType.INTENT_INSIGHTS:
-            available_collections.extend(self.collection_mapping['intent_insights'])
-        
-        if "keyword" in user_message.lower() or "search" in user_message.lower():
-            available_collections.extend(self.collection_mapping['intent_insights'])
-        
-        if "revenue" in user_message.lower() or "roas" in user_message.lower() or "roi" in user_message.lower():
-            available_collections.extend(self.collection_mapping['revenue_analysis'])
-            available_collections.extend(self.collection_mapping['combined_metrics'])
+            available_collections = self.collection_mapping['intent_insights']
 
-        selection_prompt = f"""
-        Analyze this user query and select the most relevant data collections to answer their question.
-
-        User Query: "{user_message}"
-        Module Type: {module_type.value}
-
-        Available Collections:
-        {chr(10).join([f"- {col}: {self._get_collection_description(col)}" for col in available_collections])}
-
-        Instructions:
-        1. Select 2-4 most relevant collections that would help answer the user's question
-        2. Prioritize collections that directly relate to the user's specific query
-        3. Include supporting collections that provide context
-        4. Return ONLY a JSON list of collection names, nothing else
-
-        Example response: ["google_ads_campaigns", "google_ads_key_stats"]
-        """
-
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": selection_prompt}],
-                temperature=0.1,
-                max_tokens=200
-            )
-            
-            content = response.choices[0].message.content.strip()
-            selected_collections = json.loads(content)
-            valid_collections = [col for col in selected_collections if col in available_collections]
-            return valid_collections
-            
-        except Exception as e:
-            logger.error(f"ERROR IN COLLECTION SELECTION: {e}")
-            fallback_collections = []
-            if module_type == ModuleType.GOOGLE_ADS:
-                fallback_collections = ['google_ads_key_stats', 'google_ads_campaigns']
-            elif module_type == ModuleType.GOOGLE_ANALYTICS:
-                fallback_collections = ['google_analytics_metrics', 'google_analytics_conversions']
-            else:
-                fallback_collections = ['intent_keyword_insights']
-            
-            return fallback_collections
-
-    def _get_collection_description(self, collection_name: str) -> str:
-        """Get human-readable description of what each collection contains"""
-        descriptions = {
-            'google_ads_customers_accounts': 'Available Google Ads customer accounts and basic info',
-            'google_ads_key_stats': 'Overall campaign performance metrics (impressions, clicks, cost, conversions)',
-            'google_ads_campaigns': 'Individual campaign data with performance breakdown',
-            'google_ads_keywords_related_to_campaign': 'Keyword-level performance data and bidding information',
-            'google_ads_performance': 'Advanced performance metrics and trends',
-            'google_ads_geographic_performance': 'Performance breakdown by geographic location',
-            'google_ads_device_performance': 'Performance data by device type (mobile, desktop, tablet)',
-            'google_ads_time_performance': 'Daily performance trends over time',
-            'google_ads_keyword_ideas': 'Keyword suggestions and search volume data',
-            'google_analytics_properties': 'Available GA4 properties and account information',
-            'google_analytics_metrics': 'Website traffic and user engagement metrics',
-            'google_analytics_conversions': 'Conversion events and goal completions',
-            'google_analytics_traffic_sources': 'Traffic source attribution and channel data',
-            'google_analytics_top_pages': 'Most visited pages and page performance',
-            'google_analytics_channel_performance': 'Marketing channel effectiveness',
-            'google_analytics_audience_insights': 'User demographics and behavior patterns',
-            'google_analytics_time_series': 'Historical trends and time-based analytics',
-            'google_analytics_trends': 'User acquisition trends over time',
-            'google_analytics_roas_roi_time_series': 'ROAS and ROI performance over time',
-            'ga_revenue_breakdown_by_channel': 'Revenue attribution by marketing channel',
-            'ga_revenue_breakdown_by_source': 'Revenue breakdown by traffic source/medium',
-            'ga_revenue_breakdown_by_device': 'Revenue performance by device category',
-            'ga_revenue_breakdown_by_location': 'Revenue breakdown by geographic location',
-            'ga_revenue_breakdown_by_page': 'Revenue performance by landing page',
-            'ga_revenue_breakdown_by_comprehensive': 'Complete revenue analysis across all dimensions',
-            'ga_channel_revenue_time_series': 'Channel revenue performance over time',
-            'ga_specific_channels_time_series': 'Time series for specific marketing channels',
-            'ga_available_channels': 'List of available marketing channels',
-            'ads_ga_combined_overview_metrics': 'Combined overview from Google Ads and Analytics',
-            'ga_combined_roas_roi_metrics': 'Combined ROAS/ROI metrics from GA4 and Google Ads',
-            'ga_combined_roas_roi_metrics_legacy': 'Legacy combined ROAS/ROI metrics',
-            'intent_keyword_insights': 'Search volume trends and keyword opportunity analysis'
-        }
-        return descriptions.get(collection_name, 'Marketing data collection')
+        # Simple selection logic - in production you might use AI for this
+        selected = available_collections[:2]  # Take first 2 collections
+        return selected
 
     async def get_comprehensive_context(
         self,
         user_email: str,
         selected_collections: List[str],
         customer_id: Optional[str] = None,
-        property_id: Optional[str] = None,
-        limit_per_collection: int = 10
+        property_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Get comprehensive data from selected collections"""
+        """Get data from selected collections"""
         
         context = {
             "selected_collections": selected_collections,
             "data_summary": {},
-            "full_data": {},
-            "raw_response_data": {}
+            "full_data": {}
         }
-        
-        total_data_found = 0
         
         for collection_name in selected_collections:
             try:
@@ -193,43 +73,34 @@ class ChatManager:
                 
                 query_filter = {"user_email": user_email}
                 
-                if customer_id and ("ads" in collection_name or "google_ads" in collection_name):
+                if customer_id and "ads" in collection_name:
                     query_filter["customer_id"] = customer_id
                 
-                if property_id and ("analytics" in collection_name or "ga_" in collection_name):
+                if property_id and "analytics" in collection_name:
                     query_filter["property_id"] = property_id
                 
-                cursor = collection.find(query_filter).sort("last_updated", -1).limit(limit_per_collection)
-                docs = await cursor.to_list(length=limit_per_collection)
+                cursor = collection.find(query_filter).sort("last_updated", -1).limit(5)
+                docs = await cursor.to_list(length=5)
                 
                 if docs:
                     collection_data = []
-                    
                     for doc in docs:
                         response_data = doc.get("response_data", {})
-                        
                         if response_data:
                             collection_data.append({
-                                "timestamp": doc.get("last_updated", doc.get("created_at")),
-                                "request_params": doc.get("request_params", {}),
+                                "timestamp": doc.get("last_updated"),
                                 "response_data": response_data
                             })
-                            total_data_found += 1
                     
                     if collection_data:
                         context["full_data"][collection_name] = collection_data
-                        context["raw_response_data"][collection_name] = collection_data
-                        
                         context["data_summary"][collection_name] = {
                             "total_documents": len(docs),
-                            "data_entries": len(collection_data),
-                            "latest_update": docs[0].get("last_updated") if docs else None,
-                            "description": self._get_collection_description(collection_name)
+                            "data_entries": len(collection_data)
                         }
                         
             except Exception as e:
-                logger.error(f"❌ ERROR PROCESSING {collection_name}: {e}")
-                context["data_summary"][collection_name] = {"error": str(e)}
+                logger.error(f"Error processing {collection_name}: {e}")
         
         return context
 
@@ -246,17 +117,23 @@ class ChatManager:
         collection = self.db.chat_sessions
         
         if session_id:
+            # Verify session exists and belongs to user
             existing_session = await collection.find_one({
                 "session_id": session_id,
-                "user_email": user_email
+                "user_email": user_email,
+                "module_type": module_type.value
             })
             if existing_session:
                 await collection.update_one(
                     {"session_id": session_id},
                     {"$set": {"last_activity": datetime.utcnow()}}
                 )
+                logger.info(f"Using existing session: {session_id}")
                 return session_id
+            else:
+                logger.warning(f"Session {session_id} not found, creating new one")
         
+        # Create new session
         new_session_id = str(uuid.uuid4())
         session_doc = {
             "session_id": new_session_id,
@@ -271,6 +148,7 @@ class ChatManager:
         }
         
         await collection.insert_one(session_doc)
+        logger.info(f"Created new chat session: {new_session_id}")
         return new_session_id
     
     async def add_message_to_simple_session(self, session_id: str, message: ChatMessage):
@@ -312,7 +190,7 @@ class ChatManager:
                     "content": msg["content"]
                 })
         
-        system_prompt = self._get_enhanced_system_prompt_v2(module_type, context)
+        system_prompt = self._get_enhanced_system_prompt(module_type, context)
         
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(conversation_history)
@@ -329,18 +207,89 @@ class ChatManager:
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"ERROR GENERATING AI RESPONSE: {e}")
+            logger.error(f"Error generating AI response: {e}")
             return "I apologize, but I'm having trouble analyzing your data right now. Please try again."
         
+    def _get_enhanced_system_prompt(self, module_type: ModuleType, context: Dict[str, Any]) -> str:
+        """Get enhanced system prompt with data context"""
+        
+        base_prompt = """You are an expert marketing analytics assistant. 
+        
+        Capabilities:
+        - Analyze Google Ads performance data
+        - Interpret Google Analytics data  
+        - Provide keyword insights and search volume analysis
+        - Give actionable recommendations based on data trends
+        
+        Guidelines:
+        - Use actual numbers and data from the provided information
+        - Highlight key insights and trends
+        - Provide specific, actionable recommendations
+        - Format numbers clearly
+        - Be conversational but data-driven
+        """
+        
+        module_context = {
+            ModuleType.GOOGLE_ADS: "Focus on ad spend efficiency, campaign performance, keyword opportunities.",
+            ModuleType.GOOGLE_ANALYTICS: "Focus on traffic patterns, user engagement, conversion funnels.",
+            ModuleType.INTENT_INSIGHTS: "Focus on search trends, market demand, keyword opportunities."
+        }
+        
+        full_data = context.get("full_data", {})
+        
+        if full_data:
+            data_prompt = f"\n\nYOUR MARKETING DATA:\n"
+            
+            for collection_name, collection_entries in full_data.items():
+                data_prompt += f"\n=== {collection_name.upper().replace('_', ' ')} ===\n"
+                
+                for i, entry in enumerate(collection_entries):
+                    response_data = entry.get('response_data', {})
+                    data_prompt += f"\nData Entry {i+1}:\n"
+                    
+                    if isinstance(response_data, dict):
+                        for key, value in response_data.items():
+                            if isinstance(value, dict) and 'value' in value:
+                                data_prompt += f"  {key}: {value.get('formatted', value['value'])}\n"
+                            elif isinstance(value, (int, float)):
+                                data_prompt += f"  {key}: {value:,}\n"
+                            elif isinstance(value, str):
+                                data_prompt += f"  {key}: {value}\n"
+                    elif isinstance(response_data, list):
+                        data_prompt += f"  Contains {len(response_data)} data points\n"
+                        for j, item in enumerate(response_data[:3]):
+                            data_prompt += f"    {j+1}. {item}\n"
+        else:
+            data_prompt = f"\n\nNo marketing data found for the specified criteria.\n"
+        
+        context_prompt = f"""
+    Current Module: {module_type.value}
+    Focus: {module_context.get(module_type, "General marketing analysis")}
+
+    {data_prompt}
+
+    Provide specific insights and actionable recommendations based on the data above.
+    """
+        
+        return base_prompt + context_prompt
+
     async def process_chat_message(self, chat_request: ChatRequest, user_email: str) -> ChatResponse:
         """Process chat message with session-based storage"""
         
+        logger.info(f"Processing chat message for user: {user_email}")
+        logger.info(f"Message: '{chat_request.message}'")
+        logger.info(f"Module: {chat_request.module_type.value}")
+        logger.info(f"Session ID: {chat_request.session_id}")
+        
+        # Handle session
         if chat_request.session_id:
             session_id = chat_request.session_id
+            # Update last activity
             await self.db.chat_sessions.update_one(
-                {"session_id": session_id},
+                {"session_id": session_id, "user_email": user_email},
                 {"$set": {"last_activity": datetime.utcnow()}}
             )
+            logger.info(f"Using existing session: {session_id}")
         else:
             session_id = await self.create_or_get_simple_session(
                 user_email=user_email,
@@ -350,7 +299,9 @@ class ChatManager:
                 property_id=chat_request.property_id,
                 period=chat_request.period or "LAST_7_DAYS"
             )
+            logger.info(f"Created new session: {session_id}")
         
+        # Add user message to session
         user_message = ChatMessage(
             role=MessageRole.USER,
             content=chat_request.message,
@@ -358,11 +309,13 @@ class ChatManager:
         )
         await self.add_message_to_simple_session(session_id, user_message)
         
+        # Select relevant collections
         selected_collections = await self.select_relevant_collections(
             user_message=chat_request.message,
             module_type=chat_request.module_type
         )
         
+        # Get context data
         context = await self.get_comprehensive_context(
             user_email=user_email,
             selected_collections=selected_collections,
@@ -370,6 +323,7 @@ class ChatManager:
             property_id=chat_request.property_id
         )
         
+        # Generate AI response
         ai_response = await self._generate_enhanced_ai_response_simple(
             message=chat_request.message,
             context=context,
@@ -377,6 +331,7 @@ class ChatManager:
             session_id=session_id
         )
         
+        # Add AI response to session
         ai_message = ChatMessage(
             role=MessageRole.ASSISTANT,
             content=ai_response,
@@ -392,92 +347,33 @@ class ChatManager:
             module_type=chat_request.module_type
         )
 
-    def _get_enhanced_system_prompt_v2(self, module_type: ModuleType, context: Dict[str, Any]) -> str:
-        """Enhanced system prompt with complete data extraction"""
+    async def get_conversation_by_session_id(
+        self,
+        user_email: str,
+        session_id: str,
+        module_type: ModuleType
+    ) -> Optional[Dict[str, Any]]:
+        """Get specific conversation by session ID - FIXED"""
+        collection = self.db.chat_sessions
         
-        base_prompt = """You are an expert marketing analytics assistant with access to real marketing data. 
+        logger.info(f"Looking for session: {session_id} for user: {user_email} module: {module_type.value}")
         
-        Your capabilities:
-        - Analyze Google Ads performance data (campaigns, keywords, costs, conversions)
-        - Interpret Google Analytics data (traffic, user behavior, conversions, revenue)
-        - Provide keyword insights and search volume analysis
-        - Give actionable recommendations based on data trends
+        session = await collection.find_one({
+            "session_id": session_id,
+            "user_email": user_email,
+            "module_type": module_type.value
+        })
         
-        Guidelines:
-        - Use actual numbers and data from the provided information
-        - Highlight key insights and trends you can see in the data
-        - Provide specific, actionable recommendations
-        - Format numbers clearly (use commas, percentages, currency symbols)
-        - If you see concerning trends, mention them with specific data points
-        - Be conversational but data-driven
-        """
-        
-        module_context = {
-            ModuleType.GOOGLE_ADS: "Focus on ad spend efficiency, campaign performance, keyword opportunities, and conversion optimization.",
-            ModuleType.GOOGLE_ANALYTICS: "Focus on traffic patterns, user engagement, conversion funnels, and revenue attribution.",
-            ModuleType.INTENT_INSIGHTS: "Focus on search trends, market demand, keyword opportunities, and competitive analysis."
-        }
-        
-        full_data = context.get("full_data", {})
-        
-        if full_data:
-            data_prompt = f"\n\nYOUR ACTUAL MARKETING DATA:\n"
-            
-            for collection_name, collection_entries in full_data.items():
-                data_prompt += f"\n=== {collection_name.upper().replace('_', ' ')} ===\n"
-                data_prompt += f"Description: {self._get_collection_description(collection_name)}\n"
-                
-                for i, entry in enumerate(collection_entries):
-                    response_data = entry.get('response_data', {})
-                    timestamp = entry.get('timestamp', 'Unknown')
-                    
-                    data_prompt += f"\nData Entry {i+1} (Updated: {timestamp}):\n"
-                    
-                    if isinstance(response_data, dict):
-                        for key, value in response_data.items():
-                            if isinstance(value, dict):
-                                if 'value' in value and 'formatted' in value:
-                                    data_prompt += f"  {key}: {value['formatted']} (raw: {value['value']})\n"
-                                elif 'label' in value:
-                                    data_prompt += f"  {value.get('label', key)}: {value.get('formatted', value.get('value', 'N/A'))}\n"
-                                else:
-                                    data_prompt += f"  {key}: {value}\n"
-                            elif isinstance(value, (int, float)):
-                                data_prompt += f"  {key}: {value:,}\n"
-                            elif isinstance(value, str):
-                                data_prompt += f"  {key}: {value}\n"
-                            elif isinstance(value, list):
-                                data_prompt += f"  {key}: List with {len(value)} items\n"
-                                for j, item in enumerate(value[:3]):
-                                    if isinstance(item, dict):
-                                        data_prompt += f"    Item {j+1}: {item}\n"
-                                    else:
-                                        data_prompt += f"    Item {j+1}: {item}\n"
-                    
-                    elif isinstance(response_data, list):
-                        data_prompt += f"  Contains {len(response_data)} data points:\n"
-                        for j, item in enumerate(response_data):
-                            if isinstance(item, dict):
-                                item_desc = ", ".join([f"{k}: {v}" for k, v in item.items()])
-                                data_prompt += f"    {j+1}. {item_desc}\n"
-                            else:
-                                data_prompt += f"    {j+1}. {item}\n"
-                    
-                    data_prompt += "\n"
+        if session:
+            session["_id"] = str(session["_id"])
+            logger.info(f"Found session with {len(session.get('messages', []))} messages")
+            return session
         else:
-            data_prompt = f"\n\nNO MARKETING DATA FOUND for the specified criteria.\n"
-            data_prompt += f"Available collections checked: {context.get('selected_collections', [])}\n"
-        
-        context_prompt = f"""
-    Current Module: {module_type.value}
-    Focus: {module_context.get(module_type, "General marketing analysis")}
-
-    {data_prompt}
-
-    Based on the above data, provide specific insights and actionable recommendations. Use the actual numbers and trends you can see in the data.
-    """
-        
-        return base_prompt + context_prompt
+            logger.error(f"Session not found")
+            # Debug: check what sessions exist for this user
+            all_sessions = await collection.find({"user_email": user_email}).to_list(length=10)
+            logger.error(f"Available sessions for user: {[s['session_id'] for s in all_sessions]}")
+            return None
 
     async def get_chat_history(self, user_email: str, module_type: ModuleType, limit: int = 20) -> ChatHistoryResponse:
         """Get chat history from sessions"""
@@ -490,60 +386,38 @@ class ChatManager:
         }).sort("last_activity", -1).limit(limit)
         
         sessions = await cursor.to_list(length=limit)
-        total_sessions = await collection.count_documents({
-            "user_email": user_email,
-            "module_type": module_type.value,
-            "is_active": True
-        })
+        total_sessions = len(sessions)
         
         session_objects = []
         for session in sessions:
-            messages = []
-            for msg in session.get("messages", []):
-                messages.append(ChatMessage(
-                    role=MessageRole(msg["role"]),
-                    content=msg["content"],
-                    timestamp=msg["timestamp"]
-                ))
-            
-            session_obj = ChatSession(
-                session_id=session["session_id"],
-                user_email=session["user_email"],
-                module_type=ModuleType(session["module_type"]),
-                customer_id=session.get("customer_id"),
-                property_id=session.get("property_id"),
-                messages=messages,
-                created_at=session["created_at"],
-                last_activity=session["last_activity"],
-                is_active=session.get("is_active", True)
-            )
-            session_objects.append(session_obj)
+            # Only include sessions with messages
+            if session.get("messages") and len(session["messages"]) > 0:
+                messages = []
+                for msg in session.get("messages", []):
+                    messages.append(ChatMessage(
+                        role=MessageRole(msg["role"]),
+                        content=msg["content"],
+                        timestamp=msg["timestamp"]
+                    ))
+                
+                session_obj = ChatSession(
+                    session_id=session["session_id"],
+                    user_email=session["user_email"],
+                    module_type=ModuleType(session["module_type"]),
+                    customer_id=session.get("customer_id"),
+                    property_id=session.get("property_id"),
+                    messages=messages,
+                    created_at=session["created_at"],
+                    last_activity=session["last_activity"],
+                    is_active=session.get("is_active", True)
+                )
+                session_objects.append(session_obj)
         
         return ChatHistoryResponse(
             sessions=session_objects,
-            total_sessions=total_sessions,
+            total_sessions=len(session_objects),
             module_type=module_type
         )
-
-    async def get_conversation_by_session_id(
-        self,
-        user_email: str,
-        session_id: str,
-        module_type: ModuleType
-    ) -> Optional[Dict[str, Any]]:
-        """Get specific conversation by session ID"""
-        collection = self.db.chat_sessions
-        
-        session = await collection.find_one({
-            "session_id": session_id,
-            "user_email": user_email,
-            "module_type": module_type.value
-        })
-        
-        if session:
-            session["_id"] = str(session["_id"])
-        
-        return session
     
     async def delete_chat_sessions(self, user_email: str, session_ids: List[str]) -> Dict[str, Any]:
         """Delete chat sessions"""
@@ -568,4 +442,5 @@ class ChatManager:
             "success": result.modified_count > 0
         }
 
+# Create singleton instance
 chat_manager = ChatManager()

@@ -1752,7 +1752,7 @@ async def send_chat_message(
     chat_request: ChatRequest,
     current_user: dict = Depends(get_current_user_enhanced)
 ):
-    """Enhanced chat message endpoint with intelligent document search and endpoint triggering"""
+    """Enhanced chat message endpoint"""
     try:
         # Validate auth provider for module type
         auth_provider = current_user.get("auth_provider", "google")
@@ -1780,8 +1780,11 @@ async def get_conversation(
     module_type: ModuleType = Query(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get specific conversation by session ID"""
+    """Get specific conversation by session ID - FIXED VERSION"""
     try:
+        logger.info(f"Getting conversation: session_id={session_id}, user={current_user['email']}, module={module_type.value}")
+        
+        # Use the chat_manager method
         conversation = await chat_manager.get_conversation_by_session_id(
             user_email=current_user["email"],
             session_id=session_id,
@@ -1789,8 +1792,16 @@ async def get_conversation(
         )
         
         if not conversation:
-            logger.error(f"Conversation not found: session_id={session_id}, user={current_user['email']}, module={module_type.value}")
-            raise HTTPException(status_code=404, detail="Conversation not found")
+            logger.error(f"Conversation not found in database")
+            # Let's also check what sessions exist for debugging
+            collection = chat_manager.db.chat_sessions
+            existing_sessions = await collection.find({
+                "user_email": current_user["email"],
+                "module_type": module_type.value
+            }).to_list(length=10)
+            
+            logger.error(f"Available sessions for user: {[s['session_id'] for s in existing_sessions]}")
+            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
         
         logger.info(f"Found conversation with {len(conversation.get('messages', []))} messages")
         
@@ -1800,6 +1811,74 @@ async def get_conversation(
         raise
     except Exception as e:
         logger.error(f"Error getting conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/sessions/{module_type}")
+async def get_chat_sessions_list(
+    module_type: ModuleType,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get list of chat sessions for a module - IMPROVED VERSION"""
+    try:
+        collection = chat_manager.db.chat_sessions
+        
+        # Get sessions with messages
+        cursor = collection.find({
+            "user_email": current_user["email"],
+            "module_type": module_type.value,
+            "is_active": True
+        }).sort("last_activity", -1)
+        
+        sessions = await cursor.to_list(length=50)
+        
+        logger.info(f"Found {len(sessions)} sessions for user {current_user['email']} and module {module_type.value}")
+        
+        # Format sessions and include debug info
+        formatted_sessions = []
+        for session in sessions:
+            messages = session.get("messages", [])
+            
+            # Only include sessions that have messages
+            if len(messages) > 0:
+                formatted_sessions.append({
+                    "session_id": session["session_id"],
+                    "user_email": session["user_email"],
+                    "module_type": session["module_type"],
+                    "customer_id": session.get("customer_id"),
+                    "property_id": session.get("property_id"),
+                    "created_at": session["created_at"],
+                    "last_activity": session["last_activity"],
+                    "is_active": session.get("is_active", True),
+                    "messages": messages
+                })
+        
+        logger.info(f"Returning {len(formatted_sessions)} sessions with messages")
+        
+        return {
+            "sessions": formatted_sessions,
+            "total_sessions": len(formatted_sessions),
+            "module_type": module_type.value
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting chat sessions list: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat/delete")
+async def delete_chat_sessions(
+    delete_request: DeleteChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete chat sessions"""
+    try:
+        result = await chat_manager.delete_chat_sessions(
+            user_email=current_user["email"],
+            session_ids=delete_request.session_ids
+        )
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error deleting chat sessions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/chat/history/{module_type}", response_model=ChatHistoryResponse)
@@ -1821,67 +1900,44 @@ async def get_chat_history(
         logger.error(f"Error getting chat history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/chat/delete")
-async def delete_chat_sessions(
-    delete_request: DeleteChatRequest,
-    current_user: dict = Depends(get_current_user)
-):
-    """Delete chat sessions"""
-    try:
-        result = await chat_manager.delete_chat_sessions(
-            user_email=current_user["email"],
-            session_ids=delete_request.session_ids
-        )
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error deleting chat sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/chat/sessions/{module_type}")
-async def get_chat_sessions_list(
+# Debug endpoint to help troubleshoot
+@app.get("/api/chat/debug/{module_type}")
+async def debug_chat_sessions(
     module_type: ModuleType,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get list of chat sessions for a module (without full message history)"""
+    """Debug endpoint to check chat sessions"""
     try:
         collection = chat_manager.db.chat_sessions
         
-        cursor = collection.find({
+        # Get all sessions for this user and module
+        sessions = await collection.find({
+            "user_email": current_user["email"],
+            "module_type": module_type.value
+        }).to_list(length=100)
+        
+        debug_info = {
             "user_email": current_user["email"],
             "module_type": module_type.value,
-            "is_active": True
-        }).sort("last_activity", -1)
-        
-        sessions = await cursor.to_list(length=50)
-        
-        # Format sessions with proper titles from first user message
-        formatted_sessions = []
-        for session in sessions:
-            formatted_sessions.append({
-                "session_id": session["session_id"],
-                "user_email": session["user_email"],
-                "module_type": session["module_type"],
-                "customer_id": session.get("customer_id"),
-                "property_id": session.get("property_id"),
-                "created_at": session["created_at"],
-                "last_activity": session["last_activity"],
-                "is_active": session.get("is_active", True),
-                "messages": session.get("messages", [])
-            })
-        
-        # Return in the same format as chat history
-        return {
-            "sessions": formatted_sessions,
-            "total_sessions": len(formatted_sessions),
-            "module_type": module_type.value
+            "total_sessions": len(sessions),
+            "sessions_summary": []
         }
         
+        for session in sessions:
+            debug_info["sessions_summary"].append({
+                "session_id": session["session_id"],
+                "message_count": len(session.get("messages", [])),
+                "is_active": session.get("is_active", True),
+                "created_at": session["created_at"],
+                "last_activity": session["last_activity"],
+                "first_message": session["messages"][0]["content"][:50] + "..." if session.get("messages") else "No messages"
+            })
+        
+        return debug_info
+        
     except Exception as e:
-        logger.error(f"Error getting chat sessions list: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    
+        logger.error(f"Error in debug endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))   
 # # Chat endpoints
 
 # @app.post("/api/chat/message", response_model=ChatResponse)
