@@ -622,4 +622,5 @@ class RevenueTimeSeries(BaseModel):
     groups_found: list
     date_range: Dict[str, Any]
     totals: Dict[str, Any]
-    error: str | None = None
+    # error: str | None = None
+    error: Optional[str] = None
