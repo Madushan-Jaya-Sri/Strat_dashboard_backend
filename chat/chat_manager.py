@@ -40,7 +40,11 @@ class ChatManager:
                 'google_analytics_traffic_sources',
                 'google_analytics_top_pages',
                 'google_analytics_channel_performance',
-                'google_analytics_audience_insights',
+                'ga_audience_insights_city',
+                'ga_audience_insights_userAgeBracket', 
+                'ga_audience_insights_userGender',
+                'ga_audience_insights_deviceCategory',
+                'ga_audience_insights_browser',
                 'google_analytics_time_series',
                 'google_analytics_trends',
                 'google_analytics_roas_roi_time_series'
@@ -246,10 +250,15 @@ class ChatManager:
             'google_analytics_traffic_sources': 'Traffic source attribution and channel data',
             'google_analytics_top_pages': 'Most visited pages and page performance',
             'google_analytics_channel_performance': 'Marketing channel effectiveness',
-            'google_analytics_audience_insights': 'User demographics and behavior patterns, including city, userAgeBracket, userGender, deviceCategory, and browser details',
+            'ga_audience_insights_city': 'User demographics/geograpic and behavior patterns by city location',
+            'ga_audience_insights_userAgeBracket': 'User demographics and behavior patterns by age bracket',
+            'ga_audience_insights_userGender': 'User demographics and behavior patterns by gender',
+            'ga_audience_insights_deviceCategory': 'User demographics and behavior patterns by device category (mobile, desktop, tablet)',
+            'ga_audience_insights_browser': 'User demographics and behavior patterns by browser type',
             'google_analytics_time_series': 'Historical trends and time-based analytics',
             'google_analytics_trends': 'User acquisition trends over time',
             'google_analytics_roas_roi_time_series': 'ROAS and ROI performance over time',
+        
             
             # Revenue breakdown collections
             'ga_revenue_breakdown_by_channel': 'Revenue attribution by marketing channel',

@@ -130,7 +130,6 @@ class MongoManager:
             'ga_traffic_sources': 'google_analytics_traffic_sources',
             'ga_top_pages': 'google_analytics_top_pages',
             'ga_channel_performance': 'google_analytics_channel_performance',
-            'ga_audience_insights': 'google_analytics_audience_insights',
             'ga_time_series': 'google_analytics_time_series',
             'ga_trends': 'google_analytics_trends',
             'ga_roas_roi_time_series': 'google_analytics_roas_roi_time_series',
@@ -185,6 +184,11 @@ class MongoManager:
             'social_media_overview': 'social_media_overview',
             'social_insights_summary': 'social_insights_summary'
         }
+
+        # Special handling for ga_audience_insights endpoint with dimension-based collections
+        if endpoint == 'ga_audience_insights' and request_params and 'dimension' in request_params:
+            dimension = request_params['dimension']
+            return f'ga_audience_insights_{dimension}'
 
         # Special handling for revenue-timeseries endpoint
         if endpoint == 'ga_revenue_time_series' and request_params and 'breakdown_by' in request_params:
