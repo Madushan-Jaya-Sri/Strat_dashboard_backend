@@ -396,12 +396,12 @@ async def health_check():
     }
 
 # Add these endpoint functions to your main.py file
+from fastapi.responses import HTMLResponse
 
 @app.get("/privacy")
 async def privacy_page():
     """Serve the privacy policy HTML page"""
     try:
-        # Read the HTML file content and return as HTMLResponse
         with open("privacy.html", "r", encoding="utf-8") as file:
             html_content = file.read()
         return HTMLResponse(content=html_content, status_code=200)
@@ -415,7 +415,6 @@ async def privacy_page():
 async def terms_page():
     """Serve the terms of service HTML page"""
     try:
-        # Read the HTML file content and return as HTMLResponse
         with open("terms.html", "r", encoding="utf-8") as file:
             html_content = file.read()
         return HTMLResponse(content=html_content, status_code=200)
