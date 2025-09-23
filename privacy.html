@@ -1,92 +1,251 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Privacy Policy — Momentro (Internal Dashboard)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body { font-family: Arial, Helvetica, sans-serif; line-height:1.6; margin:24px; color:#111; }
-    h1,h2 { color:#0b5ea6; }
-    p { margin:8px 0; }
-    .section { margin-bottom:20px; }
-    .small { font-size:0.9em; color:#444; }
-    ul { margin:8px 0 8px 20px; }
-    .note { background:#f3f7fb; padding:10px; border-left:4px solid #0b5ea6; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Momentro Analytics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #0B4E5D 0%, #05242A 50%, #1E1E1E 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .content {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #508995;
+        }
+
+        .logo {
+            color: #508995;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #0B4E5D;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .effective-date {
+            color: #666;
+            font-size: 14px;
+            background: #f8f9fa;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        h2 {
+            color: #0B4E5D;
+            font-size: 24px;
+            font-weight: 600;
+            margin: 30px 0 15px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e1e5e9;
+        }
+
+        h3 {
+            color: #508995;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 25px 0 10px 0;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        ul, ol {
+            margin: 15px 0 15px 30px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .definition {
+            background: #f8f9fa;
+            border-left: 4px solid #508995;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .definition strong {
+            color: #0B4E5D;
+        }
+
+        .highlight-box {
+            background: #e8f4f6;
+            border: 1px solid #508995;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .contact-info {
+            background: #0B4E5D;
+            color: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .contact-info h3 {
+            color: white;
+            margin-bottom: 15px;
+        }
+
+        .email-link {
+            color: #A1BCD3;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .email-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e5e9;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .url-highlight {
+            background: #e8f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 15px;
+            }
+            
+            .content {
+                padding: 25px 20px;
+            }
+            
+            h1 {
+                font-size: 28px;
+            }
+            
+            h2 {
+                font-size: 20px;
+            }
+        }
+    </style>
 </head>
 <body>
-  <h1>Privacy Policy</h1>
-  <p class="small"><strong>Effective Date:</strong> [Effective Date]</p>
+    <div class="container">
+        <div class="content">
+            <div class="header">
+                <div class="logo">Momentro Pvt Ltd</div>
+                <h1>Privacy Policy</h1>
+                <div class="effective-date">Effective Date: December 22, 2024</div>
+            </div>
 
-  <div class="section">
-    <h2>Overview</h2>
-    <p>This Privacy Policy describes how <strong>[Your Company Name]</strong> ("we", "our", "us") collects, uses, stores, and deletes Platform Data and other data for the internal Momentro dashboard hosted at <em>eyqi6vd53z.us-east-2.awsapprunner.com</em>.</p>
-    <p>This dashboard is for <strong>internal use only</strong> (employees and authorized contractors) and is not offered to the public.</p>
-  </div>
+            <h2>Overview</h2>
+            <p>This Privacy Policy describes how <strong>Momentro Pvt Ltd</strong> ("we", "our", "us") collects, uses, stores, and deletes Platform Data and other data for the internal Momentro dashboard hosted at <span class="url-highlight">eyqi6vd53z.us-east-2.awsapprunner.com</span>.</p>
+            
+            <p>This dashboard is for <strong>internal use only</strong> (employees and authorized contractors) and is not offered to the public.</p>
 
-  <div class="section">
-    <h2>Definitions</h2>
-    <p><strong>Platform Data</strong> — data obtained from Meta APIs (Graph API) such as Ads Insights, Campaign metrics, Page/Instagram metrics, audience aggregates, and metadata tied to business accounts. This <em>does not</em> include the items excluded by Platform Terms 3(e).</p>
-  </div>
+            <h2>Definitions</h2>
+            <div class="definition">
+                <strong>Platform Data</strong> — data obtained from Meta APIs (Graph API) such as Ads Insights, Campaign metrics, Page/Instagram metrics, audience aggregates, and metadata tied to business accounts. This <em>does not</em> include the items excluded by Platform Terms 3(e).
+            </div>
 
-  <div class="section">
-    <h2>What Data We Collect</h2>
-    <ul>
-      <li>Platform Data from Meta Graph API (ads insights, campaign stats, page/instagram metrics) — only as permitted by granted permissions.</li>
-      <li>Account/email used to access the dashboard (for authentication and audit).</li>
-      <li>Operational logs and performance metrics (for debugging and platform health).</li>
-    </ul>
-  </div>
+            <h2>What Data We Collect</h2>
+            <ul>
+                <li><strong>Platform Data from Meta Graph API</strong> (ads insights, campaign stats, page/instagram metrics) — only as permitted by granted permissions.</li>
+                <li><strong>Account/email</strong> used to access the dashboard (for authentication and audit).</li>
+                <li><strong>Operational logs and performance metrics</strong> (for debugging and platform health).</li>
+            </ul>
 
-  <div class="section">
-    <h2>How We Use Platform Data</h2>
-    <p>Platform Data is used only to render internal reports, perform analytics, monitor campaign performance, and support internal business decision-making. No advertising or data sharing outside authorized internal users.</p>
-  </div>
+            <h2>How We Use Platform Data</h2>
+            <p>Platform Data is used only to render internal reports, perform analytics, monitor campaign performance, and support internal business decision-making. No advertising or data sharing outside authorized internal users.</p>
 
-  <div class="section">
-    <h2>Storage, Caching & Transfer</h2>
-    <p>All Platform Data is stored in our secure cloud database(s). We do not store Platform Data on organizational or personal devices (laptops, phones, removable drives). Data in transit uses HTTPS/TLS. Access to stored Platform Data is restricted by role-based access controls and MFA for permitted accounts.</p>
-  </div>
+            <h2>Storage, Caching & Transfer</h2>
+            <p>All Platform Data is stored in our secure cloud database(s). We do not store Platform Data on organizational or personal devices (laptops, phones, removable drives). Data in transit uses HTTPS/TLS. Access to stored Platform Data is restricted by role-based access controls and MFA for permitted accounts.</p>
 
-  <div class="section">
-    <h2>Retention and Deletion</h2>
-    <p>We retain Platform Data only as long as it is necessary for legitimate business purposes (e.g., to display dashboard metrics, run internal reports, or comply with legal/audit obligations). Typical retention periods are:</p>
-    <ul>
-      <li>Cached/processed dashboard data: up to 90 days by default (configurable).</li>
-      <li>Audit logs: up to 1 year or as required by regulation.</li>
-    </ul>
-    <p>If Platform Data is no longer necessary, it is deleted or irreversibly anonymized.</p>
-  </div>
+            <h2>Retention and Deletion</h2>
+            <p>We retain Platform Data only as long as it is necessary for legitimate business purposes (e.g., to display dashboard metrics, run internal reports, or comply with legal/audit obligations). Typical retention periods are:</p>
+            
+            <ul>
+                <li><strong>Cached/processed dashboard data:</strong> up to 90 days by default (configurable).</li>
+                <li><strong>Audit logs:</strong> up to 1 year or as required by regulation.</li>
+            </ul>
+            
+            <p>If Platform Data is no longer necessary, it is deleted or irreversibly anonymized.</p>
 
-  <div class="section">
-    <h2>User Data Deletion Requests</h2>
-    <p>If an internal user (or an authorized account owner) requests deletion of Platform Data associated with their account, they may request it by:</p>
-    <ol>
-      <li>Using the dashboard: <em>Settings → Privacy & Data → Delete My Data</em>, which triggers automated deletion for the account's Platform Data; or</li>
-      <li>Emailing support at <strong>support@yourcompany.com</strong> with the account identifier. We will authenticate the request and delete associated Platform Data within <strong>30 days</strong> unless legal hold applies.</li>
-    </ol>
-    <p class="note">Note: Platform Data listed in Platform Terms 3(e) are excluded from this policy per Meta's definitions.</p>
-  </div>
+            <h2>User Data Deletion Requests</h2>
+            <p>If an internal user (or an authorized account owner) requests deletion of Platform Data associated with their account, they may request it by:</p>
+            
+            <ol>
+                <li><strong>Using the dashboard:</strong> <em>Settings → Privacy & Data → Delete My Data</em>, which triggers automated deletion for the account's Platform Data; or</li>
+                <li><strong>Emailing support</strong> at <a href="mailto:madushan.jayasri@momentro.com" class="email-link">madushan.jayasri@momentro.com</a> with the account identifier. We will authenticate the request and delete associated Platform Data within <strong>30 days</strong> unless legal hold applies.</li>
+            </ol>
+            
+            <div class="highlight-box">
+                <strong>Note:</strong> Platform Data listed in Platform Terms 3(e) are excluded from this policy per Meta's definitions.
+            </div>
 
-  <div class="section">
-    <h2>Security</h2>
-    <p>We maintain industry-standard protections: encrypted storage at rest, HTTPS/TLS for all network traffic, role-based access control, MFA for privileged accounts, and periodic security patching of code and infrastructure.</p>
-  </div>
+            <h2>Security</h2>
+            <p>We maintain industry-standard protections: encrypted storage at rest, HTTPS/TLS for all network traffic, role-based access control, MFA for privileged accounts, and periodic security patching of code and infrastructure.</p>
 
-  <div class="section">
-    <h2>Third Parties</h2>
-    <p>We do not share Platform Data with third-party vendors except where required for hosting, backups, or tooling. Any such provider is contractually required to maintain equivalent data protection and only process data on our instruction.</p>
-  </div>
+            <h2>Third Parties</h2>
+            <p>We do not share Platform Data with third-party vendors except where required for hosting, backups, or tooling. Any such provider is contractually required to maintain equivalent data protection and only process data on our instruction.</p>
 
-  <div class="section">
-    <h2>Changes</h2>
-    <p>We may update this policy. Changes will be posted here with an updated effective date.</p>
-  </div>
+            <h2>Changes</h2>
+            <p>We may update this policy. Changes will be posted here with an updated effective date.</p>
 
-  <div class="section">
-    <h2>Contact</h2>
-    <p>For privacy questions or data deletion requests, email: <strong>support@yourcompany.com</strong></p>
-    <p class="small">[Your Company Name] — Internal Dashboard Privacy Policy</p>
-  </div>
+            <div class="contact-info">
+                <h3>Contact Information</h3>
+                <p>For privacy questions or data deletion requests, please contact:</p>
+                <p><a href="mailto:madushan.jayasri@momentro.com" class="email-link">madushan.jayasri@momentro.com</a></p>
+            </div>
+
+            <div class="footer">
+                <p><strong>Momentro Pvt Ltd</strong> — Internal Dashboard Privacy Policy</p>
+                <p>This document governs the internal analytics dashboard and is for authorized users only.</p>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

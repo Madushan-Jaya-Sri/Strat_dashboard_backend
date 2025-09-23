@@ -1,91 +1,382 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Terms of Service — Momentro (Internal Dashboard)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body { font-family: Arial, Helvetica, sans-serif; line-height:1.6; margin:24px; color:#111; }
-    h1,h2 { color:#0b5ea6; }
-    p { margin:8px 0; }
-    .section { margin-bottom:20px; }
-    ul { margin:8px 0 8px 20px; }
-    .small { font-size:0.9em; color:#444; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service - Momentro Analytics Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #0B4E5D 0%, #05242A 50%, #1E1E1E 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .content {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #508995;
+        }
+
+        .logo {
+            color: #508995;
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: #0B4E5D;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .effective-date {
+            color: #666;
+            font-size: 14px;
+            background: #f8f9fa;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: inline-block;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section-number {
+            display: inline-block;
+            background: #508995;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            font-size: 14px;
+            margin-right: 15px;
+        }
+
+        .section-title {
+            color: #0B4E5D;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .section-content {
+            margin-left: 45px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        ul {
+            margin: 15px 0 15px 20px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            position: relative;
+        }
+
+        li::before {
+            content: "•";
+            color: #508995;
+            font-weight: bold;
+            position: absolute;
+            left: -15px;
+        }
+
+        .highlight-box {
+            background: #e8f4f6;
+            border-left: 4px solid #508995;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .warning-box strong {
+            color: #856404;
+        }
+
+        .contact-info {
+            background: #0B4E5D;
+            color: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .contact-info h3 {
+            color: white;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .email-link {
+            color: #A1BCD3;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .email-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e5e9;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .url-highlight {
+            background: #e8f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .important-notice {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .important-notice h4 {
+            margin-bottom: 10px;
+            color: #721c24;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 15px;
+            }
+            
+            .content {
+                padding: 25px 20px;
+            }
+            
+            h1 {
+                font-size: 28px;
+            }
+            
+            .section-title {
+                font-size: 18px;
+                flex-direction: column;
+                align-items: flex-start;
+                text-align: left;
+            }
+            
+            .section-number {
+                margin-bottom: 10px;
+            }
+            
+            .section-content {
+                margin-left: 0;
+            }
+        }
+    </style>
 </head>
 <body>
-  <h1>Terms of Service</h1>
-  <p class="small"><strong>Effective Date:</strong> September 9, 2025</p>
-  
-  <div class="section">
-    <h2>1. Acceptance</h2>
-    <p>These Terms of Service ("Terms") govern your use of the Momentro internal dashboard located at <em>eyqi6vd53z.us-east-2.awsapprunner.com</em>. By accessing or using the dashboard you agree to comply with these Terms.</p>
-  </div>
-  
-  <div class="section">
-    <h2>2. Access & Eligibility</h2>
-    <p>The dashboard is provided for internal use by authorized employees and contractors of Momentro Pvt Ltd. Access is granted only to approved accounts for the purpose of accessing Meta Ads and Facebook Page Insights to manage client campaigns. You must not allow unauthorized persons to access the dashboard.</p>
-  </div>
-  
-  <div class="section">
-    <h2>3. Authorized Use</h2>
-    <p>Authorized users may view, analyze, and export aggregated reports for internal business purposes and legitimate campaign management activities. Use must comply with Meta Platform Terms and applicable laws.</p>
-  </div>
-  
-  <div class="section">
-    <h2>4. Prohibited Actions</h2>
-    <ul>
-      <li>Do not copy, store, or transfer Platform Data to personal devices.</li>
-      <li>Do not share access credentials or provide dashboard access to third parties without authorization.</li>
-      <li>Do not attempt to reverse-engineer, circumvent security controls, or use the dashboard for unauthorized data scraping.</li>
-      <li>Do not export or disclose Platform Data outside approved business purposes.</li>
-    </ul>
-  </div>
-  
-  <div class="section">
-    <h2>5. Use of Platform Data</h2>
-    <p>All data accessed through the dashboard is subject to Meta's Platform Terms and must be handled in accordance with Meta's policies. Data may only be used for legitimate campaign management activities and internal reporting purposes.</p>
-  </div>
-  
-  <div class="section">
-    <h2>6. Data Security</h2>
-    <p>We implement technical and organizational measures to secure Platform Data. Employees are required to comply with internal security protocols at all times. Platform Data will be deleted when no longer required for business purposes or upon request.</p>
-  </div>
-  
-  <div class="section">
-    <h2>7. Intellectual Property</h2>
-    <p>All software, dashboards, reports, and underlying IP are owned by Momentro Pvt Ltd or licensed to it. Users obtain no ownership rights by using the dashboard.</p>
-  </div>
-  
-  <div class="section">
-    <h2>8. Disclaimer</h2>
-    <p>The dashboard and its content are provided "as is" for internal use. While we strive for accuracy, we do not guarantee completeness or that the service will be error-free.</p>
-  </div>
-  
-  <div class="section">
-    <h2>9. Limitation of Liability</h2>
-    <p>To the maximum extent permitted by law, Momentro Pvt Ltd will not be liable for indirect, incidental, or consequential damages arising from use of the dashboard.</p>
-  </div>
-  
-  <div class="section">
-    <h2>10. Termination</h2>
-    <p>We reserve the right to suspend or revoke access for any user who violates these Terms or any applicable policies. Upon termination, the user must cease all use of the dashboard.</p>
-  </div>
-  
-  <div class="section">
-    <h2>11. Changes to Terms</h2>
-    <p>We may modify these Terms. Updated Terms will be posted at this URL with a new effective date. Any changes will be communicated to the internal campaign team. Continued use after changes constitutes acceptance.</p>
-  </div>
-  
-  <div class="section">
-    <h2>12. Governing Law</h2>
-    <p>These Terms are governed by the laws of Sri Lanka.</p>
-  </div>
-  
-  <div class="section">
-    <h2>13. Contact</h2>
-    <p>Questions about these Terms can be sent to: <strong>supportdash@momentro.com</strong></p>
-    <p class="small">Momentro Pvt Ltd — Internal Dashboard Terms of Service</p>
-  </div>
+    <div class="container">
+        <div class="content">
+            <div class="header">
+                <div class="logo">Momentro Pvt Ltd</div>
+                <h1>Terms of Service</h1>
+                <div class="effective-date">Effective Date: September 9, 2025</div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">1</span>
+                    Acceptance
+                </div>
+                <div class="section-content">
+                    <p>These Terms of Service ("Terms") govern your use of the Momentro internal dashboard located at <span class="url-highlight">eyqi6vd53z.us-east-2.awsapprunner.com</span>. By accessing or using the dashboard you agree to comply with these Terms.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">2</span>
+                    Access & Eligibility
+                </div>
+                <div class="section-content">
+                    <p>The dashboard is provided for internal use by authorized employees and contractors of <strong>Momentro Pvt Ltd</strong>. Access is granted only to approved accounts for the purpose of accessing Meta Ads and Facebook Page Insights to manage client campaigns.</p>
+                    <div class="warning-box">
+                        <strong>Important:</strong> You must not allow unauthorized persons to access the dashboard.
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">3</span>
+                    Authorized Use
+                </div>
+                <div class="section-content">
+                    <p>Authorized users may view, analyze, and export aggregated reports for internal business purposes and legitimate campaign management activities. Use must comply with Meta Platform Terms and applicable laws.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">4</span>
+                    Prohibited Actions
+                </div>
+                <div class="section-content">
+                    <p>The following actions are strictly prohibited:</p>
+                    <ul>
+                        <li>Do not copy, store, or transfer Platform Data to personal devices.</li>
+                        <li>Do not share access credentials or provide dashboard access to third parties without authorization.</li>
+                        <li>Do not attempt to reverse-engineer, circumvent security controls, or use the dashboard for unauthorized data scraping.</li>
+                        <li>Do not export or disclose Platform Data outside approved business purposes.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">5</span>
+                    Use of Platform Data
+                </div>
+                <div class="section-content">
+                    <p>All data accessed through the dashboard is subject to Meta's Platform Terms and must be handled in accordance with Meta's policies. Data may only be used for legitimate campaign management activities and internal reporting purposes.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">6</span>
+                    Data Security
+                </div>
+                <div class="section-content">
+                    <p>We implement technical and organizational measures to secure Platform Data. Employees are required to comply with internal security protocols at all times. Platform Data will be deleted when no longer required for business purposes or upon request.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">7</span>
+                    Intellectual Property
+                </div>
+                <div class="section-content">
+                    <p>All software, dashboards, reports, and underlying IP are owned by <strong>Momentro Pvt Ltd</strong> or licensed to it. Users obtain no ownership rights by using the dashboard.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">8</span>
+                    Disclaimer
+                </div>
+                <div class="section-content">
+                    <p>The dashboard and its content are provided "as is" for internal use. While we strive for accuracy, we do not guarantee completeness or that the service will be error-free.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">9</span>
+                    Limitation of Liability
+                </div>
+                <div class="section-content">
+                    <p>To the maximum extent permitted by law, <strong>Momentro Pvt Ltd</strong> will not be liable for indirect, incidental, or consequential damages arising from use of the dashboard.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">10</span>
+                    Termination
+                </div>
+                <div class="section-content">
+                    <p>We reserve the right to suspend or revoke access for any user who violates these Terms or any applicable policies. Upon termination, the user must cease all use of the dashboard.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">11</span>
+                    Changes to Terms
+                </div>
+                <div class="section-content">
+                    <p>We may modify these Terms. Updated Terms will be posted at this URL with a new effective date. Any changes will be communicated to the internal campaign team. Continued use after changes constitutes acceptance.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">
+                    <span class="section-number">12</span>
+                    Governing Law
+                </div>
+                <div class="section-content">
+                    <p>These Terms are governed by the laws of <strong>Sri Lanka</strong>.</p>
+                </div>
+            </div>
+
+            <div class="important-notice">
+                <h4>Internal Use Only</h4>
+                <p>This dashboard and these terms are intended exclusively for authorized Momentro Pvt Ltd employees and contractors. Unauthorized access or use is strictly prohibited.</p>
+            </div>
+
+            <div class="contact-info">
+                <h3>Questions About These Terms?</h3>
+                <p>For questions or clarifications regarding these Terms of Service:</p>
+                <p><a href="mailto:supportdash@momentro.com" class="email-link">supportdash@momentro.com</a></p>
+            </div>
+
+            <div class="footer">
+                <p><strong>Momentro Pvt Ltd</strong> — Internal Dashboard Terms of Service</p>
+                <p>This document governs the internal analytics dashboard and is for authorized users only.</p>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
