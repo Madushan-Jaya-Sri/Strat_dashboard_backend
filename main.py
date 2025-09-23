@@ -395,7 +395,36 @@ async def health_check():
         }
     }
 
+# Add these endpoint functions to your main.py file
 
+@app.get("/privacy")
+async def privacy_page():
+    """Serve the privacy policy HTML page"""
+    try:
+        # Read the HTML file content and return as HTMLResponse
+        with open("privacy.html", "r", encoding="utf-8") as file:
+            html_content = file.read()
+        return HTMLResponse(content=html_content, status_code=200)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Privacy policy page not found")
+    except Exception as e:
+        logger.error(f"Error serving privacy page: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/terms")
+async def terms_page():
+    """Serve the terms of service HTML page"""
+    try:
+        # Read the HTML file content and return as HTMLResponse
+        with open("terms.html", "r", encoding="utf-8") as file:
+            html_content = file.read()
+        return HTMLResponse(content=html_content, status_code=200)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Terms of service page not found")
+    except Exception as e:
+        logger.error(f"Error serving terms page: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
 # =============================================================================
 # TESTING AND DEBUG ENDPOINTS
 # =============================================================================
