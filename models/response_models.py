@@ -624,3 +624,183 @@ class RevenueTimeSeries(BaseModel):
     totals: Dict[str, Any]
     # error: str | None = None
     error: Optional[str] = None
+
+
+
+"""
+Response Models for Facebook and Instagram APIs
+Clean Pydantic models for social media platform responses
+"""
+
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+# =============================================================================
+# FACEBOOK MODELS
+# =============================================================================
+
+class FacebookPage(BaseModel):
+    id: str
+    name: str
+    category: str
+    about: str
+    website: str
+    fan_count: int
+    followers_count: int
+    picture_url: str
+    access_token: str
+    has_insights_access: bool
+
+class FacebookPageBasicStats(BaseModel):
+    page_id: str
+    page_name: str
+    period: str
+    date_range: str
+    total_fans: int
+    new_fans: int
+    fan_growth_rate: float
+    total_reach: int
+    total_impressions: int
+    engaged_users: int
+    engagement_rate: float
+    category: str
+    website: str
+    has_insights_access: bool
+    generated_at: str
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+class FacebookPost(BaseModel):
+    id: str
+    message: str
+    created_time: str
+    type: str
+    permalink_url: str
+    likes_count: int
+    comments_count: int
+    shares_count: int
+    total_engagement: int
+
+class FacebookPageSummary(BaseModel):
+    page_id: str
+    page_name: str
+    period: str
+    total_fans: int
+    new_fans: int
+    fan_growth_rate: float
+    total_reach: int
+    engaged_users: int
+    engagement_rate: float
+    total_posts: int
+    total_post_engagement: int
+    avg_engagement_per_post: float
+    top_performing_post: Optional[FacebookPost]
+    category: str
+    website: str
+    has_insights_access: bool
+    generated_at: str
+
+# =============================================================================
+# INSTAGRAM MODELS
+# =============================================================================
+
+class InstagramAccount(BaseModel):
+    id: str
+    username: str
+    name: str
+    biography: str
+    website: str
+    followers_count: int
+    follows_count: int
+    media_count: int
+    profile_picture_url: str
+    account_type: str
+    connected_facebook_page: Optional[Dict[str, str]] = None
+
+class InstagramAccountBasicStats(BaseModel):
+    account_id: str
+    username: str
+    name: str
+    period: str
+    date_range: str
+    impressions: int
+    reach: int
+    profile_views: int
+    website_clicks: int
+    follower_count: int
+    reach_rate: float
+    followers_count: int
+    follows_count: int
+    media_count: int
+    biography: str
+    website: str
+    generated_at: str
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+class InstagramMedia(BaseModel):
+    id: str
+    caption: str
+    media_type: str
+    media_url: str
+    permalink: str
+    thumbnail_url: str
+    timestamp: str
+    username: str
+    like_count: int
+    comments_count: int
+    total_engagement: int
+    impressions: int
+    reach: int
+    engagement_rate: float
+
+class InstagramHashtag(BaseModel):
+    hashtag: str
+    posts_count: int
+    avg_engagement_per_post: float
+    avg_reach_per_post: float
+    total_engagement: int
+
+class InstagramAccountSummary(BaseModel):
+    account_id: str
+    username: str
+    name: str
+    period: str
+    followers_count: int
+    follows_count: int
+    media_count: int
+    total_impressions: int
+    total_reach: int
+    profile_views: int
+    website_clicks: int
+    reach_rate: float
+    posts_in_period: int
+    total_media_engagement: int
+    avg_engagement_per_post: float
+    overall_engagement_rate: float
+    best_performing_post: Optional[InstagramMedia]
+    biography: str
+    website: str
+    generated_at: str
+
+# =============================================================================
+# COMBINED SOCIAL MEDIA MODELS
+# =============================================================================
+
+class SocialMediaOverview(BaseModel):
+    facebook_pages: Optional[List[FacebookPage]] = None
+    instagram_accounts: Optional[List[InstagramAccount]] = None
+    total_social_followers: int
+    total_social_engagement: int
+    generated_at: str
+
+# =============================================================================
+# ERROR MODELS
+# =============================================================================
+
+class SocialMediaError(BaseModel):
+    platform: str
+    error: str
+    detail: Optional[str] = None
+    status_code: int
