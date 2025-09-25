@@ -16,7 +16,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
 
-
 try:
     from utils.helpers import format_large_number, format_currency
 except ImportError:
@@ -37,9 +36,9 @@ class MetaManager:
     def __init__(self, user_email: str, auth_manager: AuthManager):
         self.auth_manager = auth_manager
         self.user_email = user_email
+        self.email = user_email  # Add for compatibility
         
-        # ADD THESE MISSING LINES:
-        self.email = user_email
+        # Initialize API configuration
         self.api_version = "v18.0"
         self.base_url = f"https://graph.facebook.com/{self.api_version}"
         
@@ -57,12 +56,7 @@ class MetaManager:
     def get_user_accounts(self) -> Dict[str, Any]:
         """Get user's Facebook pages and ad accounts with better error handling"""
         try:
-
-
-            # Use getattr to safely get user identifier
-            user_identifier = getattr(self, 'email', None) or getattr(self, 'user_id', None) or 'unknown_user'
-            logger.info(f"Getting Facebook accounts for user: {user_identifier}")
-
+            logger.info(f"Getting Facebook accounts for user: {self.user_email}")
             
             # Initialize results
             result = {
@@ -191,13 +185,7 @@ class MetaManager:
             return result
             
         except Exception as e:
-<<<<<<< HEAD
             logger.error(f"Error getting Facebook accounts for {self.user_email}: {e}")
-
-=======
-            user_identifier = getattr(self, 'email', None) or getattr(self, 'user_id', None) or 'unknown_user'
-            logger.error(f"Error getting Facebook accounts for {user_identifier}: {e}")
->>>>>>> 1932d604aabc5df15048c329b6b2a525eeb32370
             
             # Return partial data instead of failing completely
             return {
@@ -293,7 +281,8 @@ class MetaManager:
         try:
             endpoint = "me/adaccounts"
             params = {
-                "fields": "id,name,account_status,currency,balance,amount_spent,spend_cap,timezone_name,business"
+                "fields": "id,name,account_status,currency,balance,amount_spent,spend_cap,timezone_name,business",
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -347,7 +336,8 @@ class MetaManager:
             endpoint = f"{account_id}/campaigns"
             params = {
                 "fields": "id,name,status,objective,created_time,start_time,stop_time,updated_time",
-                "limit": 100
+                "limit": 100,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -391,7 +381,8 @@ class MetaManager:
             params = {
                 "fields": "spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,actions,cost_per_action_type",
                 "time_range": f"{{'since':'{date_range['since']}','until':'{date_range['until']}'}}",
-                "limit": 1
+                "limit": 1,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -435,7 +426,8 @@ class MetaManager:
             params = {
                 "fields": "spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,actions,cost_per_action_type,unique_clicks,link_clicks,post_engagement",
                 "time_range": f"{{'since':'{date_range['since']}','until':'{date_range['until']}'}}",
-                "limit": 1
+                "limit": 1,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -455,9 +447,6 @@ class MetaManager:
                 cost_per_click = self.safe_float(insight.get('cpc', 0))
                 cost_per_mille = self.safe_float(insight.get('cpm', 0))
                 frequency = self.safe_float(insight.get('frequency', 0))
-                
-                # Format for dashboard display
-                from utils.helpers import format_large_number, format_currency
                 
                 return {
                     'total_spend': {
@@ -555,7 +544,8 @@ class MetaManager:
                 "fields": "spend,impressions,clicks,ctr,cpc,placement",
                 "breakdowns": "publisher_platform,platform_position",
                 "time_range": f"{{'since':'{date_range['since']}','until':'{date_range['until']}'}}",
-                "limit": 50
+                "limit": 50,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -591,7 +581,8 @@ class MetaManager:
                 "fields": "spend,impressions,clicks,ctr,cpc,reach",
                 "breakdowns": "age,gender",
                 "time_range": f"{{'since':'{date_range['since']}','until':'{date_range['until']}'}}",
-                "limit": 50
+                "limit": 50,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -626,7 +617,8 @@ class MetaManager:
                 "fields": "spend,impressions,clicks,ctr,cpc,reach",
                 "time_increment": "1",  # Daily breakdown
                 "time_range": f"{{'since':'{date_range['since']}','until':'{date_range['until']}'}}",
-                "limit": 100
+                "limit": 100,
+                "access_token": self.access_token
             }
             
             response = self._make_api_request(endpoint, params)
@@ -688,13 +680,14 @@ class MetaManager:
                     
                     if endpoint_type == 0:
                         # Call ad accounts endpoint
-                        self._make_api_request("me/adaccounts")
+                        self._make_api_request("me/adaccounts", {"access_token": self.access_token})
                         call_breakdown["ad_accounts"] += 1
                         
                     elif endpoint_type == 1:
                         # Call campaigns endpoint
                         self._make_api_request(f"{account_id}/campaigns", {
-                            "fields": "id,name,status,objective"
+                            "fields": "id,name,status,objective",
+                            "access_token": self.access_token
                         })
                         call_breakdown["campaigns"] += 1
                         
@@ -702,28 +695,32 @@ class MetaManager:
                         # Call insights endpoint
                         self._make_api_request(f"{account_id}/insights", {
                             "date_preset": "last_7d",
-                            "fields": "impressions,clicks,spend"
+                            "fields": "impressions,clicks,spend",
+                            "access_token": self.access_token
                         })
                         call_breakdown["insights"] += 1
                         
                     elif endpoint_type == 3:
                         # Call ad sets endpoint
                         self._make_api_request(f"{account_id}/adsets", {
-                            "fields": "id,name,status"
+                            "fields": "id,name,status",
+                            "access_token": self.access_token
                         })
                         call_breakdown["ad_sets"] += 1
                         
                     elif endpoint_type == 4:
                         # Call ads endpoint
                         self._make_api_request(f"{account_id}/ads", {
-                            "fields": "id,name,status"
+                            "fields": "id,name,status",
+                            "access_token": self.access_token
                         })
                         call_breakdown["ads"] += 1
                         
                     else:
                         # Call audiences endpoint
                         self._make_api_request(f"{account_id}/customaudiences", {
-                            "fields": "id,name"
+                            "fields": "id,name",
+                            "access_token": self.access_token
                         })
                         call_breakdown["audiences"] += 1
                     
@@ -748,7 +745,7 @@ class MetaManager:
         """Get API usage statistics (mock implementation - Facebook doesn't provide this directly)"""
         try:
             # Make a test call to verify API access
-            test_response = self._make_api_request("me/adaccounts", {"limit": 1})
+            test_response = self._make_api_request("me/adaccounts", {"limit": 1, "access_token": self.access_token})
             
             # Since Facebook doesn't provide usage stats directly, we'll return helpful info
             return {
@@ -770,7 +767,6 @@ class MetaManager:
                 "error": str(e),
                 "permissions_note": "API access may be limited or expired"
             }
-
 
     # =============================================================================
     # UTILITY METHODS
