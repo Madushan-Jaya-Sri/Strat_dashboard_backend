@@ -56,7 +56,9 @@ class MetaManager:
     def get_user_accounts(self) -> Dict[str, Any]:
         """Get user's Facebook pages and ad accounts with better error handling"""
         try:
-            logger.info(f"Getting Facebook accounts for user: {self.user_id}")
+            # Use getattr to safely get user identifier
+            user_identifier = getattr(self, 'email', None) or getattr(self, 'user_id', None) or 'unknown_user'
+            logger.info(f"Getting Facebook accounts for user: {user_identifier}")
             
             # Initialize results
             result = {
@@ -185,7 +187,8 @@ class MetaManager:
             return result
             
         except Exception as e:
-            logger.error(f"Error getting Facebook accounts for {self.user_id}: {e}")
+            user_identifier = getattr(self, 'email', None) or getattr(self, 'user_id', None) or 'unknown_user'
+            logger.error(f"Error getting Facebook accounts for {user_identifier}: {e}")
             
             # Return partial data instead of failing completely
             return {
