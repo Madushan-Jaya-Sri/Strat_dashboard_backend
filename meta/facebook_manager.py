@@ -146,27 +146,48 @@ class FacebookManager:
             page_access_token = None
             page_info = None
             
+            logger.info(f"Looking for page {page_id} in {len(pages)} available pages")
+            
             for page in pages:
                 if page['id'] == page_id:
                     page_access_token = page.get('access_token')
                     page_info = page
+                    logger.info(f"Found page: {page.get('name')} - Has insights access: {page.get('has_insights_access', False)}")
                     break
             
-            if not page_access_token:
-                raise HTTPException(status_code=404, detail="Page not found or no access token available")
+            if not page_info:
+                raise HTTPException(status_code=404, detail=f"Page {page_id} not found in user's pages")
             
-            # Define metrics to fetch
+            if not page_access_token:
+                logger.error(f"No access token available for page {page_id}")
+                raise HTTPException(status_code=403, detail="No access token available for this page. Please ensure you have admin rights to the page.")
+            
+            # Check if insights access is available
+            if not page_info.get('has_insights_access', False):
+                logger.warning(f"Page {page_id} doesn't have insights access")
+                # Still try to fetch insights, sometimes the flag is incorrect
+            
+            # Test page access token validity first
+            test_endpoint = f"{page_id}"
+            test_params = {
+                'access_token': page_access_token,
+                'fields': 'id,name'
+            }
+            
+            try:
+                test_response = self._make_api_request(test_endpoint, test_params)
+                logger.info(f"Page access token is valid for page: {test_response.get('name')}")
+            except Exception as e:
+                logger.error(f"Page access token validation failed: {e}")
+                raise HTTPException(status_code=403, detail="Invalid page access token")
+            
+            # Define metrics to fetch (reduced set for testing)
             metrics = [
                 'page_fans',  # Total page likes
-                'page_fan_adds',  # New page likes
-                'page_fan_removes',  # Page unlikes
+                'page_fan_adds',  # New page likes  
                 'page_impressions',  # Total reach
                 'page_impressions_unique',  # Unique reach
                 'page_engaged_users',  # People engaged
-                'page_post_engagements',  # Post engagements
-                'page_posts_impressions',  # Post reach
-                'page_video_views',  # Video views
-                'page_views_total'  # Page views
             ]
             
             endpoint = f"{page_id}/insights"
@@ -178,7 +199,27 @@ class FacebookManager:
                 'access_token': page_access_token
             }
             
-            response = self._make_api_request(endpoint, params)
+            logger.info(f"Fetching insights for page {page_id} with params: {params}")
+            
+            try:
+                response = self._make_api_request(endpoint, params)
+                logger.info(f"Successfully fetched insights data: {len(response.get('data', []))} metrics")
+            except Exception as api_error:
+                logger.error(f"Facebook API error when fetching insights: {api_error}")
+                
+                # Check if it's a permissions error
+                if "insufficient permissions" in str(api_error).lower():
+                    return {
+                        'page_id': page_id,
+                        'page_name': page_info.get('name', ''),
+                        'error': 'Insufficient permissions to access insights',
+                        'message': 'This page may not have enough followers (needs 30+ followers) or you may need additional permissions like read_insights.',
+                        'has_insights_access': page_info.get('has_insights_access', False),
+                        'fan_count': page_info.get('fan_count', 0),
+                        'generated_at': datetime.now().isoformat()
+                    }
+                else:
+                    raise
             
             # Process insights data
             insights_data = {}
@@ -186,20 +227,21 @@ class FacebookManager:
                 metric_name = metric_data.get('name', '')
                 values = metric_data.get('values', [])
                 
-                # Sum up daily values
-                total_value = sum(self.safe_int(value.get('value', 0)) for value in values)
-                insights_data[metric_name] = total_value
+                # Sum up daily values or get latest value for cumulative metrics
+                if metric_name in ['page_fans']:  # Cumulative metrics - get latest value
+                    latest_value = values[-1].get('value', 0) if values else 0
+                    insights_data[metric_name] = self.safe_int(latest_value)
+                else:  # Sum daily values for period metrics
+                    total_value = sum(self.safe_int(value.get('value', 0)) for value in values)
+                    insights_data[metric_name] = total_value
             
             # Calculate derived metrics
             total_fans = insights_data.get('page_fans', 0)
             new_fans = insights_data.get('page_fan_adds', 0)
-            lost_fans = insights_data.get('page_fan_removes', 0)
-            net_fan_change = new_fans - lost_fans
             
             total_reach = insights_data.get('page_impressions_unique', 0)
             total_impressions = insights_data.get('page_impressions', 0)
             engaged_users = insights_data.get('page_engaged_users', 0)
-            post_engagements = insights_data.get('page_post_engagements', 0)
             
             engagement_rate = (engaged_users / total_reach * 100) if total_reach > 0 else 0
             frequency = (total_impressions / total_reach) if total_reach > 0 else 0
@@ -213,9 +255,7 @@ class FacebookManager:
                 # Fan metrics
                 'total_fans': total_fans,
                 'new_fans': new_fans,
-                'lost_fans': lost_fans,
-                'net_fan_change': net_fan_change,
-                'fan_growth_rate': (net_fan_change / total_fans * 100) if total_fans > 0 else 0,
+                'fan_growth_rate': (new_fans / total_fans * 100) if total_fans > 0 else 0,
                 
                 # Reach and impressions
                 'total_reach': total_reach,
@@ -224,21 +264,31 @@ class FacebookManager:
                 
                 # Engagement
                 'engaged_users': engaged_users,
-                'post_engagements': post_engagements,
                 'engagement_rate': round(engagement_rate, 2),
                 
-                # Content performance
-                'video_views': insights_data.get('page_video_views', 0),
-                'page_views': insights_data.get('page_views_total', 0),
-                'post_reach': insights_data.get('page_posts_impressions', 0),
-                
+                # Additional info
+                'has_insights_access': page_info.get('has_insights_access', False),
                 'generated_at': datetime.now().isoformat()
             }
             
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
         except Exception as e:
             logger.error(f"Error fetching page insights for {page_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch page insights: {str(e)}")
-    
+
+    def safe_int(self, value):
+        """Safely convert value to int"""
+        try:
+            if isinstance(value, (int, float)):
+                return int(value)
+            elif isinstance(value, str):
+                return int(float(value))
+            else:
+                return 0
+        except (ValueError, TypeError):
+            return 0
     # =============================================================================
     # POST ANALYTICS
     # =============================================================================

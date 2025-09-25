@@ -61,11 +61,11 @@ class AuthManager:
         
         self.FACEBOOK_SCOPES = [
             'email',
-            'ads_read',
-            'ads_management',
+            # 'ads_read',
+            # 'ads_management',
             # 'business_management',
             'public_profile',
-            'pages_show_list',           # Required to see pages
+            # 'pages_show_list',           # Required to see pages
             # 'pages_read_engagement',     # Required to read page data
             # 'instagram_basic'            # For Instagram Business accounts
         ]
@@ -75,6 +75,7 @@ class AuthManager:
         self.facebook_sessions: Dict[str, Dict[str, Any]] = {}
         self.oauth_states: Dict[str, str] = {}
         self.facebook_states: Dict[str, str] = {}
+        
         
         logger.info(f"✅ AuthManager initialized")
         logger.info(f"📱 Google Client ID: {self.GOOGLE_CLIENT_ID[:20]}...")
@@ -287,6 +288,8 @@ class AuthManager:
             raise HTTPException(status_code=500, detail=f"Failed to generate Facebook authorization URL: {str(e)}")
     
     async def handle_facebook_callback(self, code: str, state: Optional[str] = None):
+
+        
         """Handle Facebook OAuth callback with comprehensive debugging"""
         logger.info("🔄 FACEBOOK CALLBACK PROCESSING STARTED")
         logger.info("=" * 60)
@@ -385,17 +388,26 @@ class AuthManager:
             logger.info(f"   - Final email: {user_email}")
             logger.info(f"   - Final name: {formatted_user_info['name']}")
             
-            # Step 5: Store Facebook session
-            logger.info("📋 Step 5: Storing Facebook session...")
-            session_data = {
-                'access_token': access_token,
-                'token_type': token_data.get("token_type", "bearer"),
-                'expires_in': token_data.get("expires_in"),
-                'user_info': formatted_user_info,
-                'auth_provider': 'facebook',
-                'created_at': datetime.now().isoformat()
-            }
-            
+            try:
+                # Step 5: Store Facebook session
+                logger.info("📋 Step 5: Storing Facebook session...")
+                session_data = {
+                    'access_token': access_token,
+                    'token_type': token_data.get("token_type", "bearer"),
+                    'expires_in': token_data.get("expires_in"),
+                    'user_info': formatted_user_info,
+                    'auth_provider': 'facebook', 
+                    'created_at': datetime.now().isoformat()
+                }
+                
+                self.facebook_sessions[user_email] = session_data
+                logger.info(f"✅ Session stored for user: {user_email}")
+                
+            except Exception as session_error:
+                logger.error(f"❌ Error creating session data: {session_error}")
+                raise HTTPException(status_code=500, detail=f"Failed to create user session: {str(session_error)}")
+
+            # Store the session
             self.facebook_sessions[user_email] = session_data
             logger.info(f"✅ Session stored for user: {user_email}")
             logger.info(f"   - Total Facebook sessions: {len(self.facebook_sessions)}")
@@ -479,25 +491,18 @@ class AuthManager:
         
         return credentials
     
+    # And make sure get_facebook_access_token has this exact logic:
     def get_facebook_access_token(self, user_email: str) -> str:
-        """Get Facebook access token for API calls with debugging"""
-        logger.info(f"🔑 Retrieving Facebook access token for: {user_email}")
-        logger.info(f"   - Available sessions: {list(self.facebook_sessions.keys())}")
+        logger.info(f"Looking for Facebook token for: {user_email}")
+        logger.info(f"Available sessions: {list(self.facebook_sessions.keys())}")
         
         if user_email not in self.facebook_sessions:
-            logger.error(f"❌ User {user_email} not found in Facebook sessions")
-            logger.error(f"   - Available emails: {list(self.facebook_sessions.keys())}")
-            raise HTTPException(status_code=401, detail="Facebook user not authenticated")
+            raise HTTPException(status_code=401, detail="Facebook authentication required")
         
-        session = self.facebook_sessions[user_email]
-        access_token = session.get('access_token')
-        
+        access_token = self.facebook_sessions[user_email].get('access_token')
         if not access_token:
-            logger.error(f"❌ No access token found for user {user_email}")
-            logger.error(f"   - Session keys: {list(session.keys())}")
             raise HTTPException(status_code=401, detail="No Facebook access token available")
         
-        logger.info(f"✅ Access token retrieved successfully: {access_token[:20]}...")
         return access_token
     
     def get_user_session(self, user_email: str, auth_provider: str = "google") -> Dict[str, Any]:
