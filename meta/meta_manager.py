@@ -53,32 +53,193 @@ class MetaManager:
             logger.error(f"❌ Failed to get access token: {e}")
             raise HTTPException(status_code=401, detail=f"Facebook authentication required: {str(e)}")
     
-    def _make_api_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Make API request to Facebook Graph API"""
-        if params is None:
-            params = {}
-        
-        # Add access token to all requests
-        params['access_token'] = self.access_token
-        
-        url = f"{self.base_url}/{endpoint}"
-        
+    def get_user_accounts(self) -> Dict[str, Any]:
+        """Get user's Facebook pages and ad accounts with better error handling"""
         try:
-            response = requests.get(url, params=params)
+            logger.info(f"Getting Facebook accounts for user: {self.user_id}")
             
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Meta API error {response.status_code}: {response.text}")
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Meta API error: {response.text}"
-                )
+            # Initialize results
+            result = {
+                'pages': [],
+                'ad_accounts': [],
+                'total_accounts': 0
+            }
+            
+            # First, try to get pages using /me/accounts
+            try:
+                logger.info("Attempting to fetch Facebook pages...")
+                pages_endpoint = "me/accounts"
+                pages_params = {
+                    'access_token': self.access_token,
+                    'fields': 'id,name,access_token,category,category_list,about,description,website,phone,location,fan_count,followers_count,picture,tasks'
+                }
                 
+                pages_response = self._make_api_request(pages_endpoint, pages_params)
+                pages_data = pages_response.get('data', [])
+                
+                logger.info(f"Successfully fetched {len(pages_data)} Facebook pages")
+                
+                # Process pages data
+                for page in pages_data:
+                    # Check if user has insights access (requires MANAGE or CREATE_CONTENT tasks)
+                    tasks = page.get('tasks', [])
+                    has_insights_access = any(task in ['MANAGE', 'CREATE_CONTENT', 'ADVERTISE'] for task in tasks)
+                    
+                    processed_page = {
+                        'id': page.get('id'),
+                        'name': page.get('name'),
+                        'category': page.get('category'),
+                        'category_list': page.get('category_list', []),
+                        'about': page.get('about', ''),
+                        'description': page.get('description', ''),
+                        'website': page.get('website', ''),
+                        'phone': page.get('phone', ''),
+                        'location': page.get('location', {}),
+                        'fan_count': page.get('fan_count', 0),
+                        'followers_count': page.get('followers_count', 0),
+                        'engagement': page.get('engagement', {}),
+                        'picture_url': page.get('picture', {}).get('data', {}).get('url', ''),
+                        'access_token': page.get('access_token', ''),
+                        'has_insights_access': has_insights_access,
+                        'tasks': tasks
+                    }
+                    
+                    result['pages'].append(processed_page)
+                    
+            except Exception as pages_error:
+                logger.warning(f"Failed to fetch pages: {pages_error}")
+                # Don't fail completely, just log the error
+                
+            # Try to get ad accounts (this might fail for some users)
+            try:
+                logger.info("Attempting to fetch ad accounts...")
+                
+                # First check if user has access to business manager
+                try:
+                    business_endpoint = "me/businesses"
+                    business_params = {
+                        'access_token': self.access_token,
+                        'fields': 'id,name'
+                    }
+                    business_response = self._make_api_request(business_endpoint, business_params)
+                    businesses = business_response.get('data', [])
+                    
+                    if businesses:
+                        logger.info(f"User has access to {len(businesses)} business(es)")
+                        # Try to get ad accounts through business manager
+                        for business in businesses:
+                            try:
+                                ad_accounts_endpoint = f"{business['id']}/adaccounts"
+                                ad_accounts_params = {
+                                    'access_token': self.access_token,
+                                    'fields': 'id,name,account_status,currency,timezone_name,amount_spent,balance'
+                                }
+                                ad_accounts_response = self._make_api_request(ad_accounts_endpoint, ad_accounts_params)
+                                
+                                for ad_account in ad_accounts_response.get('data', []):
+                                    result['ad_accounts'].append({
+                                        'id': ad_account.get('id'),
+                                        'name': ad_account.get('name'),
+                                        'account_status': ad_account.get('account_status'),
+                                        'currency': ad_account.get('currency'),
+                                        'timezone_name': ad_account.get('timezone_name'),
+                                        'amount_spent': ad_account.get('amount_spent'),
+                                        'balance': ad_account.get('balance'),
+                                        'business_id': business['id'],
+                                        'business_name': business['name']
+                                    })
+                            except Exception as business_ad_error:
+                                logger.warning(f"Failed to fetch ad accounts for business {business['id']}: {business_ad_error}")
+                    
+                    else:
+                        logger.info("User has no businesses, trying direct ad accounts access...")
+                        # Try direct ad accounts access
+                        ad_accounts_endpoint = "me/adaccounts"
+                        ad_accounts_params = {
+                            'access_token': self.access_token,
+                            'fields': 'id,name,account_status,currency'
+                        }
+                        ad_accounts_response = self._make_api_request(ad_accounts_endpoint, ad_accounts_params)
+                        
+                        for ad_account in ad_accounts_response.get('data', []):
+                            result['ad_accounts'].append({
+                                'id': ad_account.get('id'),
+                                'name': ad_account.get('name'),
+                                'account_status': ad_account.get('account_status'),
+                                'currency': ad_account.get('currency')
+                            })
+                            
+                except Exception as business_error:
+                    logger.warning(f"Business/Ad accounts access failed: {business_error}")
+                    # This is not critical, some users don't have ad accounts
+                    
+            except Exception as ad_error:
+                logger.warning(f"Failed to fetch ad accounts: {ad_error}")
+                # Not critical, continue without ad accounts
+                
+            # Calculate totals
+            result['total_accounts'] = len(result['pages']) + len(result['ad_accounts'])
+            
+            logger.info(f"Successfully retrieved {len(result['pages'])} pages and {len(result['ad_accounts'])} ad accounts")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting Facebook accounts for {self.user_id}: {e}")
+            
+            # Return partial data instead of failing completely
+            return {
+                'pages': [],
+                'ad_accounts': [],
+                'total_accounts': 0,
+                'error': f"Partial failure: {str(e)}",
+                'message': "Some account data may not be available due to permissions or account type"
+            }
+
+    def _make_api_request(self, endpoint: str, params: Dict[str, Any], method: str = 'GET') -> Dict[str, Any]:
+        """Make request to Facebook Graph API with better error handling"""
+        try:
+            url = f"{self.base_url}/{endpoint}"
+            
+            if method.upper() == 'GET':
+                response = requests.get(url, params=params, timeout=30)
+            else:
+                response = requests.post(url, json=params, timeout=30)
+                
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            # Check for Facebook API errors
+            if 'error' in response_data:
+                error_info = response_data['error']
+                error_message = f"Facebook API Error {error_info.get('code', 'unknown')}: {error_info.get('message', 'Unknown error')}"
+                
+                # Log specific error details
+                logger.error(f"Meta API error {error_info.get('code', 'unknown')}: {response_data}")
+                
+                # Handle specific error codes
+                if error_info.get('code') == 100:
+                    raise ValueError(f"Invalid API request: {error_info.get('message', 'Unsupported request')}")
+                elif error_info.get('code') == 190:
+                    raise ValueError(f"Access token error: {error_info.get('message', 'Invalid access token')}")
+                elif error_info.get('code') == 200:
+                    raise ValueError(f"Permission error: {error_info.get('message', 'Insufficient permissions')}")
+                else:
+                    raise ValueError(error_message)
+                    
+            return response_data
+            
         except requests.exceptions.RequestException as e:
-            logger.error(f"Meta API request failed: {e}")
-            raise HTTPException(status_code=500, detail=f"Meta API request failed: {str(e)}")
-    
+            logger.error(f"Request error: {e}")
+            raise ValueError(f"Network error: {str(e)}")
+        except ValueError:
+            # Re-raise ValueError (Facebook API errors)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in API request: {e}")
+            raise ValueError(f"Unexpected error: {str(e)}")
+
     def safe_float(self, value, default=0.0):
         """Safely convert to float"""
         try:

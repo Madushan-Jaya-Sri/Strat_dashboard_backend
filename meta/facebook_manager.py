@@ -30,32 +30,50 @@ class FacebookManager:
             logger.error(f"Failed to initialize Facebook Manager: {e}")
             raise HTTPException(status_code=401, detail=f"Facebook authentication required: {str(e)}")
     
-    def _make_api_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Make API request to Facebook Graph API"""
-        if params is None:
-            params = {}
-        
-        # Add access token to all requests
-        params['access_token'] = self.access_token
-        
-        url = f"{self.base_url}/{endpoint}"
-        
+    def _make_api_request(self, endpoint: str, params: Dict[str, Any], method: str = 'GET') -> Dict[str, Any]:
+        """Make request to Facebook Graph API with better error handling"""
         try:
-            response = requests.get(url, params=params)
+            url = f"{self.base_url}/{endpoint}"
             
-            if response.status_code == 200:
-                return response.json()
+            if method.upper() == 'GET':
+                response = requests.get(url, params=params, timeout=30)
             else:
-                logger.error(f"Facebook API error {response.status_code}: {response.text}")
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Facebook API error: {response.text}"
-                )
+                response = requests.post(url, json=params, timeout=30)
                 
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            # Check for Facebook API errors
+            if 'error' in response_data:
+                error_info = response_data['error']
+                error_message = f"Facebook API Error {error_info.get('code', 'unknown')}: {error_info.get('message', 'Unknown error')}"
+                
+                # Log specific error details
+                logger.error(f"Meta API error {error_info.get('code', 'unknown')}: {response_data}")
+                
+                # Handle specific error codes
+                if error_info.get('code') == 100:
+                    raise ValueError(f"Invalid API request: {error_info.get('message', 'Unsupported request')}")
+                elif error_info.get('code') == 190:
+                    raise ValueError(f"Access token error: {error_info.get('message', 'Invalid access token')}")
+                elif error_info.get('code') == 200:
+                    raise ValueError(f"Permission error: {error_info.get('message', 'Insufficient permissions')}")
+                else:
+                    raise ValueError(error_message)
+                    
+            return response_data
+            
         except requests.exceptions.RequestException as e:
-            logger.error(f"Facebook API request failed: {e}")
-            raise HTTPException(status_code=500, detail=f"Facebook API request failed: {str(e)}")
-    
+            logger.error(f"Request error: {e}")
+            raise ValueError(f"Network error: {str(e)}")
+        except ValueError:
+            # Re-raise ValueError (Facebook API errors)
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in API request: {e}")
+            raise ValueError(f"Unexpected error: {str(e)}")
+        
     def safe_float(self, value, default=0.0):
         """Safely convert to float"""
         try:

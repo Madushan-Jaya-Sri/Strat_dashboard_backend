@@ -1024,22 +1024,32 @@ async def facebook_auth_callback(code: str, state: Optional[str] = None):
 # Add these routes after the Facebook auth callback
 @app.get("/api/facebook/accounts")
 async def get_facebook_accounts(current_user: dict = Depends(get_current_user)):
-    """Get Facebook ad accounts and pages"""
+    """Get Facebook pages and ad accounts with improved error handling"""
     try:
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        pages = facebook_manager.get_user_pages()
+        logger.info(f"Getting Facebook accounts for user: {current_user['email']}")
         
         meta_manager = MetaManager(current_user["email"], auth_manager)
-        ad_accounts = meta_manager.get_ad_accounts()
+        accounts = meta_manager.get_user_accounts()
         
-        return {
-            "pages": pages,
-            "ad_accounts": ad_accounts,
-            "total_accounts": len(pages) + len(ad_accounts)
-        }
+        # Always return data, even if partial
+        return accounts
+        
     except Exception as e:
         logger.error(f"Error fetching Facebook accounts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        
+        # Return a more informative error response
+        return {
+            'pages': [],
+            'ad_accounts': [],
+            'total_accounts': 0,
+            'error': str(e),
+            'message': 'Unable to fetch Facebook accounts. This may be due to insufficient permissions or account type restrictions.',
+            'suggestions': [
+                'Ensure your Facebook account has pages or ad accounts',
+                'Check if your access token has the required permissions',
+                'Try reconnecting your Facebook account'
+            ]
+        }
        
 @app.get("/api/facebook/page-insights/{page_id}")
 async def get_facebook_page_insights(
