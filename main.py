@@ -1084,7 +1084,45 @@ async def get_facebook_ad_performance(
         logger.error(f"Error fetching ad performance: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.get("/api/facebook/debug-token")
+async def debug_facebook_token(current_user: dict = Depends(get_current_user)):
+    """Debug Facebook access token"""
+    try:
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        access_token = meta_manager.access_token
+        
+        # Test basic API call
+        test_response = requests.get(
+            "https://graph.facebook.com/me",
+            params={'access_token': access_token, 'fields': 'id,name,email'}
+        )
+        
+        return {
+            "token_preview": f"{access_token[:20]}..." if access_token else None,
+            "test_call_status": test_response.status_code,
+            "test_response": test_response.json() if test_response.status_code == 200 else test_response.text
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
+@app.get("/api/facebook/permissions") 
+async def get_facebook_permissions(current_user: dict = Depends(get_current_user)):
+    """Get Facebook permissions"""
+    try:
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        access_token = meta_manager.access_token
+        
+        response = requests.get(
+            "https://graph.facebook.com/me/permissions",
+            params={'access_token': access_token}
+        )
+        
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+    
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):

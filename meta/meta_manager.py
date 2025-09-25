@@ -39,6 +39,7 @@ class MetaManager:
         self.user_email = user_email
         
         # ADD THESE MISSING LINES:
+        self.email = user_email
         self.api_version = "v18.0"
         self.base_url = f"https://graph.facebook.com/{self.api_version}"
         
@@ -56,7 +57,7 @@ class MetaManager:
     def get_user_accounts(self) -> Dict[str, Any]:
         """Get user's Facebook pages and ad accounts with better error handling"""
         try:
-            logger.info(f"Getting Facebook accounts for user: {self.user_id}")
+            logger.info(f"Getting Facebook accounts for user: {self.user_email}")
             
             # Initialize results
             result = {
@@ -185,7 +186,8 @@ class MetaManager:
             return result
             
         except Exception as e:
-            logger.error(f"Error getting Facebook accounts for {self.user_id}: {e}")
+            logger.error(f"Error getting Facebook accounts for {self.user_email}: {e}")
+
             
             # Return partial data instead of failing completely
             return {
