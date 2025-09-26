@@ -359,3 +359,68 @@ class FacebookManager:
         except Exception as e:
             logger.error(f"Error fetching page summary for {page_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch page summary: {str(e)}")
+        
+
+
+    # =============================================================================
+    # AD ACCOUNT DETAILS
+    # =============================================================================
+
+
+    def get_user_ad_accounts(self) -> List[Dict[str, Any]]:
+        """Get Facebook/Meta ad accounts accessible to the user"""
+        try:
+            endpoint = "me/adaccounts"
+            params = {
+                "fields": "id,name,account_status,currency,balance,amount_spent,spend_cap,timezone_name,business"
+            }
+            
+            response = self._make_api_request(endpoint, params)
+            ad_accounts = []
+            
+            for account in response.get('data', []):
+                # Convert account_status to readable string
+                account_status = account.get('account_status', '')
+                if isinstance(account_status, int):
+                    # Map Facebook's integer status codes to strings
+                    status_mapping = {
+                        1: "ACTIVE",
+                        2: "DISABLED", 
+                        3: "UNSETTLED",
+                        7: "PENDING_RISK_REVIEW",
+                        8: "PENDING_SETTLEMENT",
+                        9: "IN_GRACE_PERIOD",
+                        101: "PENDING_CLOSURE",
+                        201: "CLOSED"
+                    }
+                    account_status = status_mapping.get(account_status, f"STATUS_{account_status}")
+                
+                # Extract business name if available
+                business_name = ""
+                if account.get('business'):
+                    business_name = account['business'].get('name', '')
+                
+                ad_accounts.append({
+                    'id': account.get('id', ''),
+                    'name': account.get('name', ''),
+                    'account_status': str(account_status),
+                    'currency': account.get('currency', 'USD'),
+                    'balance': self.safe_float(account.get('balance', 0)),
+                    'amount_spent': self.safe_float(account.get('amount_spent', 0)),
+                    'spend_cap': self.safe_float(account.get('spend_cap', 0)),
+                    'timezone_name': account.get('timezone_name', 'UTC'),
+                    'business_name': business_name
+                })
+            
+            logger.info(f"Found {len(ad_accounts)} Facebook ad accounts for {self.user_email}")
+            return ad_accounts
+            
+        except HTTPException as http_error:
+            # Re-raise HTTP exceptions (like auth errors)
+            raise http_error
+        except Exception as e:
+            logger.warning(f"Error fetching Facebook ad accounts: {e}")
+            # Return empty list instead of failing completely
+            # Some users may not have ad accounts or permissions
+            return []
+

@@ -1281,27 +1281,66 @@ async def get_instagram_account_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 # =============================================================================
+# ADS ACCOUNTS ENDPOINTS
+# =============================================================================
+
+@app.get("/api/facebook/ad-accounts", response_model=List[FacebookAdAccount])
+@save_response("facebook_ad_accounts")
+async def get_facebook_ad_accounts(current_user: dict = Depends(get_current_user)):
+    """Get Facebook/Meta ad accounts accessible to the user"""
+    try:
+        from social.facebook_manager import FacebookManager
+        facebook_manager = FacebookManager(current_user["email"], auth_manager)
+        ad_accounts = facebook_manager.get_user_ad_accounts()
+        return [FacebookAdAccount(**account) for account in ad_accounts]
+    except HTTPException as http_error:
+        # Re-raise authentication and permission errors
+        raise http_error
+    except Exception as e:
+        logger.error(f"Error fetching Facebook ad accounts: {e}")
+        # Return empty list for users without ad accounts instead of failing
+        return []
+
+# =============================================================================
 # COMBINED SOCIAL MEDIA OVERVIEW
 # =============================================================================
 
 @app.get("/api/social/overview", response_model=SocialMediaOverview)
 @save_response("social_media_overview")
 async def get_social_media_overview(current_user: dict = Depends(get_current_user)):
-    """Get combined overview of Facebook pages and Instagram accounts"""
+    """Get combined overview of Facebook pages, ad accounts, and Instagram accounts"""
     try:
         facebook_pages = []
+        facebook_ad_accounts = []
         instagram_accounts = []
         total_followers = 0
+        total_ad_spend = 0.0
         
-        # Try to get Facebook pages
+        # Try to get Facebook pages and ad accounts
         try:
             from social.facebook_manager import FacebookManager
             facebook_manager = FacebookManager(current_user["email"], auth_manager)
-            pages = facebook_manager.get_user_pages()
-            facebook_pages = pages
-            total_followers += sum(page.get('followers_count', 0) for page in pages)
+            
+            # Get Facebook pages
+            try:
+                pages = facebook_manager.get_user_pages()
+                facebook_pages = pages
+                total_followers += sum(page.get('followers_count', 0) for page in pages)
+                logger.info(f"Retrieved {len(pages)} Facebook pages")
+            except Exception as pages_error:
+                logger.warning(f"Could not fetch Facebook pages: {pages_error}")
+            
+            # Get Facebook ad accounts
+            try:
+                ad_accounts = facebook_manager.get_user_ad_accounts()
+                facebook_ad_accounts = ad_accounts
+                total_ad_spend += sum(account.get('amount_spent', 0) for account in ad_accounts)
+                logger.info(f"Retrieved {len(ad_accounts)} Facebook ad accounts")
+            except Exception as ad_error:
+                logger.warning(f"Could not fetch Facebook ad accounts: {ad_error}")
+                
         except Exception as fb_error:
-            logger.warning(f"Could not fetch Facebook pages: {fb_error}")
+            logger.warning(f"Facebook Manager initialization failed: {fb_error}")
         
         # Try to get Instagram accounts
         try:
@@ -1310,14 +1349,20 @@ async def get_social_media_overview(current_user: dict = Depends(get_current_use
             accounts = instagram_manager.get_instagram_accounts()
             instagram_accounts = accounts
             total_followers += sum(account.get('followers_count', 0) for account in accounts)
+            logger.info(f"Retrieved {len(accounts)} Instagram accounts")
         except Exception as ig_error:
             logger.warning(f"Could not fetch Instagram accounts: {ig_error}")
         
+        # Calculate total engagement (would need recent posts data for accuracy)
+        total_engagement = 0  # This could be enhanced by fetching recent post engagement
+        
         return SocialMediaOverview(
-            facebook_pages=[FacebookPage(**page) for page in facebook_pages],
-            instagram_accounts=[InstagramAccount(**account) for account in instagram_accounts],
+            facebook_pages=[FacebookPage(**page) for page in facebook_pages] if facebook_pages else None,
+            facebook_ad_accounts=[FacebookAdAccount(**account) for account in facebook_ad_accounts] if facebook_ad_accounts else None,
+            instagram_accounts=[InstagramAccount(**account) for account in instagram_accounts] if instagram_accounts else None,
             total_social_followers=total_followers,
-            total_social_engagement=0,  # Would need to calculate from recent posts
+            total_social_engagement=total_engagement,
+            total_ad_spend=round(total_ad_spend, 2),
             generated_at=datetime.now().isoformat()
         )
         

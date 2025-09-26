@@ -784,15 +784,28 @@ class InstagramAccountSummary(BaseModel):
     website: str
     generated_at: str
 
+class FacebookAdAccount(BaseModel):
+    id: str
+    name: str
+    account_status: str
+    currency: str
+    balance: float
+    amount_spent: float
+    spend_cap: float
+    timezone_name: str
+    business_name: str
+    
 # =============================================================================
 # COMBINED SOCIAL MEDIA MODELS
 # =============================================================================
 
 class SocialMediaOverview(BaseModel):
     facebook_pages: Optional[List[FacebookPage]] = None
+    facebook_ad_accounts: Optional[List[FacebookAdAccount]] = None  # Add this
     instagram_accounts: Optional[List[InstagramAccount]] = None
     total_social_followers: int
     total_social_engagement: int
+    total_ad_spend: float  # Add this
     generated_at: str
 
 # =============================================================================
@@ -804,3 +817,5 @@ class SocialMediaError(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+
+
