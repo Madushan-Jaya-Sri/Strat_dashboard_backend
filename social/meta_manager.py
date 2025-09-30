@@ -23,13 +23,22 @@ class MetaManager:
     
     def _get_access_token(self) -> str:
         """Get Facebook access token for user"""
-        token_data = self.auth_manager.get_facebook_token(self.user_email)
-        if not token_data:
+        try:
+            access_token = self.auth_manager.get_facebook_access_token(self.user_email)
+            if not access_token:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Facebook not connected. Please authenticate with Facebook first."
+                )
+            return access_token
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting Facebook access token: {e}")
             raise HTTPException(
                 status_code=401,
-                detail="Facebook not connected. Please authenticate with Facebook first."
+                detail="Facebook authentication required. Please connect your Facebook account."
             )
-        return token_data.get("access_token")
     
     def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
         """Make request to Facebook Graph API"""
