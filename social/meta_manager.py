@@ -136,24 +136,43 @@ class MetaManager:
                 'fields': 'id,account_id,name,account_status,currency,timezone_name,amount_spent,balance'
             })
             
+            # Map Facebook status codes to strings
+            status_map = {
+                1: "ACTIVE",
+                2: "DISABLED",
+                3: "UNSETTLED",
+                7: "PENDING_RISK_REVIEW",
+                8: "PENDING_SETTLEMENT",
+                9: "IN_GRACE_PERIOD",
+                100: "PENDING_CLOSURE",
+                101: "CLOSED",
+                201: "ANY_ACTIVE",
+                202: "ANY_CLOSED"
+            }
+            
             accounts = []
             for account in data.get('data', []):
+                status_code = account.get('account_status')
+                status_string = status_map.get(status_code, f"UNKNOWN_{status_code}")
+                
                 accounts.append({
                     'id': account.get('id'),
                     'account_id': account.get('account_id'),
                     'name': account.get('name'),
-                    'status': account.get('account_status'),
+                    'status': status_string,  # Convert to string
                     'currency': account.get('currency'),
                     'timezone': account.get('timezone_name'),
-                    'amount_spent': float(account.get('amount_spent', 0)) / 100,  # Convert from cents
+                    'amount_spent': float(account.get('amount_spent', 0)) / 100,
                     'balance': float(account.get('balance', 0)) / 100
                 })
             
+            logger.info(f"Retrieved {len(accounts)} ad accounts")
             return accounts
+            
         except Exception as e:
             logger.error(f"Error fetching ad accounts: {e}")
             return []
-    
+
     def get_ad_account_insights(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get insights for specific ad account"""
         if start_date and end_date:

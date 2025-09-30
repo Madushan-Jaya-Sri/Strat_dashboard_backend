@@ -5,6 +5,7 @@ Response models for Meta Insights endpoints
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
+from typing import Union
 
 # =============================================================================
 # AD ACCOUNTS
@@ -14,7 +15,7 @@ class MetaAdAccount(BaseModel):
     id: str
     account_id: str
     name: str
-    status: str
+    status: Union[int, str]  # Allow both int and str
     currency: str
     timezone: Optional[str] = None
     amount_spent: float
