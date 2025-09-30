@@ -30,8 +30,6 @@ from models.response_models import (EnhancedAdCampaign, FunnelRequest,FacebookPa
 from database.mongo_manager import MongoManager
 
 
-from social.facebook_manager import FacebookManager
-
 from chat.chat_manager import chat_manager
 from models.chat_models import *
 
@@ -1022,371 +1020,220 @@ async def facebook_auth_callback(code: str, state: Optional[str] = None):
 #         error_message = str(e).replace(" ", "%20")
 #         return RedirectResponse(url=f"{frontend_url}/?error={error_message}")
 
-# # Add these routes after the Facebook auth callback
-# @app.get("/api/facebook/accounts")
-# async def get_facebook_accounts(current_user: dict = Depends(get_current_user)):
-#     """Get Facebook pages and ad accounts with improved error handling"""
-#     try:
-#         logger.info(f"Getting Facebook accounts for user: {current_user['email']}")
-        
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         accounts = meta_manager.get_user_accounts()
-        
-#         # Always return data, even if partial
-#         return accounts
-        
-#     except Exception as e:
-#         logger.error(f"Error fetching Facebook accounts: {e}")
-        
-#         # Return a more informative error response
-#         return {
-#             'pages': [],
-#             'ad_accounts': [],
-#             'total_accounts': 0,
-#             'error': str(e),
-#             'message': 'Unable to fetch Facebook accounts. This may be due to insufficient permissions or account type restrictions.',
-#             'suggestions': [
-#                 'Ensure your Facebook account has pages or ad accounts',
-#                 'Check if your access token has the required permissions',
-#                 'Try reconnecting your Facebook account'
-#             ]
-#         }
-       
-# @app.get("/api/facebook/page-insights/{page_id}")
-# async def get_facebook_page_insights(
-#     page_id: str,
-#     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get Facebook page insights with better error handling"""
-#     try:
-#         facebook_manager = FacebookManager(current_user["email"], auth_manager)
-#         insights = facebook_manager.get_page_insights(page_id, period)
-#         return insights
-#     except HTTPException as e:
-#         logger.error(f"HTTP Error fetching page insights: {e.detail}")
-#         raise e
-#     except Exception as e:
-#         logger.error(f"Unexpected error fetching page insights: {e}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
-
-# @app.get("/api/facebook/ad-performance/{account_id}")
-# async def get_facebook_ad_performance(
-#     account_id: str,
-#     period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get Facebook ad performance"""
-#     try:
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         key_stats = meta_manager.get_account_key_stats(account_id, period)
-#         return key_stats
-#     except Exception as e:
-#         logger.error(f"Error fetching ad performance: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-    
-# @app.get("/api/facebook/debug-token")
-# async def debug_facebook_token(current_user: dict = Depends(get_current_user)):
-#     """Debug Facebook access token"""
-#     try:
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         access_token = meta_manager.access_token
-        
-#         # Test basic API call
-#         test_response = requests.get(
-#             "https://graph.facebook.com/me",
-#             params={'access_token': access_token, 'fields': 'id,name,email'}
-#         )
-        
-#         return {
-#             "token_preview": f"{access_token[:20]}..." if access_token else None,
-#             "test_call_status": test_response.status_code,
-#             "test_response": test_response.json() if test_response.status_code == 200 else test_response.text
-#         }
-#     except Exception as e:
-#         return {"error": str(e)}
-
-# @app.get("/api/facebook/permissions") 
-# async def get_facebook_permissions(current_user: dict = Depends(get_current_user)):
-#     """Get Facebook permissions"""
-#     try:
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         access_token = meta_manager.access_token
-        
-#         response = requests.get(
-#             "https://graph.facebook.com/me/permissions",
-#             params={'access_token': access_token}
-#         )
-        
-#         return response.json()
-#     except Exception as e:
-#         return {"error": str(e)}
-    
-# Add these endpoints to your main.py file
-
 # =============================================================================
-# FACEBOOK ENDPOINTS
+# META INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)
 # =============================================================================
 
-@app.get("/api/facebook/pages", response_model=List[FacebookPage])
-@save_response("facebook_pages")
-async def get_facebook_pages(current_user: dict = Depends(get_current_user)):
-    """Get all Facebook pages accessible to the user"""
-    try:
-        from social.facebook_manager import FacebookManager
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        pages = facebook_manager.get_user_pages()
-        return [FacebookPage(**page) for page in pages]
-    except Exception as e:
-        logger.error(f"Error fetching Facebook pages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+def parse_date_params(
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format")
+) -> dict:
+    """Helper to parse and validate date parameters"""
+    if start_date and end_date:
+        # Custom date range
+        return {"period": None, "start_date": start_date, "end_date": end_date}
+    elif period:
+        # Predefined period
+        return {"period": period, "start_date": None, "end_date": None}
+    else:
+        # Default to last 30 days
+        return {"period": "30d", "start_date": None, "end_date": None}
 
-@app.get("/api/facebook/pages/{page_id}/stats", response_model=FacebookPageBasicStats)
-@save_response("facebook_page_basic_stats")
-async def get_facebook_page_stats(
-    page_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+@app.get("/api/meta/overview", response_model=MetaOverview)
+@save_response("meta_overview")
+async def get_meta_overview(
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get basic statistics for a Facebook page"""
+    """Get unified overview of all Meta assets (Ads, Pages, Instagram)"""
     try:
-        from social.facebook_manager import FacebookManager
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        stats = facebook_manager.get_page_basic_stats(page_id, period)
-        return FacebookPageBasicStats(**stats)
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaOverview
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        overview = meta_manager.get_meta_overview(period, start_date, end_date)
+        return MetaOverview(**overview)
     except Exception as e:
-        logger.error(f"Error fetching Facebook page stats: {e}")
+        logger.error(f"Error fetching Meta overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/facebook/pages/{page_id}/posts", response_model=List[FacebookPost])
-@save_response("facebook_page_posts")
-async def get_facebook_page_posts(
+@app.get("/api/meta/ad-accounts", response_model=List[MetaAdAccount])
+@save_response("meta_ad_accounts")
+async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
+    """Get Meta ad accounts (no date filter needed for account list)"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaAdAccount
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        accounts = meta_manager.get_ad_accounts()
+        return [MetaAdAccount(**acc) for acc in accounts]
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad accounts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/ad-accounts/{account_id}/insights", response_model=MetaAdAccountInsights)
+@save_response("meta_ad_account_insights")
+async def get_meta_ad_insights(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get insights for Meta ad account with custom date range support"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaAdAccountInsights
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_ad_account_insights(account_id, period, start_date, end_date)
+        return MetaAdAccountInsights(**insights)
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=List[MetaCampaign])
+@save_response("meta_campaigns")
+async def get_meta_campaigns(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get campaigns for Meta ad account with custom date range support"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaCampaign
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        campaigns = meta_manager.get_campaigns(account_id, period, start_date, end_date)
+        return [MetaCampaign(**camp) for camp in campaigns]
+    except Exception as e:
+        logger.error(f"Error fetching Meta campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/pages", response_model=List[FacebookPageBasic])
+@save_response("meta_pages")
+async def get_meta_pages(current_user: dict = Depends(get_current_user)):
+    """Get Facebook pages (no date filter needed for page list)"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import FacebookPageBasic
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        pages = meta_manager.get_pages()
+        return [FacebookPageBasic(**page) for page in pages]
+    except Exception as e:
+        logger.error(f"Error fetching Meta pages: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/pages/{page_id}/insights", response_model=FacebookPageInsights)
+@save_response("meta_page_insights")
+async def get_meta_page_insights(
     page_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get insights for Facebook page with custom date range support"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import FacebookPageInsights
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_page_insights(page_id, period, start_date, end_date)
+        return FacebookPageInsights(**insights)
+    except Exception as e:
+        logger.error(f"Error fetching Meta page insights: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/pages/{page_id}/posts", response_model=List[FacebookPostDetail])
+@save_response("meta_page_posts")
+async def get_meta_page_posts(
+    page_id: str,
     limit: int = Query(10, ge=1, le=50),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get recent posts from a Facebook page"""
+    """Get posts from Facebook page with custom date range support"""
     try:
-        from social.facebook_manager import FacebookManager
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        posts = facebook_manager.get_recent_posts(page_id, limit, period)
-        return [FacebookPost(**post) for post in posts]
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import FacebookPostDetail
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        posts = meta_manager.get_page_posts(page_id, limit, period, start_date, end_date)
+        return [FacebookPostDetail(**post) for post in posts]
     except Exception as e:
-        logger.error(f"Error fetching Facebook page posts: {e}")
+        logger.error(f"Error fetching Meta page posts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/facebook/pages/{page_id}/summary", response_model=FacebookPageSummary)
-@save_response("facebook_page_summary")
-async def get_facebook_page_summary(
-    page_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get comprehensive summary for a Facebook page"""
+@app.get("/api/meta/instagram/accounts", response_model=List[InstagramAccountBasic])
+@save_response("meta_instagram_accounts")
+async def get_meta_instagram_accounts(current_user: dict = Depends(get_current_user)):
+    """Get Instagram Business accounts (no date filter needed for account list)"""
     try:
-        from social.facebook_manager import FacebookManager
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        summary = facebook_manager.get_page_summary(page_id, period)
-        return FacebookPageSummary(**summary)
-    except Exception as e:
-        logger.error(f"Error fetching Facebook page summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =============================================================================
-# INSTAGRAM ENDPOINTS
-# =============================================================================
-
-@app.get("/api/instagram/accounts", response_model=List[InstagramAccount])
-@save_response("instagram_accounts")
-async def get_instagram_accounts(current_user: dict = Depends(get_current_user)):
-    """Get Instagram Business accounts connected to Facebook pages"""
-    try:
-        from social.instagram_manager import InstagramManager
-        instagram_manager = InstagramManager(current_user["email"], auth_manager)
-        accounts = instagram_manager.get_instagram_accounts()
-        return [InstagramAccount(**account) for account in accounts]
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import InstagramAccountBasic
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        accounts = meta_manager.get_instagram_accounts()
+        return [InstagramAccountBasic(**acc) for acc in accounts]
     except Exception as e:
         logger.error(f"Error fetching Instagram accounts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/instagram/accounts/{account_id}/stats", response_model=InstagramAccountBasicStats)
-@save_response("instagram_account_basic_stats")
-async def get_instagram_account_stats(
+@app.get("/api/meta/instagram/{account_id}/insights", response_model=InstagramAccountInsights)
+@save_response("meta_instagram_insights")
+async def get_meta_instagram_insights(
     account_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get basic statistics for an Instagram Business account"""
+    """Get insights for Instagram account with custom date range support"""
     try:
-        from social.instagram_manager import InstagramManager
-        instagram_manager = InstagramManager(current_user["email"], auth_manager)
-        stats = instagram_manager.get_account_basic_stats(account_id, period)
-        return InstagramAccountBasicStats(**stats)
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import InstagramAccountInsights
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_instagram_insights(account_id, period, start_date, end_date)
+        return InstagramAccountInsights(**insights)
     except Exception as e:
-        logger.error(f"Error fetching Instagram account stats: {e}")
+        logger.error(f"Error fetching Instagram insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/instagram/accounts/{account_id}/media", response_model=List[InstagramMedia])
-@save_response("instagram_account_media")
-async def get_instagram_account_media(
+@app.get("/api/meta/instagram/{account_id}/media", response_model=List[InstagramMediaDetail])
+@save_response("meta_instagram_media")
+async def get_meta_instagram_media(
     account_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     limit: int = Query(10, ge=1, le=50),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get recent media from an Instagram Business account"""
+    """Get media from Instagram account with custom date range support"""
     try:
-        from social.instagram_manager import InstagramManager
-        instagram_manager = InstagramManager(current_user["email"], auth_manager)
-        media = instagram_manager.get_recent_media(account_id, limit, period)
-        return [InstagramMedia(**post) for post in media]
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import InstagramMediaDetail
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        media = meta_manager.get_instagram_media(account_id, limit, period, start_date, end_date)
+        return [InstagramMediaDetail(**media_item) for media_item in media]
     except Exception as e:
-        logger.error(f"Error fetching Instagram account media: {e}")
+        logger.error(f"Error fetching Instagram media: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/instagram/accounts/{account_id}/hashtags", response_model=List[InstagramHashtag])
-@save_response("instagram_popular_hashtags")
-async def get_instagram_popular_hashtags(
-    account_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-    limit: int = Query(10, ge=1, le=20),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get popular hashtags from Instagram account posts"""
-    try:
-        from social.instagram_manager import InstagramManager
-        instagram_manager = InstagramManager(current_user["email"], auth_manager)
-        hashtags = instagram_manager.get_popular_hashtags(account_id, period, limit)
-        return [InstagramHashtag(**hashtag) for hashtag in hashtags]
-    except Exception as e:
-        logger.error(f"Error fetching Instagram hashtag performance: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/instagram/accounts/{account_id}/summary", response_model=InstagramAccountSummary)
-@save_response("instagram_account_summary")
-async def get_instagram_account_summary(
-    account_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get comprehensive summary for an Instagram Business account"""
-    try:
-        from social.instagram_manager import InstagramManager
-        instagram_manager = InstagramManager(current_user["email"], auth_manager)
-        summary = instagram_manager.get_account_summary(account_id, period)
-        return InstagramAccountSummary(**summary)
-    except Exception as e:
-        logger.error(f"Error fetching Instagram account summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =============================================================================
-# ADS ACCOUNTS ENDPOINTS
-# =============================================================================
-
-@app.get("/api/facebook/ad-accounts", response_model=List[FacebookAdAccount])
-@save_response("facebook_ad_accounts")
-async def get_facebook_ad_accounts(current_user: dict = Depends(get_current_user)):
-    """Get Facebook/Meta ad accounts accessible to the user"""
-    try:
-        from social.facebook_manager import FacebookManager
-        facebook_manager = FacebookManager(current_user["email"], auth_manager)
-        ad_accounts = facebook_manager.get_user_ad_accounts()
-        return [FacebookAdAccount(**account) for account in ad_accounts]
-    except HTTPException as http_error:
-        # Re-raise authentication and permission errors
-        raise http_error
-    except Exception as e:
-        logger.error(f"Error fetching Facebook ad accounts: {e}")
-        # Return empty list for users without ad accounts instead of failing
-        return []
-
-# =============================================================================
-# COMBINED SOCIAL MEDIA OVERVIEW
-# =============================================================================
-
-@app.get("/api/social/overview", response_model=SocialMediaOverview)
-@save_response("social_media_overview")
-async def get_social_media_overview(current_user: dict = Depends(get_current_user)):
-    """Get combined overview of Facebook pages, ad accounts, and Instagram accounts"""
-    try:
-        facebook_pages = []
-        facebook_ad_accounts = []
-        instagram_accounts = []
-        total_followers = 0
-        total_ad_spend = 0.0
-        
-        # Try to get Facebook pages and ad accounts
-        try:
-            from social.facebook_manager import FacebookManager
-            facebook_manager = FacebookManager(current_user["email"], auth_manager)
-            
-            # Get Facebook pages
-            try:
-                pages = facebook_manager.get_user_pages()
-                facebook_pages = pages
-                total_followers += sum(page.get('followers_count', 0) for page in pages)
-                logger.info(f"Retrieved {len(pages)} Facebook pages")
-            except Exception as pages_error:
-                logger.warning(f"Could not fetch Facebook pages: {pages_error}")
-            
-            # Get Facebook ad accounts
-            try:
-                ad_accounts = facebook_manager.get_user_ad_accounts()
-                facebook_ad_accounts = ad_accounts
-                total_ad_spend += sum(account.get('amount_spent', 0) for account in ad_accounts)
-                logger.info(f"Retrieved {len(ad_accounts)} Facebook ad accounts")
-            except Exception as ad_error:
-                logger.warning(f"Could not fetch Facebook ad accounts: {ad_error}")
-                
-        except Exception as fb_error:
-            logger.warning(f"Facebook Manager initialization failed: {fb_error}")
-        
-        # Try to get Instagram accounts
-        try:
-            from social.instagram_manager import InstagramManager
-            instagram_manager = InstagramManager(current_user["email"], auth_manager)
-            accounts = instagram_manager.get_instagram_accounts()
-            instagram_accounts = accounts
-            total_followers += sum(account.get('followers_count', 0) for account in accounts)
-            logger.info(f"Retrieved {len(accounts)} Instagram accounts")
-        except Exception as ig_error:
-            logger.warning(f"Could not fetch Instagram accounts: {ig_error}")
-        
-        # Calculate total engagement (would need recent posts data for accuracy)
-        total_engagement = 0  # This could be enhanced by fetching recent post engagement
-        
-        return SocialMediaOverview(
-            facebook_pages=[FacebookPage(**page) for page in facebook_pages] if facebook_pages else None,
-            facebook_ad_accounts=[FacebookAdAccount(**account) for account in facebook_ad_accounts] if facebook_ad_accounts else None,
-            instagram_accounts=[InstagramAccount(**account) for account in instagram_accounts] if instagram_accounts else None,
-            total_social_followers=total_followers,
-            total_social_engagement=total_engagement,
-            total_ad_spend=round(total_ad_spend, 2),
-            generated_at=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
-        logger.error(f"Error fetching social media overview: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Error handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.detail, "status_code": exc.status_code}
-    )
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
-    logger.exception(f"Unhandled error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error", "detail": str(exc)}
-    )
-
-
+    
+    
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(

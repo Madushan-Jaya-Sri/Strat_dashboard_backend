@@ -794,7 +794,7 @@ class FacebookAdAccount(BaseModel):
     spend_cap: float
     timezone_name: str
     business_name: str
-    
+
 # =============================================================================
 # COMBINED SOCIAL MEDIA MODELS
 # =============================================================================
@@ -817,5 +817,19 @@ class SocialMediaError(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+
+# Import Meta models
+from models.meta_response_models import (
+    MetaAdAccount,
+    MetaAdAccountInsights,
+    MetaCampaign,
+    FacebookPageBasic,
+    FacebookPageInsights,
+    FacebookPostDetail,
+    InstagramAccountBasic,
+    InstagramAccountInsights,
+    InstagramMediaDetail,
+    MetaOverview
+)
 
 
