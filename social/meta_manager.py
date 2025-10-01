@@ -484,43 +484,64 @@ class MetaManager:
         since, until = self._period_to_dates(period, start_date, end_date)
         
         try:
+            # Use valid metrics for Facebook Pages
+            # These are the currently supported page-level metrics
             metrics = [
+                'page_total_actions',
+                'page_post_engagements',
                 'page_impressions',
                 'page_impressions_unique',
-                'page_engaged_users',
-                'page_post_engagements',
-                'page_fans',
-                'page_views_total'
+                'page_posts_impressions',
+                'page_posts_impressions_unique'
             ]
             
-            data = self._make_request(f"{page_id}/insights", {
-                'metric': ','.join(metrics),
-                'since': since,
-                'until': until,
-                'period': 'day'
+            # First, try to get basic page info
+            page_info = self._make_request(page_id, {
+                'fields': 'followers_count,fan_count'
             })
             
-            insights_dict = {}
-            for metric_data in data.get('data', []):
-                metric_name = metric_data.get('name')
-                values = metric_data.get('values', [])
-                
-                # Sum up values across the period
-                total = sum(v.get('value', 0) for v in values)
-                insights_dict[metric_name] = total
+            # Then get insights with proper date range
+            all_insights = {}
+            
+            # Split metrics into smaller groups to avoid API limits
+            for metric in metrics:
+                try:
+                    data = self._make_request(f"{page_id}/insights/{metric}", {
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    })
+                    
+                    # Sum up values across the date range
+                    values = data.get('data', [])
+                    if values and len(values) > 0:
+                        metric_data = values[0].get('values', [])
+                        total = sum(v.get('value', 0) for v in metric_data if v.get('value') is not None)
+                        all_insights[metric] = total
+                        print("="*100)
+                        print(f"Metric {metric}: {total}")
+                        print("="*100)
+                    else:
+                        all_insights[metric] = 0
+                        
+                except Exception as metric_error:
+                    logger.warning(f"Could not fetch metric {metric}: {metric_error}")
+                    all_insights[metric] = 0
             
             return {
-                'impressions': insights_dict.get('page_impressions', 0),
-                'unique_impressions': insights_dict.get('page_impressions_unique', 0),
-                'engaged_users': insights_dict.get('page_engaged_users', 0),
-                'post_engagements': insights_dict.get('page_post_engagements', 0),
-                'fans': insights_dict.get('page_fans', 0),
-                'page_views': insights_dict.get('page_views_total', 0)
+                'impressions': all_insights.get('page_impressions', 0),
+                'unique_impressions': all_insights.get('page_impressions_unique', 0),
+                'engaged_users': all_insights.get('page_total_actions', 0),
+                'post_engagements': all_insights.get('page_post_engagements', 0),
+                'fans': page_info.get('fan_count', 0),
+                'followers': page_info.get('followers_count', 0),
+                'page_views': 0  # This metric is no longer available via API
             }
+            
         except Exception as e:
             logger.error(f"Error fetching page insights: {e}")
             raise
-    
+
     def get_page_posts(self, page_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get recent posts from Facebook page"""
         if start_date and end_date:

@@ -96,7 +96,7 @@ class MetaAd(BaseModel):
     cost_per_link_click: float
     created_time: str
     updated_time: str
-    
+
 # =============================================================================
 # FACEBOOK PAGES
 # =============================================================================
@@ -117,6 +117,7 @@ class FacebookPageInsights(BaseModel):
     engaged_users: int
     post_engagements: int
     fans: int
+    followers: Optional[int] = 0  # Add this field
     page_views: int
 
 class FacebookPostDetail(BaseModel):
