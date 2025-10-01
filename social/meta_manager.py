@@ -44,7 +44,10 @@ class MetaManager:
         """Make request to Facebook Graph API"""
         if params is None:
             params = {}
-        params['access_token'] = self.access_token
+        
+        # Only add access_token if not already provided
+        if 'access_token' not in params:
+            params['access_token'] = self.access_token
         
         url = f"{self.BASE_URL}/{endpoint}"
         response = requests.get(url, params=params)
@@ -601,40 +604,83 @@ class MetaManager:
             logger.warning(f"Could not get page access token: {e}")
             return self.access_token
 
-    def get_page_posts(self, page_id: str, limit: int = 20, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get recent posts from Facebook page"""
+    def get_page_posts(self, page_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get recent posts from Facebook page using Page Access Token"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
+            since, until = self._period_to_dates(period, start_date, end_date)
+            since_timestamp = datetime.strptime(since, '%Y-%m-%d').strftime('%s')
+            until_timestamp = datetime.strptime(until, '%Y-%m-%d').strftime('%s')
+        else:
+            # Use period
+            days = int(period[:-1]) if period else 30
+            since_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+            until_timestamp = None
         
         try:
-            data = self._make_request(f"{page_id}/posts", {
-                'fields': 'id,message,created_time,type,attachments,likes.summary(true),comments.summary(true),shares',
-                'limit': limit,
-                'since': since,
-                'until': until
-            })
-            print("&"*100)
-            print(data)
-            print("&"*100)
+            # CRITICAL: Get page access token
+            page_access_token = self._get_page_access_token(page_id)
+            
+            logger.info(f"Fetching posts for page {page_id} with page token")
+            
+            # Build request params
+            params = {
+                'access_token': page_access_token,  # Use PAGE token, not user token
+                'fields': 'id,message,created_time,type,full_picture,attachments,likes.summary(true),comments.summary(true),shares',
+                'limit': limit
+            }
+            
+            # Add time filter if provided
+            if since_timestamp:
+                params['since'] = str(since_timestamp)
+            if until_timestamp:
+                params['until'] = str(until_timestamp)
+            
+            # Make request with page token
+            response = requests.get(
+                f"{self.BASE_URL}/{page_id}/posts",
+                params=params
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Error fetching posts: {response.text}")
+                return []
+            
+            data = response.json()
+            logger.info(f"Raw posts data: {data}")
+            
             posts = []
             for post in data.get('data', []):
-                # Get post insights
+                # Get post insights using page token
                 try:
-                    insights = self._make_request(f"{post['id']}/insights", {
-                        'metric': 'post_impressions,post_engaged_users,post_clicks'
-                    })
+                    insights_response = requests.get(
+                        f"{self.BASE_URL}/{post['id']}/insights",
+                        params={
+                            'access_token': page_access_token,
+                            'metric': 'post_impressions,post_engaged_users,post_clicks'
+                        }
+                    )
                     
-                    insights_dict = {i['name']: i['values'][0]['value'] for i in insights.get('data', [])}
-                except:
+                    if insights_response.status_code == 200:
+                        insights = insights_response.json()
+                        insights_dict = {i['name']: i['values'][0]['value'] for i in insights.get('data', [])}
+                    else:
+                        insights_dict = {}
+                except Exception as e:
+                    logger.warning(f"Could not fetch insights for post {post['id']}: {e}")
                     insights_dict = {}
+                
+                # Extract attachment info
+                attachments = post.get('attachments', {}).get('data', [])
+                attachment_type = attachments[0].get('type') if attachments else None
                 
                 posts.append({
                     'id': post.get('id'),
                     'message': post.get('message', ''),
                     'created_time': post.get('created_time'),
                     'type': post.get('type'),
+                    'full_picture': post.get('full_picture'),
+                    'attachment_type': attachment_type,
                     'likes': post.get('likes', {}).get('summary', {}).get('total_count', 0),
                     'comments': post.get('comments', {}).get('summary', {}).get('total_count', 0),
                     'shares': post.get('shares', {}).get('count', 0),
@@ -643,9 +689,11 @@ class MetaManager:
                     'clicks': insights_dict.get('post_clicks', 0)
                 })
             
+            logger.info(f"Retrieved {len(posts)} posts for page {page_id}")
             return posts
+            
         except Exception as e:
-            logger.error(f"Error fetching page posts: {e}")
+            logger.error(f"Error fetching page posts: {e}", exc_info=True)
             return []
     
     # =========================================================================
