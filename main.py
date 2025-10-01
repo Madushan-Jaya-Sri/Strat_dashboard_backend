@@ -1285,17 +1285,53 @@ async def debug_meta_permissions(current_user: dict = Depends(get_current_user))
         # Check user token permissions
         user_perms = meta_manager._make_request("me/permissions")
         
-        # Check if we can get pages
+        # Check pages without perms field
         pages = meta_manager._make_request("me/accounts", {
-            'fields': 'id,name,access_token,perms'
+            'fields': 'id,name,access_token,tasks'
         })
+        
+        # For each page, try to get posts count
+        pages_debug = []
+        for page in pages.get('data', []):
+            page_id = page['id']
+            page_token = page.get('access_token')
+            
+            # Try to get posts without time filter
+            try:
+                posts_response = requests.get(
+                    f"https://graph.facebook.com/v21.0/{page_id}/posts",
+                    params={
+                        'access_token': page_token,
+                        'fields': 'id',
+                        'limit': 5
+                    }
+                )
+                posts_data = posts_response.json()
+                
+                pages_debug.append({
+                    'id': page_id,
+                    'name': page['name'],
+                    'has_token': page_token is not None,
+                    'tasks': page.get('tasks', []),
+                    'posts_count': len(posts_data.get('data', [])),
+                    'posts_error': posts_data.get('error')
+                })
+            except Exception as e:
+                pages_debug.append({
+                    'id': page_id,
+                    'name': page['name'],
+                    'error': str(e)
+                })
         
         return {
             "user_permissions": user_perms,
-            "pages": pages
+            "pages_debug": pages_debug
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(

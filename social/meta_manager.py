@@ -621,39 +621,43 @@ class MetaManager:
                 logger.error("No page access token available!")
                 return []
             
-            # Use updated fields that work with v21.0
+            # Start with basic request - NO TIME FILTER to test
             posts_url = f"{self.BASE_URL}/{page_id}/posts"
             params = {
                 'access_token': page_access_token,
-                'fields': 'id,message,created_time,story,permalink_url,attachments{media,type,title,description,url}',
+                'fields': 'id,message,created_time,story,permalink_url,attachments{media,type}',
                 'limit': limit
             }
             
-            # Add time filtering if provided
-            if period:
-                days = int(period[:-1])
-                since_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
-                params['since'] = str(since_timestamp)
-            elif start_date and end_date:
-                since_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                until_dt = datetime.strptime(end_date, '%Y-%m-%d')
-                params['since'] = str(int(since_dt.timestamp()))
-                params['until'] = str(int(until_dt.timestamp()))
-            
-            logger.info(f"Requesting posts with params: {list(params.keys())}")
+            logger.info(f"Requesting posts WITHOUT time filter first")
             
             response = requests.get(posts_url, params=params)
             
+            logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response body: {response.text[:500]}")
+            
             if response.status_code != 200:
                 logger.error(f"Error getting posts: {response.text}")
-                return []
-            
-            data = response.json()
-            logger.info(f"Got {len(data.get('data', []))} posts")
+                
+                # Try alternate endpoint
+                logger.info("Trying /feed endpoint instead...")
+                feed_response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/feed",
+                    params=params
+                )
+                
+                if feed_response.status_code == 200:
+                    data = feed_response.json()
+                    logger.info(f"Feed endpoint worked! Got {len(data.get('data', []))} items")
+                else:
+                    logger.error(f"Feed endpoint also failed: {feed_response.text}")
+                    return []
+            else:
+                data = response.json()
             
             posts = []
             for post in data.get('data', []):
-                # Extract media from attachments
+                # Basic post data
                 attachments = post.get('attachments', {}).get('data', [])
                 media_url = None
                 attachment_type = None
@@ -661,91 +665,25 @@ class MetaManager:
                 if attachments:
                     first_attachment = attachments[0]
                     attachment_type = first_attachment.get('type')
-                    
-                    # Get media URL if available
                     media = first_attachment.get('media', {})
                     if media:
                         media_url = media.get('image', {}).get('src')
                 
-                # Get engagement metrics
-                post_id = post.get('id')
-                likes_count = 0
-                comments_count = 0
-                shares_count = 0
-                
-                try:
-                    # Get likes
-                    likes_response = requests.get(
-                        f"{self.BASE_URL}/{post_id}/likes",
-                        params={'access_token': page_access_token, 'summary': 'true', 'limit': 0}
-                    )
-                    if likes_response.status_code == 200:
-                        likes_count = likes_response.json().get('summary', {}).get('total_count', 0)
-                    
-                    # Get comments
-                    comments_response = requests.get(
-                        f"{self.BASE_URL}/{post_id}/comments",
-                        params={'access_token': page_access_token, 'summary': 'true', 'limit': 0}
-                    )
-                    if comments_response.status_code == 200:
-                        comments_count = comments_response.json().get('summary', {}).get('total_count', 0)
-                    
-                    # Get shares
-                    shares_response = requests.get(
-                        f"{self.BASE_URL}/{post_id}",
-                        params={'access_token': page_access_token, 'fields': 'shares'}
-                    )
-                    if shares_response.status_code == 200:
-                        shares_count = shares_response.json().get('shares', {}).get('count', 0)
-                    
-                except Exception as e:
-                    logger.warning(f"Could not fetch engagement for post {post_id}: {e}")
-                
-                # Try to get insights (may fail for some posts)
-                impressions = 0
-                engaged_users = 0
-                clicks = 0
-                
-                try:
-                    insights_response = requests.get(
-                        f"{self.BASE_URL}/{post_id}/insights",
-                        params={
-                            'access_token': page_access_token,
-                            'metric': 'post_impressions,post_engaged_users,post_clicks'
-                        }
-                    )
-                    
-                    if insights_response.status_code == 200:
-                        insights_data = insights_response.json().get('data', [])
-                        for metric in insights_data:
-                            metric_name = metric.get('name')
-                            values = metric.get('values', [])
-                            if values:
-                                value = values[0].get('value', 0)
-                                if metric_name == 'post_impressions':
-                                    impressions = value
-                                elif metric_name == 'post_engaged_users':
-                                    engaged_users = value
-                                elif metric_name == 'post_clicks':
-                                    clicks = value
-                except:
-                    pass  # Insights not available for all posts
-                
                 posts.append({
-                    'id': post_id,
+                    'id': post.get('id'),
                     'message': post.get('message', ''),
-                    'story': post.get('story', ''),  # For posts without message (e.g., photo updates)
+                    'story': post.get('story', ''),
                     'created_time': post.get('created_time'),
                     'type': attachment_type or 'status',
                     'full_picture': media_url,
                     'attachment_type': attachment_type,
                     'permalink_url': post.get('permalink_url'),
-                    'likes': likes_count,
-                    'comments': comments_count,
-                    'shares': shares_count,
-                    'impressions': impressions,
-                    'engaged_users': engaged_users,
-                    'clicks': clicks
+                    'likes': 0,  # Will fetch separately if needed
+                    'comments': 0,
+                    'shares': 0,
+                    'impressions': 0,
+                    'engaged_users': 0,
+                    'clicks': 0
                 })
             
             logger.info(f"Successfully retrieved {len(posts)} posts for page {page_id}")
@@ -754,7 +692,6 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching page posts: {e}", exc_info=True)
             return []
-    
     # =========================================================================
     # INSTAGRAM
     # =========================================================================
