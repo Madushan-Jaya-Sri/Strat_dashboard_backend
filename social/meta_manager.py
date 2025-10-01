@@ -605,7 +605,7 @@ class MetaManager:
             return self.access_token
 
     def get_page_posts(self, page_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get recent posts from Facebook page using Page Access Token"""
+        """Get posts with comprehensive statistics"""
         
         try:
             # Get page access token
@@ -615,78 +615,231 @@ class MetaManager:
             
             page_access_token = page_data.get('access_token')
             
-            logger.info(f"Page: {page_data.get('name')}, Token: {page_access_token[:30] if page_access_token else 'NONE'}...")
-            
             if not page_access_token:
                 logger.error("No page access token available!")
                 return []
             
-            # Start with basic request - NO TIME FILTER to test
+            # Fetch posts with all engagement fields
             posts_url = f"{self.BASE_URL}/{page_id}/posts"
             params = {
                 'access_token': page_access_token,
-                'fields': 'id,message,created_time,story,permalink_url,attachments{media,type}',
+                'fields': 'id,message,created_time,story,permalink_url,status_type,attachments{media,type,title,description},reactions.summary(total_count).limit(0),likes.summary(true).limit(0),comments.summary(true).limit(0),shares',
                 'limit': limit
             }
             
-            logger.info(f"Requesting posts WITHOUT time filter first")
-            
             response = requests.get(posts_url, params=params)
-            
-            logger.info(f"Response status: {response.status_code}")
-            logger.info(f"Response body: {response.text[:500]}")
             
             if response.status_code != 200:
                 logger.error(f"Error getting posts: {response.text}")
-                
-                # Try alternate endpoint
-                logger.info("Trying /feed endpoint instead...")
-                feed_response = requests.get(
-                    f"{self.BASE_URL}/{page_id}/feed",
-                    params=params
-                )
-                
-                if feed_response.status_code == 200:
-                    data = feed_response.json()
-                    logger.info(f"Feed endpoint worked! Got {len(data.get('data', []))} items")
-                else:
-                    logger.error(f"Feed endpoint also failed: {feed_response.text}")
-                    return []
-            else:
-                data = response.json()
+                return []
             
+            data = response.json()
             posts = []
+            
             for post in data.get('data', []):
-                # Basic post data
+                post_id = post.get('id')
+                
+                # Extract attachment info
                 attachments = post.get('attachments', {}).get('data', [])
                 media_url = None
                 attachment_type = None
+                attachment_title = None
+                attachment_description = None
                 
                 if attachments:
                     first_attachment = attachments[0]
                     attachment_type = first_attachment.get('type')
+                    attachment_title = first_attachment.get('title')
+                    attachment_description = first_attachment.get('description')
+                    
                     media = first_attachment.get('media', {})
                     if media:
                         media_url = media.get('image', {}).get('src')
                 
+                # Get basic engagement counts
+                reactions_count = post.get('reactions', {}).get('summary', {}).get('total_count', 0)
+                likes_count = post.get('likes', {}).get('summary', {}).get('total_count', 0)
+                comments_count = post.get('comments', {}).get('summary', {}).get('total_count', 0)
+                shares_count = post.get('shares', {}).get('count', 0)
+                
+                # Get detailed reactions breakdown
+                reactions_breakdown = {}
+                try:
+                    reactions_response = requests.get(
+                        f"{self.BASE_URL}/{post_id}/reactions",
+                        params={
+                            'access_token': page_access_token,
+                            'summary': 'total_count',
+                            'limit': 0
+                        }
+                    )
+                    if reactions_response.status_code == 200:
+                        reactions_data = reactions_response.json()
+                        reactions_breakdown = reactions_data.get('summary', {})
+                except:
+                    pass
+                
+                # Get comprehensive post insights
+                post_insights = {
+                    'impressions': 0,
+                    'impressions_unique': 0,
+                    'impressions_paid': 0,
+                    'impressions_organic': 0,
+                    'reach': 0,
+                    'reach_unique': 0,
+                    'engaged_users': 0,
+                    'clicks': 0,
+                    'clicks_unique': 0,
+                    'negative_feedback': 0,
+                    'video_views': 0,
+                    'video_views_10s': 0,
+                    'video_avg_time_watched': 0,
+                    'video_complete_views': 0
+                }
+                
+                # Fetch all available post insights metrics
+                try:
+                    all_metrics = [
+                        'post_impressions',
+                        'post_impressions_unique',
+                        'post_impressions_paid',
+                        'post_impressions_organic',
+                        'post_impressions_viral',
+                        'post_impressions_fan',
+                        'post_reach',
+                        'post_engaged_users',
+                        'post_clicks',
+                        'post_clicks_unique',
+                        'post_negative_feedback',
+                        'post_engaged_fan',
+                        'post_reactions_by_type_total'
+                    ]
+                    
+                    insights_response = requests.get(
+                        f"{self.BASE_URL}/{post_id}/insights",
+                        params={
+                            'access_token': page_access_token,
+                            'metric': ','.join(all_metrics)
+                        }
+                    )
+                    
+                    if insights_response.status_code == 200:
+                        insights_data = insights_response.json().get('data', [])
+                        
+                        for metric in insights_data:
+                            metric_name = metric.get('name')
+                            values = metric.get('values', [])
+                            
+                            if values and len(values) > 0:
+                                value = values[0].get('value', 0)
+                                
+                                if metric_name == 'post_impressions':
+                                    post_insights['impressions'] = value
+                                elif metric_name == 'post_impressions_unique':
+                                    post_insights['impressions_unique'] = value
+                                elif metric_name == 'post_impressions_paid':
+                                    post_insights['impressions_paid'] = value
+                                elif metric_name == 'post_impressions_organic':
+                                    post_insights['impressions_organic'] = value
+                                elif metric_name == 'post_reach':
+                                    post_insights['reach'] = value
+                                elif metric_name == 'post_engaged_users':
+                                    post_insights['engaged_users'] = value
+                                elif metric_name == 'post_clicks':
+                                    post_insights['clicks'] = value
+                                elif metric_name == 'post_clicks_unique':
+                                    post_insights['clicks_unique'] = value
+                                elif metric_name == 'post_negative_feedback':
+                                    post_insights['negative_feedback'] = value
+                                elif metric_name == 'post_reactions_by_type_total':
+                                    post_insights['reactions_by_type'] = value
+                    
+                    # For video posts, get video insights
+                    if attachment_type in ['video', 'video_inline', 'video_autoplay']:
+                        video_metrics = [
+                            'post_video_views',
+                            'post_video_views_10s',
+                            'post_video_avg_time_watched',
+                            'post_video_complete_views_30s'
+                        ]
+                        
+                        video_insights_response = requests.get(
+                            f"{self.BASE_URL}/{post_id}/insights",
+                            params={
+                                'access_token': page_access_token,
+                                'metric': ','.join(video_metrics)
+                            }
+                        )
+                        
+                        if video_insights_response.status_code == 200:
+                            video_insights_data = video_insights_response.json().get('data', [])
+                            
+                            for metric in video_insights_data:
+                                metric_name = metric.get('name')
+                                values = metric.get('values', [])
+                                
+                                if values and len(values) > 0:
+                                    value = values[0].get('value', 0)
+                                    
+                                    if metric_name == 'post_video_views':
+                                        post_insights['video_views'] = value
+                                    elif metric_name == 'post_video_views_10s':
+                                        post_insights['video_views_10s'] = value
+                                    elif metric_name == 'post_video_avg_time_watched':
+                                        post_insights['video_avg_time_watched'] = value
+                                    elif metric_name == 'post_video_complete_views_30s':
+                                        post_insights['video_complete_views'] = value
+                    
+                except Exception as e:
+                    logger.warning(f"Could not fetch insights for post {post_id}: {e}")
+                
+                # Calculate engagement rate
+                total_engagement = reactions_count + comments_count + shares_count + post_insights['clicks']
+                engagement_rate = 0
+                if post_insights['reach'] > 0:
+                    engagement_rate = (total_engagement / post_insights['reach']) * 100
+                
                 posts.append({
-                    'id': post.get('id'),
+                    'id': post_id,
                     'message': post.get('message', ''),
                     'story': post.get('story', ''),
                     'created_time': post.get('created_time'),
+                    'status_type': post.get('status_type'),
                     'type': attachment_type or 'status',
                     'full_picture': media_url,
                     'attachment_type': attachment_type,
+                    'attachment_title': attachment_title,
+                    'attachment_description': attachment_description,
                     'permalink_url': post.get('permalink_url'),
-                    'likes': 0,  # Will fetch separately if needed
-                    'comments': 0,
-                    'shares': 0,
-                    'impressions': 0,
-                    'engaged_users': 0,
-                    'clicks': 0
+                    
+                    # Engagement metrics
+                    'reactions': reactions_count,
+                    'reactions_breakdown': reactions_breakdown,
+                    'likes': likes_count,
+                    'comments': comments_count,
+                    'shares': shares_count,
+                    'total_engagement': total_engagement,
+                    'engagement_rate': round(engagement_rate, 2),
+                    
+                    # Insights metrics
+                    'impressions': post_insights['impressions'],
+                    'impressions_unique': post_insights['impressions_unique'],
+                    'impressions_paid': post_insights['impressions_paid'],
+                    'impressions_organic': post_insights['impressions_organic'],
+                    'reach': post_insights['reach'],
+                    'engaged_users': post_insights['engaged_users'],
+                    'clicks': post_insights['clicks'],
+                    'clicks_unique': post_insights['clicks_unique'],
+                    'negative_feedback': post_insights['negative_feedback'],
+                    
+                    # Video metrics (if applicable)
+                    'video_views': post_insights.get('video_views', 0),
+                    'video_views_10s': post_insights.get('video_views_10s', 0),
+                    'video_avg_time_watched': post_insights.get('video_avg_time_watched', 0),
+                    'video_complete_views': post_insights.get('video_complete_views', 0)
                 })
             
-            logger.info(f"Successfully retrieved {len(posts)} posts for page {page_id}")
+            logger.info(f"Successfully retrieved {len(posts)} posts with comprehensive stats")
             return posts
             
         except Exception as e:

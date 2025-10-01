@@ -136,16 +136,39 @@ class FacebookPostDetail(BaseModel):
     message: str
     story: Optional[str] = None
     created_time: str
+    status_type: Optional[str] = None
     type: str
     full_picture: Optional[str] = None
     attachment_type: Optional[str] = None
+    attachment_title: Optional[str] = None
+    attachment_description: Optional[str] = None
     permalink_url: Optional[str] = None
+    
+    # Engagement metrics
+    reactions: int
+    reactions_breakdown: Optional[dict] = {}
     likes: int
     comments: int
     shares: int
-    impressions: int = 0
-    engaged_users: int = 0
-    clicks: int = 0
+    total_engagement: int
+    engagement_rate: float
+    
+    # Insights metrics
+    impressions: int
+    impressions_unique: int
+    impressions_paid: int
+    impressions_organic: int
+    reach: int
+    engaged_users: int
+    clicks: int
+    clicks_unique: int
+    negative_feedback: int
+    
+    # Video metrics
+    video_views: int = 0
+    video_views_10s: int = 0
+    video_avg_time_watched: float = 0
+    video_complete_views: int = 0
 
 # =============================================================================
 # INSTAGRAM
