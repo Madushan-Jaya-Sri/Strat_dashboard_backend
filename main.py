@@ -1275,7 +1275,27 @@ async def get_meta_instagram_media(
         logger.error(f"Error fetching Instagram media: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-
+@app.get("/api/meta/debug/permissions")
+async def debug_meta_permissions(current_user: dict = Depends(get_current_user)):
+    """Debug endpoint to check what permissions we have"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Check user token permissions
+        user_perms = meta_manager._make_request("me/permissions")
+        
+        # Check if we can get pages
+        pages = meta_manager._make_request("me/accounts", {
+            'fields': 'id,name,access_token,perms'
+        })
+        
+        return {
+            "user_permissions": user_perms,
+            "pages": pages
+        }
+    except Exception as e:
+        return {"error": str(e)}
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(

@@ -65,7 +65,8 @@ class AuthManager:
             'pages_show_list',              # To see pages
             'pages_read_engagement',        # To read page engagement
             'pages_read_user_content',      # To read page posts
-            'pages_manage_metadata',        # To get page info
+            'pages_manage_metadata', 
+            'pages_manage_posts',       # To get page info
             'read_insights',                # To get page insights (CRITICAL)
             'ads_read',
             'ads_management',
