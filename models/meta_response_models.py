@@ -134,8 +134,12 @@ class FacebookPageInsights(BaseModel):
 class FacebookPostDetail(BaseModel):
     id: str
     message: str
+    story: Optional[str] = None
     created_time: str
     type: str
+    full_picture: Optional[str] = None
+    attachment_type: Optional[str] = None
+    permalink_url: Optional[str] = None
     likes: int
     comments: int
     shares: int
