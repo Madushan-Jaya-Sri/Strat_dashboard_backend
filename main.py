@@ -1117,6 +1117,48 @@ async def get_meta_campaigns(
         logger.error(f"Error fetching Meta campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/meta/campaigns/{campaign_id}/adsets", response_model=List[MetaAdSet])
+@save_response("meta_ad_sets")
+async def get_meta_ad_sets(
+    campaign_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get ad sets for a campaign with custom date range support"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaAdSet
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ad_sets = meta_manager.get_ad_sets(campaign_id, period, start_date, end_date)
+        return [MetaAdSet(**ad_set) for ad_set in ad_sets]
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad sets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/adsets/{ad_set_id}/ads", response_model=List[MetaAd])
+@save_response("meta_ads")
+async def get_meta_ads(
+    ad_set_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get ads for an ad set with custom date range support"""
+    try:
+        from social.meta_manager import MetaManager
+        from models.meta_response_models import MetaAd
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ads = meta_manager.get_ads(ad_set_id, period, start_date, end_date)
+        return [MetaAd(**ad) for ad in ads]
+    except Exception as e:
+        logger.error(f"Error fetching Meta ads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/meta/pages", response_model=List[FacebookPageBasic])
 @save_response("meta_pages")
 async def get_meta_pages(current_user: dict = Depends(get_current_user)):
@@ -1233,7 +1275,7 @@ async def get_meta_instagram_media(
         logger.error(f"Error fetching Instagram media: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-    
+
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(

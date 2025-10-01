@@ -279,6 +279,168 @@ class MetaManager:
             logger.error(f"Error fetching campaigns: {e}")
             return []
    
+    def get_ad_sets(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get ad sets for a campaign with insights"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            data = self._make_request(f"{campaign_id}/adsets", {
+                'fields': 'id,name,status,targeting,optimization_goal,billing_event,budget_remaining,daily_budget,lifetime_budget,created_time,updated_time'
+            })
+            
+            ad_sets = []
+            for ad_set in data.get('data', []):
+                # Get insights for each ad set
+                try:
+                    insights = self._make_request(f"{ad_set['id']}/insights", {
+                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,conversions'
+                    })
+                    
+                    insights_data = insights.get('data', [])
+                    if insights_data:
+                        ad_set_insights = insights_data[0]
+                    else:
+                        ad_set_insights = {}
+                        logger.warning(f"No insights data for ad set {ad_set.get('id')}")
+                    
+                except Exception as insight_error:
+                    logger.warning(f"Could not fetch insights for ad set {ad_set.get('id')}: {insight_error}")
+                    ad_set_insights = {}
+                
+                # Extract conversions from actions
+                conversions = 0
+                actions = ad_set_insights.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                # Parse targeting (simplified)
+                targeting = ad_set.get('targeting', {})
+                targeting_summary = {
+                    'locations': targeting.get('geo_locations', {}),
+                    'age_min': targeting.get('age_min'),
+                    'age_max': targeting.get('age_max'),
+                    'genders': targeting.get('genders', [])
+                }
+                
+                ad_sets.append({
+                    'id': ad_set.get('id'),
+                    'name': ad_set.get('name'),
+                    'campaign_id': campaign_id,
+                    'status': ad_set.get('status'),
+                    'optimization_goal': ad_set.get('optimization_goal'),
+                    'billing_event': ad_set.get('billing_event'),
+                    'daily_budget': float(ad_set.get('daily_budget', 0)) / 100 if ad_set.get('daily_budget') else None,
+                    'lifetime_budget': float(ad_set.get('lifetime_budget', 0)) / 100 if ad_set.get('lifetime_budget') else None,
+                    'budget_remaining': float(ad_set.get('budget_remaining', 0)) / 100 if ad_set.get('budget_remaining') else None,
+                    'targeting_summary': targeting_summary,
+                    'spend': float(ad_set_insights.get('spend', 0)),
+                    'impressions': int(ad_set_insights.get('impressions', 0)),
+                    'clicks': int(ad_set_insights.get('clicks', 0)),
+                    'conversions': conversions,
+                    'cpc': float(ad_set_insights.get('cpc', 0)),
+                    'cpm': float(ad_set_insights.get('cpm', 0)),
+                    'ctr': float(ad_set_insights.get('ctr', 0)),
+                    'reach': int(ad_set_insights.get('reach', 0)),
+                    'frequency': float(ad_set_insights.get('frequency', 0)),
+                    'created_time': ad_set.get('created_time'),
+                    'updated_time': ad_set.get('updated_time')
+                })
+            
+            logger.info(f"Retrieved {len(ad_sets)} ad sets for campaign {campaign_id}")
+            return ad_sets
+            
+        except Exception as e:
+            logger.error(f"Error fetching ad sets: {e}")
+            return []
+
+    def get_ads(self, ad_set_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get ads for an ad set with insights"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            data = self._make_request(f"{ad_set_id}/ads", {
+                'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url,object_story_spec},created_time,updated_time'
+            })
+            
+            ads = []
+            for ad in data.get('data', []):
+                # Get insights for each ad
+                try:
+                    insights = self._make_request(f"{ad['id']}/insights", {
+                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,inline_link_clicks,cost_per_inline_link_click'
+                    })
+                    
+                    insights_data = insights.get('data', [])
+                    if insights_data:
+                        ad_insights = insights_data[0]
+                    else:
+                        ad_insights = {}
+                        logger.warning(f"No insights data for ad {ad.get('id')}")
+                    
+                except Exception as insight_error:
+                    logger.warning(f"Could not fetch insights for ad {ad.get('id')}: {insight_error}")
+                    ad_insights = {}
+                
+                # Extract conversions from actions
+                conversions = 0
+                link_clicks = 0
+                actions = ad_insights.get('actions', [])
+                for action in actions:
+                    action_type = action.get('action_type')
+                    value = int(action.get('value', 0))
+                    
+                    if action_type in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
+                        conversions += value
+                    elif action_type == 'link_click':
+                        link_clicks += value
+                
+                # Extract creative details
+                creative = ad.get('creative', {})
+                creative_details = {
+                    'title': creative.get('title'),
+                    'body': creative.get('body'),
+                    'image_url': creative.get('image_url'),
+                    'video_id': creative.get('video_id'),
+                    'thumbnail_url': creative.get('thumbnail_url')
+                }
+                
+                ads.append({
+                    'id': ad.get('id'),
+                    'name': ad.get('name'),
+                    'ad_set_id': ad_set_id,
+                    'status': ad.get('status'),
+                    'creative': creative_details,
+                    'spend': float(ad_insights.get('spend', 0)),
+                    'impressions': int(ad_insights.get('impressions', 0)),
+                    'clicks': int(ad_insights.get('clicks', 0)),
+                    'link_clicks': link_clicks,
+                    'conversions': conversions,
+                    'cpc': float(ad_insights.get('cpc', 0)),
+                    'cpm': float(ad_insights.get('cpm', 0)),
+                    'ctr': float(ad_insights.get('ctr', 0)),
+                    'reach': int(ad_insights.get('reach', 0)),
+                    'frequency': float(ad_insights.get('frequency', 0)),
+                    'cost_per_link_click': float(ad_insights.get('cost_per_inline_link_click', 0)),
+                    'created_time': ad.get('created_time'),
+                    'updated_time': ad.get('updated_time')
+                })
+            
+            logger.info(f"Retrieved {len(ads)} ads for ad set {ad_set_id}")
+            return ads
+            
+        except Exception as e:
+            logger.error(f"Error fetching ads: {e}")
+            return []
+
     # =========================================================================
     # FACEBOOK PAGES
     # =========================================================================

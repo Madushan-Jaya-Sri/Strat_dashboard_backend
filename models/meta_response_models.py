@@ -46,6 +46,57 @@ class MetaCampaign(BaseModel):
     created_time: str
     updated_time: str
 
+
+class MetaAdSet(BaseModel):
+    id: str
+    name: str
+    campaign_id: str
+    status: str
+    optimization_goal: Optional[str] = None
+    billing_event: Optional[str] = None
+    daily_budget: Optional[float] = None
+    lifetime_budget: Optional[float] = None
+    budget_remaining: Optional[float] = None
+    targeting_summary: Optional[dict] = None
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+    created_time: str
+    updated_time: str
+
+class MetaAdCreative(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    image_url: Optional[str] = None
+    video_id: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+
+class MetaAd(BaseModel):
+    id: str
+    name: str
+    ad_set_id: str
+    status: str
+    creative: Optional[MetaAdCreative] = None
+    spend: float
+    impressions: int
+    clicks: int
+    link_clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+    cost_per_link_click: float
+    created_time: str
+    updated_time: str
+    
 # =============================================================================
 # FACEBOOK PAGES
 # =============================================================================

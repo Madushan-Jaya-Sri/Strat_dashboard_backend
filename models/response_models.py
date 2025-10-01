@@ -6,6 +6,22 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+from models.meta_response_models import (
+    MetaAdAccount,
+    MetaAdAccountInsights,
+    MetaCampaign,
+    MetaAdSet,
+    MetaAd,
+    MetaAdCreative,
+    FacebookPageBasic,
+    FacebookPageInsights,
+    FacebookPostDetail,
+    InstagramAccountBasic,
+    InstagramAccountInsights,
+    InstagramMediaDetail,
+    MetaOverview
+)
+
 # Authentication Models
 class UserInfo(BaseModel):
     email: str
@@ -811,25 +827,4 @@ class SocialMediaOverview(BaseModel):
 # =============================================================================
 # ERROR MODELS
 # =============================================================================
-
-class SocialMediaError(BaseModel):
-    platform: str
-    error: str
-    detail: Optional[str] = None
-    status_code: int
-
-# Import Meta models
-from models.meta_response_models import (
-    MetaAdAccount,
-    MetaAdAccountInsights,
-    MetaCampaign,
-    FacebookPageBasic,
-    FacebookPageInsights,
-    FacebookPostDetail,
-    InstagramAccountBasic,
-    InstagramAccountInsights,
-    InstagramMediaDetail,
-    MetaOverview
-)
-
 
