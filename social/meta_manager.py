@@ -232,21 +232,30 @@ class MetaManager:
         
         try:
             data = self._make_request(f"{account_id}/campaigns", {
-                'fields': 'id,name,objective,status,created_time,updated_time',
-                'time_range': f'{{"since":"{since}","until":"{until}"}}'
+                'fields': 'id,name,objective,status,created_time,updated_time'
             })
-            print("="*100)
-            print("data", data)
-            print("="*100)
+            
             campaigns = []
             for campaign in data.get('data', []):
                 # Get insights for each campaign
-                insights = self._make_request(f"{campaign['id']}/insights", {
-                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                    'fields': 'spend,impressions,clicks,cpc,cpm,ctr'
-                })
-                
-                campaign_insights = insights.get('data', [{}])[0]
+                try:
+                    insights = self._make_request(f"{campaign['id']}/insights", {
+                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr'
+                    })
+                    
+                    # Handle empty insights data
+                    insights_data = insights.get('data', [])
+                    if insights_data:
+                        campaign_insights = insights_data[0]
+                    else:
+                        # No data for this time period - use defaults
+                        campaign_insights = {}
+                        logger.warning(f"No insights data for campaign {campaign.get('id')} in period {since} to {until}")
+                    
+                except Exception as insight_error:
+                    logger.warning(f"Could not fetch insights for campaign {campaign.get('id')}: {insight_error}")
+                    campaign_insights = {}
                 
                 campaigns.append({
                     'id': campaign.get('id'),
@@ -263,11 +272,13 @@ class MetaManager:
                     'updated_time': campaign.get('updated_time')
                 })
             
+            logger.info(f"Retrieved {len(campaigns)} campaigns for account {account_id}")
             return campaigns
+            
         except Exception as e:
             logger.error(f"Error fetching campaigns: {e}")
             return []
-    
+   
     # =========================================================================
     # FACEBOOK PAGES
     # =========================================================================
