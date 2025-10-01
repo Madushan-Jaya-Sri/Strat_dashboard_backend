@@ -235,7 +235,9 @@ class MetaManager:
                 'fields': 'id,name,objective,status,created_time,updated_time',
                 'time_range': f'{{"since":"{since}","until":"{until}"}}'
             })
-            
+            print("="*100)
+            print("data", data)
+            print("="*100)
             campaigns = []
             for campaign in data.get('data', []):
                 # Get insights for each campaign
