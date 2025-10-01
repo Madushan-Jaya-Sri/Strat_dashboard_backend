@@ -601,7 +601,7 @@ class MetaManager:
             logger.warning(f"Could not get page access token: {e}")
             return self.access_token
 
-    def get_page_posts(self, page_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+    def get_page_posts(self, page_id: str, limit: int = 20, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get recent posts from Facebook page"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
@@ -615,7 +615,9 @@ class MetaManager:
                 'since': since,
                 'until': until
             })
-            
+            print("&"*100)
+            print(data)
+            print("&"*100)
             posts = []
             for post in data.get('data', []):
                 # Get post insights
