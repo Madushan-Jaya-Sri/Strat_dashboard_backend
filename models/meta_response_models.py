@@ -108,8 +108,16 @@ class FacebookPageBasic(BaseModel):
     fan_count: int = 0
     followers_count: int = 0
     link: Optional[str] = None
+    about: Optional[str] = None
+    description: Optional[str] = None
+    phone: Optional[str] = None
+    emails: Optional[List[str]] = []
+    website: Optional[str] = None
+    address: Optional[str] = None
+    location: Optional[dict] = None
     has_instagram: bool = False
     instagram_account: Optional[dict] = None
+
 
 class FacebookPageInsights(BaseModel):
     impressions: int
@@ -117,8 +125,11 @@ class FacebookPageInsights(BaseModel):
     engaged_users: int
     post_engagements: int
     fans: int
-    followers: Optional[int] = 0  # Add this field
+    followers: int
     page_views: int
+    new_likes: int = 0
+    talking_about_count: int = 0
+    checkins: int = 0
 
 class FacebookPostDetail(BaseModel):
     id: str

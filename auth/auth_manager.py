@@ -61,13 +61,17 @@ class AuthManager:
         
         self.FACEBOOK_SCOPES = [
             'email',
+            'public_profile',
+            'pages_show_list',              # To see pages
+            'pages_read_engagement',        # To read page engagement
+            'pages_read_user_content',      # To read page posts
+            'pages_manage_metadata',        # To get page info
+            'read_insights',                # To get page insights (CRITICAL)
             'ads_read',
             'ads_management',
             'business_management',
-            'public_profile',
-            'pages_show_list',           # Required to see pages
-            'pages_read_engagement',     # Required to read page data
-            'instagram_basic'            # For Instagram Business accounts
+            'instagram_basic',
+            'instagram_manage_insights'
         ]
         
         # In-memory session storage (use Redis in production)
