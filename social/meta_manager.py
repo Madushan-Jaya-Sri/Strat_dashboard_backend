@@ -977,10 +977,23 @@ class MetaManager:
             
             media_items = []
             for media in data.get('data', []):
-                # Filter by timestamp
-                media_timestamp = datetime.fromisoformat(media.get('timestamp').replace('Z', '+00:00')).timestamp()
-                if media_timestamp < since_timestamp:
-                    continue
+                # Filter by timestamp - FIX: Handle Instagram's timestamp format
+                timestamp_str = media.get('timestamp', '')
+                try:
+                    # Instagram returns format like '2025-07-28T07:49:19+0000'
+                    # Convert +0000 to +00:00 for Python's fromisoformat
+                    if '+0000' in timestamp_str:
+                        timestamp_str = timestamp_str.replace('+0000', '+00:00')
+                    elif 'Z' in timestamp_str:
+                        timestamp_str = timestamp_str.replace('Z', '+00:00')
+                    
+                    media_timestamp = datetime.fromisoformat(timestamp_str).timestamp()
+                    
+                    if media_timestamp < since_timestamp:
+                        continue
+                except Exception as ts_error:
+                    logger.warning(f"Could not parse timestamp {media.get('timestamp')}: {ts_error}")
+                    # Include the media anyway if we can't parse the timestamp
                 
                 # Get media insights
                 try:
@@ -988,7 +1001,8 @@ class MetaManager:
                         'metric': 'impressions,reach,engagement,saved'
                     })
                     insights_dict = {i['name']: i['values'][0]['value'] for i in insights.get('data', [])}
-                except:
+                except Exception as insight_error:
+                    logger.debug(f"Could not fetch insights for media {media['id']}: {insight_error}")
                     insights_dict = {}
                 
                 media_items.append({
@@ -1007,10 +1021,12 @@ class MetaManager:
                     'saved': insights_dict.get('saved', 0)
                 })
             
+            logger.info(f"Retrieved {len(media_items)} Instagram media items")
             return media_items
+            
         except Exception as e:
             logger.error(f"Error fetching Instagram media: {e}")
-            return []
+            return []  
     
     # =========================================================================
     # COMBINED OVERVIEW
