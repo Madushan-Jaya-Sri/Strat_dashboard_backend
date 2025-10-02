@@ -961,7 +961,7 @@ class MetaManager:
             raise
 
     def get_instagram_media(self, account_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get recent media from Instagram account"""
+        """Get recent media from Instagram account with comprehensive insights"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
             since_timestamp = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
@@ -971,54 +971,113 @@ class MetaManager:
         
         try:
             data = self._make_request(f"{account_id}/media", {
-                'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
+                'fields': 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count,media_product_type',
                 'limit': limit
             })
             
             media_items = []
+            now = datetime.now()
+            
             for media in data.get('data', []):
-                # Filter by timestamp - FIX: Handle Instagram's timestamp format
+                # Parse timestamp
                 timestamp_str = media.get('timestamp', '')
                 try:
-                    # Instagram returns format like '2025-07-28T07:49:19+0000'
-                    # Convert +0000 to +00:00 for Python's fromisoformat
                     if '+0000' in timestamp_str:
                         timestamp_str = timestamp_str.replace('+0000', '+00:00')
                     elif 'Z' in timestamp_str:
                         timestamp_str = timestamp_str.replace('Z', '+00:00')
                     
-                    media_timestamp = datetime.fromisoformat(timestamp_str).timestamp()
+                    media_datetime = datetime.fromisoformat(timestamp_str)
+                    media_timestamp = media_datetime.timestamp()
                     
                     if media_timestamp < since_timestamp:
                         continue
+                    
+                    # Check if media is at least 24 hours old
+                    hours_old = (now - media_datetime.replace(tzinfo=None)).total_seconds() / 3600
+                    is_old_enough = hours_old >= 24
+                    
                 except Exception as ts_error:
                     logger.warning(f"Could not parse timestamp {media.get('timestamp')}: {ts_error}")
-                    # Include the media anyway if we can't parse the timestamp
+                    is_old_enough = True  # Assume it's old enough if we can't parse
                 
-                # Get media insights
-                try:
-                    insights = self._make_request(f"{media['id']}/insights", {
-                        'metric': 'impressions,reach,engagement,saved'
-                    })
-                    insights_dict = {i['name']: i['values'][0]['value'] for i in insights.get('data', [])}
-                except Exception as insight_error:
-                    logger.debug(f"Could not fetch insights for media {media['id']}: {insight_error}")
-                    insights_dict = {}
+                # Get media insights (only if media is old enough)
+                insights_dict = {
+                    'impressions': 0,
+                    'reach': 0,
+                    'engagement': 0,
+                    'saved': 0
+                }
+                
+                if is_old_enough:
+                    media_id = media['id']
+                    media_type = media.get('media_type')
+                    media_product_type = media.get('media_product_type', 'FEED')
+                    
+                    # Different metrics for different media types
+                    if media_product_type == 'STORY' or media_product_type == 'REELS':
+                        # Reels and Stories have different metrics
+                        try:
+                            if media_product_type == 'REELS':
+                                insights = self._make_request(f"{media_id}/insights", {
+                                    'metric': 'plays,reach,total_interactions,saved'
+                                })
+                            else:  # STORY
+                                insights = self._make_request(f"{media_id}/insights", {
+                                    'metric': 'impressions,reach,exits,replies'
+                                })
+                            
+                            for insight in insights.get('data', []):
+                                metric_name = insight.get('name')
+                                values = insight.get('values', [])
+                                if values:
+                                    value = values[0].get('value', 0)
+                                    
+                                    if metric_name in ['impressions', 'plays']:
+                                        insights_dict['impressions'] = value
+                                    elif metric_name == 'reach':
+                                        insights_dict['reach'] = value
+                                    elif metric_name in ['total_interactions', 'replies']:
+                                        insights_dict['engagement'] = value
+                                    elif metric_name == 'saved':
+                                        insights_dict['saved'] = value
+                                        
+                        except Exception as e:
+                            logger.debug(f"Could not fetch {media_product_type} insights for {media_id}: {e}")
+                    
+                    else:  # Regular FEED posts
+                        try:
+                            insights = self._make_request(f"{media_id}/insights", {
+                                'metric': 'impressions,reach,engagement,saved'
+                            })
+                            
+                            for insight in insights.get('data', []):
+                                metric_name = insight.get('name')
+                                values = insight.get('values', [])
+                                if values:
+                                    insights_dict[metric_name] = values[0].get('value', 0)
+                                    
+                        except Exception as e:
+                            logger.debug(f"Could not fetch feed insights for {media_id}: {e}")
+                else:
+                    logger.debug(f"Media {media['id']} is less than 24 hours old, insights not yet available")
                 
                 media_items.append({
                     'id': media.get('id'),
                     'caption': media.get('caption', ''),
                     'media_type': media.get('media_type'),
+                    'media_product_type': media.get('media_product_type', 'FEED'),
                     'media_url': media.get('media_url'),
                     'thumbnail_url': media.get('thumbnail_url'),
                     'permalink': media.get('permalink'),
                     'timestamp': media.get('timestamp'),
                     'like_count': media.get('like_count', 0),
                     'comments_count': media.get('comments_count', 0),
-                    'impressions': insights_dict.get('impressions', 0),
-                    'reach': insights_dict.get('reach', 0),
-                    'engagement': insights_dict.get('engagement', 0),
-                    'saved': insights_dict.get('saved', 0)
+                    'impressions': insights_dict['impressions'],
+                    'reach': insights_dict['reach'],
+                    'engagement': insights_dict['engagement'],
+                    'saved': insights_dict['saved'],
+                    'insights_available': is_old_enough
                 })
             
             logger.info(f"Retrieved {len(media_items)} Instagram media items")
@@ -1026,8 +1085,7 @@ class MetaManager:
             
         except Exception as e:
             logger.error(f"Error fetching Instagram media: {e}")
-            return []  
-    
+            return []   
     # =========================================================================
     # COMBINED OVERVIEW
     # =========================================================================

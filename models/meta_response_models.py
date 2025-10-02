@@ -197,6 +197,7 @@ class InstagramMediaDetail(BaseModel):
     id: str
     caption: str
     media_type: str
+    media_product_type: str = "FEED"
     media_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     permalink: Optional[str] = None
@@ -207,6 +208,7 @@ class InstagramMediaDetail(BaseModel):
     reach: int = 0
     engagement: int = 0
     saved: int = 0
+    insights_available: bool = False
 
 # =============================================================================
 # COMBINED OVERVIEW
