@@ -185,10 +185,13 @@ class InstagramAccountBasic(BaseModel):
     connected_facebook_page: Optional[dict] = None
 
 class InstagramAccountInsights(BaseModel):
-    impressions: int
     reach: int
     profile_views: int
     website_clicks: int
+    followers_count: int
+    accounts_engaged: int
+    total_interactions: int
+    media_count: int = 0
 
 class InstagramMediaDetail(BaseModel):
     id: str

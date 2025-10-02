@@ -883,46 +883,80 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching Instagram accounts: {e}")
             return []
-    
+        
     def get_instagram_insights(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get insights for Instagram Business account"""
+        """Get comprehensive Instagram Business account insights"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
         try:
-            metrics = [
-                'impressions',
+            # Metrics available with 'day' period
+            daily_metrics = [
                 'reach',
                 'profile_views',
-                'website_clicks'
+                'website_clicks',
+                'accounts_engaged',
+                'total_interactions'
             ]
             
-            data = self._make_request(f"{account_id}/insights", {
-                'metric': ','.join(metrics),
-                'period': 'day',
-                'since': since,
-                'until': until
-            })
-            
             insights_dict = {}
-            for metric_data in data.get('data', []):
-                metric_name = metric_data.get('name')
-                values = metric_data.get('values', [])
-                total = sum(v.get('value', 0) for v in values)
-                insights_dict[metric_name] = total
+            
+            # Fetch daily metrics
+            try:
+                data = self._make_request(f"{account_id}/insights", {
+                    'metric': ','.join(daily_metrics),
+                    'period': 'day',
+                    'since': since,
+                    'until': until
+                })
+                
+                for metric_data in data.get('data', []):
+                    metric_name = metric_data.get('name')
+                    values = metric_data.get('values', [])
+                    total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                    insights_dict[metric_name] = total
+            except Exception as e:
+                logger.warning(f"Could not fetch daily metrics: {e}")
+            
+            # Get lifetime metrics (current snapshot)
+            try:
+                lifetime_data = self._make_request(f"{account_id}/insights", {
+                    'metric': 'follower_count',
+                    'period': 'lifetime'
+                })
+                
+                for metric_data in lifetime_data.get('data', []):
+                    if metric_data.get('name') == 'follower_count':
+                        values = metric_data.get('values', [])
+                        if values:
+                            insights_dict['follower_count'] = values[-1].get('value', 0)
+            except Exception as e:
+                logger.warning(f"Could not fetch follower count: {e}")
+            
+            # Get current account info as fallback
+            try:
+                account_info = self._make_request(account_id, {
+                    'fields': 'followers_count,media_count,follows_count'
+                })
+            except:
+                account_info = {}
             
             return {
-                'impressions': insights_dict.get('impressions', 0),
                 'reach': insights_dict.get('reach', 0),
                 'profile_views': insights_dict.get('profile_views', 0),
-                'website_clicks': insights_dict.get('website_clicks', 0)
+                'website_clicks': insights_dict.get('website_clicks', 0),
+                'followers_count': insights_dict.get('follower_count', account_info.get('followers_count', 0)),
+                'accounts_engaged': insights_dict.get('accounts_engaged', 0),
+                'total_interactions': insights_dict.get('total_interactions', 0),
+                'media_count': account_info.get('media_count', 0)
             }
+            
         except Exception as e:
             logger.error(f"Error fetching Instagram insights: {e}")
             raise
-    
+
     def get_instagram_media(self, account_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get recent media from Instagram account"""
         if start_date and end_date:
