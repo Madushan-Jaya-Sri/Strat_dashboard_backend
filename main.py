@@ -24,9 +24,8 @@ from google_analytics.ga4_manager import GA4Manager
 from intent_insights.intent_manager import IntentManager
 from models.response_models import *
 from models.response_models import AdKeyStats
-from models.response_models import (EnhancedAdCampaign, FunnelRequest,FacebookPage, FacebookPageBasicStats, FacebookPost, FacebookPageSummary,
-    InstagramAccount, InstagramAccountBasicStats, InstagramMedia, 
-    InstagramHashtag, InstagramAccountSummary, SocialMediaOverview)
+from models.response_models import EnhancedAdCampaign, FunnelRequest
+from utils.charts_helper import ChartsDataTransformer, prepare_pie_chart_data, prepare_bar_chart_data, prepare_line_chart_data
 from database.mongo_manager import MongoManager
 
 
@@ -1096,6 +1095,27 @@ async def get_meta_ad_insights(
         logger.error(f"Error fetching Meta ad insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/meta/ad-accounts/{account_id}/insights/timeseries")
+@save_response("meta_ad_account_insights_timeseries")
+async def get_meta_ad_insights_timeseries(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get time-series insights for Meta ad account (for line charts)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_ad_account_insights_timeseries(account_id, period, start_date, end_date)
+        return insights
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad insights timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=List[MetaCampaign])
 @save_response("meta_campaigns")
 async def get_meta_campaigns(
@@ -1138,6 +1158,26 @@ async def get_meta_ad_sets(
         logger.error(f"Error fetching Meta ad sets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/meta/campaigns/{campaign_id}/adsets/timeseries")
+@save_response("meta_ad_sets_timeseries")
+async def get_meta_ad_sets_timeseries(
+    campaign_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get ad sets for a campaign with time-series insights (for line charts)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ad_sets = meta_manager.get_ad_sets_timeseries(campaign_id, period, start_date, end_date)
+        return ad_sets
+    except Exception as e:
+        logger.error(f"Error fetching Meta ad sets timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/api/meta/adsets/{ad_set_id}/ads", response_model=List[MetaAd])
 @save_response("meta_ads")
 async def get_meta_ads(
@@ -1158,6 +1198,28 @@ async def get_meta_ads(
     except Exception as e:
         logger.error(f"Error fetching Meta ads: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/adsets/{ad_set_id}/ads/timeseries")
+@save_response("meta_ads_timeseries")
+async def get_meta_ads_timeseries(
+    ad_set_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get ads for an ad set with time-series insights (for line charts)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ads = meta_manager.get_ads_timeseries(ad_set_id, period, start_date, end_date)
+        return ads
+    except Exception as e:
+        logger.error(f"Error fetching Meta ads timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 
 @app.get("/api/meta/pages", response_model=List[FacebookPageBasic])
 @save_response("meta_pages")
@@ -1195,6 +1257,26 @@ async def get_meta_page_insights(
         logger.error(f"Error fetching Meta page insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/meta/pages/{page_id}/insights/timeseries")
+@save_response("meta_page_insights_timeseries")
+async def get_meta_page_insights_timeseries(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get time-series insights for Facebook page (for line charts)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_page_insights_timeseries(page_id, period, start_date, end_date)
+        return insights
+    except Exception as e:
+        logger.error(f"Error fetching Meta page insights timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/api/meta/pages/{page_id}/posts", response_model=List[FacebookPostDetail])
 @save_response("meta_page_posts")
 async def get_meta_page_posts(
@@ -1215,6 +1297,27 @@ async def get_meta_page_posts(
         return [FacebookPostDetail(**post) for post in posts]
     except Exception as e:
         logger.error(f"Error fetching Meta page posts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/meta/pages/{page_id}/posts/timeseries")
+@save_response("meta_page_posts_timeseries")
+async def get_meta_page_posts_timeseries(
+    page_id: str,
+    limit: int = Query(10, ge=1, le=100),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get posts with time-series insights (for tracking post performance over time)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        posts = meta_manager.get_page_posts_timeseries(page_id, limit, period, start_date, end_date)
+        return posts
+    except Exception as e:
+        logger.error(f"Error fetching Meta page posts timeseries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/meta/instagram/accounts", response_model=List[InstagramAccountBasic])
@@ -1253,6 +1356,26 @@ async def get_meta_instagram_insights(
         logger.error(f"Error fetching Instagram insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/meta/instagram/{account_id}/insights/timeseries")
+@save_response("meta_instagram_insights_timeseries")
+async def get_meta_instagram_insights_timeseries(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get time-series insights for Instagram account (for line charts)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_instagram_insights_timeseries(account_id, period, start_date, end_date)
+        return insights
+    except Exception as e:
+        logger.error(f"Error fetching Instagram insights timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/api/meta/instagram/{account_id}/media", response_model=List[InstagramMediaDetail])
 @save_response("meta_instagram_media")
 async def get_meta_instagram_media(
@@ -1276,6 +1399,29 @@ async def get_meta_instagram_media(
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/api/meta/debug/permissions")
+
+@app.get("/api/meta/instagram/{account_id}/media/timeseries")
+@save_response("meta_instagram_media_timeseries")
+async def get_meta_instagram_media_timeseries(
+    account_id: str,
+    limit: int = Query(10, ge=1, le=100),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get Instagram media with time-series insights (for tracking post performance over time)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        media = meta_manager.get_instagram_media_timeseries(account_id, limit, period, start_date, end_date)
+        return media
+    except Exception as e:
+        logger.error(f"Error fetching Instagram media timeseries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
 async def debug_meta_permissions(current_user: dict = Depends(get_current_user)):
     """Debug endpoint to check what permissions we have"""
     try:
@@ -1330,7 +1476,133 @@ async def debug_meta_permissions(current_user: dict = Depends(get_current_user))
     except Exception as e:
         return {"error": str(e)}
 
+# Chart data endpoints
 
+@app.get("/api/meta/charts/campaigns-spend-distribution/{account_id}")
+async def get_campaigns_spend_pie_chart(
+    account_id: str,
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get pie chart data for spend distribution across campaigns"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        campaigns = meta_manager.get_campaigns(account_id, period=period)
+        
+        transformer = ChartsDataTransformer()
+        return transformer.prepare_pie_chart_data(campaigns, 'spend', 'name')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/charts/adsets-performance-bar/{campaign_id}")
+async def get_adsets_performance_bar_chart(
+    campaign_id: str,
+    metric: str = Query("impressions", pattern="^(impressions|clicks|conversions|spend)$"),
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get bar chart data comparing ad sets performance"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ad_sets = meta_manager.get_ad_sets(campaign_id, period=period)
+        
+        transformer = ChartsDataTransformer()
+        return transformer.prepare_bar_chart_data(ad_sets, metric, 'name')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/charts/account-metrics-line/{account_id}")
+async def get_account_metrics_line_chart(
+    account_id: str,
+    metrics: str = Query("impressions,clicks,conversions", description="Comma-separated metrics"),
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get line chart data for multiple metrics over time"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_ad_account_insights_timeseries(account_id, period=period)
+        
+        transformer = ChartsDataTransformer()
+        metrics_list = metrics.split(',')
+        return transformer.prepare_line_chart_data(insights['timeseries'], metrics_list)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/charts/impressions-breakdown-stacked/{account_id}")
+async def get_impressions_breakdown_stacked_chart(
+    account_id: str,
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get stacked bar chart for organic vs paid impressions"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_page_insights_timeseries(
+            f"act_{account_id}", period=period
+        )
+        
+        transformer = ChartsDataTransformer()
+        return transformer.prepare_stacked_bar_chart_data(
+            insights['timeseries'],
+            ['impressions_organic', 'impressions_paid']
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/charts/conversion-funnel/{account_id}")
+async def get_conversion_funnel_chart(
+    account_id: str,
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get funnel chart data for conversion tracking"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        insights = meta_manager.get_ad_account_insights_timeseries(account_id, period=period)
+        
+        transformer = ChartsDataTransformer()
+        funnel_stages = [
+            ('impressions', 'Impressions'),
+            ('clicks', 'Clicks'),
+            ('conversions', 'Conversions')
+        ]
+        return transformer.prepare_funnel_chart_data(insights['summary'], funnel_stages)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/charts/engagement-rates/{campaign_id}")
+async def get_engagement_rates_comparison(
+    campaign_id: str,
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get engagement rate comparison across ad sets"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        ad_sets = meta_manager.get_ad_sets(campaign_id, period=period)
+        
+        transformer = ChartsDataTransformer()
+        return transformer.calculate_engagement_metrics(ad_sets)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)

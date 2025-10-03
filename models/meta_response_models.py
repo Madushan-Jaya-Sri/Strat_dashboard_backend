@@ -32,6 +32,21 @@ class MetaAdAccountInsights(BaseModel):
     reach: int
     frequency: float
 
+class MetaAdInsightsDay(BaseModel):
+    date: str
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+
+class MetaAdAccountInsightsTimeseries(BaseModel):
+    timeseries: List[MetaAdInsightsDay]
+    summary: MetaAdAccountInsights
 class MetaCampaign(BaseModel):
     id: str
     name: str
@@ -70,6 +85,54 @@ class MetaAdSet(BaseModel):
     created_time: str
     updated_time: str
 
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+
+class MetricDay(BaseModel):
+    date: str
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+
+class MetricSummary(BaseModel):
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+
+class TargetingSummary(BaseModel):
+    locations: Dict[str, Any]
+    age_min: Optional[int]
+    age_max: Optional[int]
+    genders: List[int]
+
+class MetaAdSetTimeseries(BaseModel):
+    id: str
+    name: str
+    campaign_id: str
+    status: str
+    optimization_goal: Optional[str]
+    billing_event: Optional[str]
+    daily_budget: Optional[float]
+    lifetime_budget: Optional[float]
+    budget_remaining: Optional[float]
+    targeting_summary: TargetingSummary
+    created_time: str
+    updated_time: str
+    timeseries: List[MetricDay]
+    summary: MetricSummary
+
 class MetaAdCreative(BaseModel):
     title: Optional[str] = None
     body: Optional[str] = None
@@ -96,6 +159,52 @@ class MetaAd(BaseModel):
     cost_per_link_click: float
     created_time: str
     updated_time: str
+
+
+class AdMetricDay(BaseModel):
+    date: str
+    spend: float
+    impressions: int
+    clicks: int
+    link_clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+    cost_per_link_click: float
+
+class AdMetricSummary(BaseModel):
+    spend: float
+    impressions: int
+    clicks: int
+    link_clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+    cost_per_link_click: float
+
+class CreativeDetails(BaseModel):
+    title: Optional[str]
+    body: Optional[str]
+    image_url: Optional[str]
+    video_id: Optional[str]
+    thumbnail_url: Optional[str]
+
+class MetaAdTimeseries(BaseModel):
+    id: str
+    name: str
+    ad_set_id: str
+    status: str
+    creative: CreativeDetails
+    created_time: str
+    updated_time: str
+    timeseries: List[AdMetricDay]
+    summary: AdMetricSummary
 
 # =============================================================================
 # FACEBOOK PAGES
@@ -170,6 +279,95 @@ class FacebookPostDetail(BaseModel):
     video_avg_time_watched: float = 0
     video_complete_views: int = 0
 
+
+from pydantic import BaseModel
+from typing import List
+
+class PageInsightsDay(BaseModel):
+    date: str
+    impressions: int
+    unique_impressions: int
+    post_engagements: int
+    engaged_users: int
+    page_views: int
+    new_likes: int
+    fans: int
+
+class PageInsightsSummary(BaseModel):
+    impressions: int
+    unique_impressions: int
+    engaged_users: int
+    post_engagements: int
+    fans: int
+    followers: int
+    page_views: int
+    new_likes: int
+    talking_about_count: int
+    checkins: int
+
+class FacebookPageInsightsTimeseries(BaseModel):
+    timeseries: List[PageInsightsDay]
+    summary: PageInsightsSummary
+
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+
+class PostInsightsDay(BaseModel):
+    date: str
+    impressions: int
+    impressions_unique: int
+    impressions_paid: int
+    impressions_organic: int
+    reach: int
+    engaged_users: int
+    clicks: int
+    clicks_unique: int
+    negative_feedback: int
+    video_views: Optional[int] = 0
+    video_views_10s: Optional[int] = 0
+    video_avg_time_watched: Optional[float] = 0
+    video_complete_views: Optional[int] = 0
+
+class PostInsightsSummary(BaseModel):
+    impressions: int
+    impressions_unique: int
+    impressions_paid: int
+    impressions_organic: int
+    reach: int
+    engaged_users: int
+    clicks: int
+    clicks_unique: int
+    negative_feedback: int
+    video_views: int
+    video_views_10s: int
+    video_avg_time_watched: float
+    video_complete_views: int
+
+class FacebookPostTimeseries(BaseModel):
+    id: str
+    message: str
+    story: str
+    created_time: str
+    status_type: Optional[str]
+    type: str
+    full_picture: Optional[str]
+    attachment_type: Optional[str]
+    attachment_title: Optional[str]
+    attachment_description: Optional[str]
+    permalink_url: str
+    
+    # Current engagement totals
+    reactions: int
+    reactions_breakdown: Dict[str, Any]
+    likes: int
+    comments: int
+    shares: int
+    total_engagement: int
+    engagement_rate: float
+    
+    # Time-series data
+    timeseries: List[PostInsightsDay]
+    summary: PostInsightsSummary
 # =============================================================================
 # INSTAGRAM
 # =============================================================================
@@ -210,6 +408,61 @@ class InstagramMediaDetail(BaseModel):
     saved: int = 0
     insights_available: bool = False
 
+from pydantic import BaseModel
+from typing import List
+
+class InstagramInsightsDay(BaseModel):
+    date: str
+    reach: int
+    profile_views: int
+    website_clicks: int
+    accounts_engaged: int
+    total_interactions: int
+
+class InstagramInsightsSummary(BaseModel):
+    reach: int
+    profile_views: int
+    website_clicks: int
+    followers_count: int
+    accounts_engaged: int
+    total_interactions: int
+    media_count: int
+
+class InstagramAccountInsightsTimeseries(BaseModel):
+    timeseries: List[InstagramInsightsDay]
+    summary: InstagramInsightsSummary
+
+
+from pydantic import BaseModel
+from typing import List, Optional
+
+class InstagramMediaInsightsDay(BaseModel):
+    date: str
+    impressions: int
+    reach: int
+    engagement: int
+    saved: int
+
+class InstagramMediaInsightsSummary(BaseModel):
+    impressions: int
+    reach: int
+    engagement: int
+    saved: int
+
+class InstagramMediaTimeseries(BaseModel):
+    id: str
+    caption: str
+    media_type: str
+    media_product_type: str
+    media_url: Optional[str]
+    thumbnail_url: Optional[str]
+    permalink: str
+    timestamp: str
+    like_count: int
+    comments_count: int
+    insights_available: bool
+    timeseries: List[InstagramMediaInsightsDay]
+    summary: InstagramMediaInsightsSummary
 # =============================================================================
 # COMBINED OVERVIEW
 # =============================================================================
