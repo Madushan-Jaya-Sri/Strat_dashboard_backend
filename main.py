@@ -25,7 +25,7 @@ from intent_insights.intent_manager import IntentManager
 from models.response_models import *
 from models.response_models import AdKeyStats
 from models.response_models import EnhancedAdCampaign, FunnelRequest
-from utils.charts_helper import ChartsDataTransformer, prepare_pie_chart_data, prepare_bar_chart_data, prepare_line_chart_data
+from utils.charts_helper import ChartsDataTransformer
 from database.mongo_manager import MongoManager
 
 
