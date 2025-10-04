@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analytics Dashboard with Meta Tab</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3a4c 0%, #2c5364 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .header {
+            background: #1a3040;
+            color: white;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: #6fa8dc;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .nav-tabs {
+            background: #1a3040;
+            padding: 0 2rem;
+            display: flex;
+            gap: 0.5rem;
+            overflow-x: auto;
+        }
+
+        .nav-tab {
+            padding: 1rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: #a0c4d4;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .nav-tab:hover {
+            background: rgba(255,255,255,0.05);
+            color: white;
+        }
+
+        .nav-tab.active {
+            background: #6fa8dc;
+            color: white;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .main-container {
+            display: flex;
+            min-height: calc(100vh - 140px);
+        }
+
+        .sidebar {
+            width: 240px;
+            background: rgba(26, 48, 64, 0.95);
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .sidebar h3 {
+            color: #a0c4d4;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-item {
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background: rgba(111, 168, 220, 0.15);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 4px solid transparent;
+        }
+
+        .sidebar-item:hover {
+            background: rgba(111, 168, 220, 0.3);
+            border-left-color: #6fa8dc;
+        }
+
+        .sidebar-item.active {
+            background: #6fa8dc;
+            border-left-color: #fff;
+        }
+
+        .sidebar-item h4 {
+            color: white;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .sidebar-item p {
+            color: #a0c4d4;
+            font-size: 0.75rem;
+        }
+
+        .content {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .breadcrumb {
+            color: #a0c4d4;
+            font-size: 0.9rem;
+        }
+
+        .breadcrumb span {
+            color: white;
+        }
+
+        .period-selector {
+            background: rgba(26, 48, 64, 0.8);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            font-size: 0.95rem;
+            cursor: pointer;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1a3040;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-subtitle {
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .metric-change {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .metric-change.positive {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .metric-change.negative {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .chart-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .chart-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .chart-card h3 {
+            margin-bottom: 1.5rem;
+            color: #1a3040;
+            font-size: 1.1rem;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 350px;
+        }
+
+        .table-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .table-section h3 {
+            margin-bottom: 1.5rem;
+            color: #1a3040;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: #f8f9fa;
+        }
+
+        th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        tbody tr:hover {
+            background: #f8f9fa;
+            cursor: pointer;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-paused {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .sub-nav {
+            background: rgba(26, 48, 64, 0.5);
+            padding: 1rem 0;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .sub-nav-btn {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: #a0c4d4;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.3s;
+            border-radius: 6px;
+        }
+
+        .sub-nav-btn:hover {
+            background: rgba(111, 168, 220, 0.2);
+            color: white;
+        }
+
+        .sub-nav-btn.active {
+            background: #6fa8dc;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ANALYTICS DASHBOARD</h1>
+        <div class="user-info">
+            <span>Madushan Jayasri</span>
+            <div class="user-avatar">MJ</div>
+        </div>
+    </div>
+
+    <div class="nav-tabs">
+        <button class="nav-tab">Google Ads Campaigns</button>
+        <button class="nav-tab">Google Analytics</button>
+        <button class="nav-tab">Intent Insights</button>
+        <button class="nav-tab">Facebook</button>
+        <button class="nav-tab">Instagram</button>
+        <button class="nav-tab active" onclick="showMetaTab()">Meta</button>
+    </div>
+
+    <!-- META TAB CONTENT -->
+    <div id="meta-content" class="main-container">
+        <div class="sidebar">
+            <h3>Ad Accounts</h3>
+            <div class="sidebar-item active" onclick="loadAccount('account1', 'ad-accounts')">
+                <h4>Fashion Brand 2025</h4>
+                <p>ID: act_123456789</p>
+            </div>
+            <div class="sidebar-item" onclick="loadAccount('account2', 'ad-accounts')">
+                <h4>E-commerce Store</h4>
+                <p>ID: act_987654321</p>
+            </div>
+            <div class="sidebar-item" onclick="loadAccount('account3', 'ad-accounts')">
+                <h4>Tech Startup Ads</h4>
+                <p>ID: act_456789123</p>
+            </div>
+
+            <h3 style="margin-top: 2rem;">Facebook Pages</h3>
+            <div class="sidebar-item" onclick="loadAccount('page1', 'facebook-pages')">
+                <h4>Fashion Brand Page</h4>
+                <p>48.5K followers</p>
+            </div>
+
+            <h3 style="margin-top: 2rem;">Instagram Accounts</h3>
+            <div class="sidebar-item" onclick="loadAccount('ig1', 'instagram-accounts')">
+                <h4>@fashionbrand2025</h4>
+                <p>125.3K followers</p>
+            </div>
+        </div>
+
+        <div class="content">
+            <!-- Ad Accounts View -->
+            <div id="ad-accounts-view">
+                <div class="controls">
+                    <div class="breadcrumb">
+                        Meta Ads / <span>Fashion Brand 2025</span>
+                    </div>
+                    <select class="period-selector">
+                        <option>Period: 7 Days</option>
+                        <option>Period: 30 Days</option>
+                        <option>Period: 90 Days</option>
+                        <option>Custom Range</option>
+                    </select>
+                </div>
+
+                <div class="sub-nav">
+                    <button class="sub-nav-btn active" onclick="switchSubView('overview')">Overview</button>
+                    <button class="sub-nav-btn" onclick="switchSubView('campaigns')">Campaigns</button>
+                    <button class="sub-nav-btn" onclick="switchSubView('adsets')">Ad Sets</button>
+                    <button class="sub-nav-btn" onclick="switchSubView('ads')">Individual Ads</button>
+                </div>
+
+                <!-- Overview Sub-view -->
+                <div id="overview-subview">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-label">Total Spend</div>
+                            <div class="metric-value">$12,458</div>
+                            <div class="metric-subtitle">Budget utilization</div>
+                            <span class="metric-change positive">↑ 15.3%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Impressions</div>
+                            <div class="metric-value">1.2M</div>
+                            <div class="metric-subtitle">Reach and visibility</div>
+                            <span class="metric-change positive">↑ 22.1%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Total Clicks</div>
+                            <div class="metric-value">45.6K</div>
+                            <div class="metric-subtitle">User engagement</div>
+                            <span class="metric-change positive">↑ 8.5%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Conversions</div>
+                            <div class="metric-value">3,248</div>
+                            <div class="metric-subtitle">Goal achievements</div>
+                            <span class="metric-change positive">↑ 12.7%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">CPC</div>
+                            <div class="metric-value">$0.27</div>
+                            <div class="metric-subtitle">Cost efficiency</div>
+                            <span class="metric-change positive">↓ 5.2%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">CTR</div>
+                            <div class="metric-value">3.78%</div>
+                            <div class="metric-subtitle">Ad relevance</div>
+                            <span class="metric-change positive">↑ 0.3%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">CPM</div>
+                            <div class="metric-value">$10.35</div>
+                            <div class="metric-subtitle">Reach efficiency</div>
+                            <span class="metric-change negative">↑ 2.1%</span>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">ROAS</div>
+                            <div class="metric-value">4.2x</div>
+                            <div class="metric-subtitle">Return on ad spend</div>
+                            <span class="metric-change positive">↑ 0.5x</span>
+                        </div>
+                    </div>
+
+                    <div class="chart-section">
+                        <div class="chart-card">
+                            <h3>Performance Over Time</h3>
+                            <div class="chart-container">
+                                <canvas id="performanceChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="chart-card">
+                            <h3>Spend Distribution</h3>
+                            <div class="chart-container">
+                                <canvas id="spendChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Campaigns Sub-view -->
+                <div id="campaigns-subview" class="hidden">
+                    <div class="table-section">
+                        <h3>Active Campaigns</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Campaign Name</th>
+                                    <th>Status</th>
+                                    <th>Spend</th>
+                                    <th>Impressions</th>
+                                    <th>Clicks</th>
+                                    <th>Conversions</th>
+                                    <th>CPC</th>
+                                    <th>CTR</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Spring Collection 2025</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$4,250</td>
+                                    <td>425,800</td>
+                                    <td>15,400</td>
+                                    <td>1,250</td>
+                                    <td>$0.28</td>
+                                    <td>3.62%</td>
+                                </tr>
+                                <tr>
+                                    <td>Summer Sale Campaign</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$3,890</td>
+                                    <td>380,500</td>
+                                    <td>14,200</td>
+                                    <td>980</td>
+                                    <td>$0.27</td>
+                                    <td>3.73%</td>
+                                </tr>
+                                <tr>
+                                    <td>Brand Awareness Q1</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$2,450</td>
+                                    <td>245,000</td>
+                                    <td>9,800</td>
+                                    <td>650</td>
+                                    <td>$0.25</td>
+                                    <td>4.00%</td>
+                                </tr>
+                                <tr>
+                                    <td>Retargeting Campaign</td>
+                                    <td><span class="status-badge status-paused">Paused</span></td>
+                                    <td>$1,868</td>
+                                    <td>150,000</td>
+                                    <td>6,400</td>
+                                    <td>368</td>
+                                    <td>$0.29</td>
+                                    <td>4.27%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="chart-section">
+                        <div class="chart-card">
+                            <h3>Campaign Performance Comparison</h3>
+                            <div class="chart-container">
+                                <canvas id="campaignCompareChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="chart-card">
+                            <h3>Conversion Funnel</h3>
+                            <div class="chart-container">
+                                <canvas id="funnelChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ad Sets Sub-view -->
+                <div id="adsets-subview" class="hidden">
+                    <div class="table-section">
+                        <h3>Ad Sets Performance</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Ad Set Name</th>
+                                    <th>Campaign</th>
+                                    <th>Status</th>
+                                    <th>Spend</th>
+                                    <th>Impressions</th>
+                                    <th>CTR</th>
+                                    <th>Conversions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Women's Fashion 18-35</td>
+                                    <td>Spring Collection</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$1,850</td>
+                                    <td>185,500</td>
+                                    <td>3.62%</td>
+                                    <td>545</td>
+                                </tr>
+                                <tr>
+                                    <td>Men's Collection 25-45</td>
+                                    <td>Spring Collection</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$1,450</td>
+                                    <td>145,200</td>
+                                    <td>3.75%</td>
+                                    <td>425</td>
+                                </tr>
+                                <tr>
+                                    <td>Accessories All Ages</td>
+                                    <td>Spring Collection</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$950</td>
+                                    <td>95,100</td>
+                                    <td>3.40%</td>
+                                    <td>280</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Individual Ads Sub-view -->
+                <div id="ads-subview" class="hidden">
+                    <div class="table-section">
+                        <h3>Individual Ads Performance</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Ad Name</th>
+                                    <th>Ad Set</th>
+                                    <th>Status</th>
+                                    <th>Spend</th>
+                                    <th>Impressions</th>
+                                    <th>Link Clicks</th>
+                                    <th>Conversions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>Spring Dress Collection - Image 1</td>
+                                    <td>Women's Fashion 18-35</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$680</td>
+                                    <td>68,200</td>
+                                    <td>2,450</td>
+                                    <td>198</td>
+                                </tr>
+                                <tr>
+                                    <td>Spring Dress Collection - Video</td>
+                                    <td>Women's Fashion 18-35</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$620</td>
+                                    <td>62,100</td>
+                                    <td>2,850</td>
+                                    <td>215</td>
+                                </tr>
+                                <tr>
+                                    <td>Casual Wear - Carousel</td>
+                                    <td>Women's Fashion 18-35</td>
+                                    <td><span class="status-badge status-active">Active</span></td>
+                                    <td>$550</td>
+                                    <td>55,200</td>
+                                    <td>2,100</td>
+                                    <td>132</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Facebook Pages View -->
+            <div id="facebook-pages-view" class="hidden">
+                <div class="controls">
+                    <div class="breadcrumb">
+                        Meta / Facebook / <span>Fashion Brand Page</span>
+                    </div>
+                    <select class="period-selector">
+                        <option>Period: 7 Days</option>
+                        <option>Period: 30 Days</option>
+                    </select>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Page Followers</div>
+                        <div class="metric-value">48.5K</div>
+                        <div class="metric-subtitle">Total followers</div>
+                        <span class="metric-change positive">↑ 520 new</span>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Page Impressions</div>
+                        <div class="metric-value">235.6K</div>
+                        <div class="metric-subtitle">Content visibility</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Engagement</div>
+                        <div class="metric-value">12.8K</div>
+                        <div class="metric-subtitle">Likes, comments, shares</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Page Views</div>
+                        <div class="metric-value">8,945</div>
+                        <div class="metric-subtitle">Profile visits</div>
+                    </div>
+                </div>
+
+                <div class="chart-section">
+                    <div class="chart-card">
+                        <h3>Page Engagement Over Time</h3>
+                        <div class="chart-container">
+                            <canvas id="fbEngagementChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Post Type Distribution</h3>
+                        <div class="chart-container">
+                            <canvas id="fbPostTypeChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h3>Top Performing Posts</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Post Content</th>
+                                <th>Type</th>
+                                <th>Impressions</th>
+                                <th>Reach</th>
+                                <th>Engagement</th>
+                                <th>Engagement Rate</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>New Spring Collection Launch</td>
+                                <td>Photo</td>
+                                <td>45,600</td>
+                                <td>38,200</td>
+                                <td>2,850</td>
+                                <td>7.46%</td>
+                            </tr>
+                            <tr>
+                                <td>Behind the Scenes: Photo Shoot</td>
+                                <td>Video</td>
+                                <td>38,900</td>
+                                <td>32,100</td>
+                                <td>2,240</td>
+                                <td>6.98%</td>
+                            </tr>
+                            <tr>
+                                <td>Customer Testimonial Story</td>
+                                <td>Photo</td>
+                                <td>32,500</td>
+                                <td>28,300</td>
+                                <td>1,890</td>
+                                <td>6.68%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Instagram Accounts View -->
+            <div id="instagram-accounts-view" class="hidden">
+                <div class="controls">
+                    <div class="breadcrumb">
+                        Meta / Instagram / <span>@fashionbrand2025</span>
+                    </div>
+                    <select class="period-selector">
+                        <option>Period: 7 Days</option>
+                        <option>Period: 30 Days</option>
+                    </select>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Followers</div>
+                        <div class="metric-value">125.3K</div>
+                        <div class="metric-subtitle">Total followers</div>
+                        <span class="metric-change positive">↑ 1,240 new</span>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Reach</div>
+                        <div class="metric-value">458.2K</div>
+                        <div class="metric-subtitle">Unique accounts reached</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Impressions</div>
+                        <div class="metric-value">892.5K</div>
+                        <div class="metric-subtitle">Total content views</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Profile Views</div>
+                        <div class="metric-value">24.8K</div>
+                        <div class="metric-subtitle">Profile visits</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Website Clicks</div>
+                        <div class="metric-value">3,450</div>
+                        <div class="metric-subtitle">Link clicks</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Accounts Engaged</div>
+                        <div class="metric-value">85.6K</div>
+                        <div class="metric-subtitle">Interacted accounts</div>
+                    </div>
+                </div>
+
+                <div class="chart-section">
+                    <div class="chart-card">
+                        <h3>Instagram Metrics Trend</h3>
+                        <div class="chart-container">
+                            <canvas id="igMetricsChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Content Type Performance</h3>
+                        <div class="chart-container">
+                            <canvas id="igContentChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h3>Recent Posts Performance</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Caption</th>
+                                <th>Type</th>
+                                <th>Likes</th>
+                                <th>Comments</th>
+                                <th>Impressions</th>
+                                <th>Reach</th>
+                                <th>Saves</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Summer vibes with our new collection</td>
+                                <td>Reel</td>
+                                <td>8,450</td>
+                                <td>234</td>
+                                <td>125,600</td>
+                                <td>98,200</td>
+                                <td>1,240</td>
+                            </tr>
+                            <tr>
+                                <td>Style tips for the modern professional</td>
+                                <td>Carousel</td>
+                                <td>6,280</td>
+                                <td>189</td>
+                                <td>95,400</td>
+                                <td>76,500</td>
+                                <td>980</td>
+                            </tr>
+                            <tr>
+                                <td>Customer transformation story</td>
+                                <td>Photo</td>
+                                <td>5,920</td>
+                                <td>156</td>
+                                <td>78,300</td>
+                                <td>62,100</td>
+                                <td>850</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // View switching functions
+        function showMetaTab() {
+            document.getElementById('meta-content').style.display = 'flex';
+        }
+
+        function loadAccount(accountId, viewType) {
+            // Remove active from all sidebar items
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.sidebar-item').classList.add('active');
+
+            // Hide all views
+            document.getElementById('ad-accounts-view').classList.add('hidden');
+            document.getElementById('facebook-pages-view').classList.add('hidden');
+            document.getElementById('instagram-accounts-view').classList.add('hidden');
+
+            // Show selected view
+            if (viewType === 'ad-accounts') {
+                document.getElementById('ad-accounts-view').classList.remove('hidden');
+            } else if (viewType === 'facebook-pages') {
+                document.getElementById('facebook-pages-view').classList.remove('hidden');
+            } else if (viewType === 'instagram-accounts') {
+                document.getElementById('instagram-accounts-view').classList.remove('hidden');
+            }
+        }
+
+        function switchSubView(view) {
+            // Remove active from all sub-nav buttons
+            document.querySelectorAll('.sub-nav-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Hide all sub-views
+            document.getElementById('overview-subview').classList.add('hidden');
+            document.getElementById('campaigns-subview').classList.add('hidden');
+            document.getElementById('adsets-subview').classList.add('hidden');
+            document.getElementById('ads-subview').classList.add('hidden');
+
+            // Show selected sub-view
+            document.getElementById(view + '-subview').classList.remove('hidden');
+        }
+
+        // Performance Chart (Overview)
+        const perfCtx = document.getElementById('performanceChart').getContext('2d');
+        new Chart(perfCtx, {
+            type: 'line',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [{
+                    label: 'Impressions',
+                    data: [165000, 178000, 185000, 172000, 195000, 210000, 205000],
+                    borderColor: '#6fa8dc',
+                    backgroundColor: 'rgba(111, 168, 220, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Clicks',
+                    data: [6200, 6800, 7100, 6500, 7400, 8000, 7800],
+                    borderColor: '#1a3040',
+                    backgroundColor: 'rgba(26, 48, 64, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Spend Distribution Chart
+        const spendCtx = document.getElementById('spendChart').getContext('2d');
+        new Chart(spendCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Spring Collection', 'Summer Sale', 'Brand Awareness', 'Retargeting'],
+                datasets: [{
+                    data: [4250, 3890, 2450, 1868],
+                    backgroundColor: ['#6fa8dc', '#1a3040', '#a0c4d4', '#d4e4ed']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // Campaign Comparison Chart
+        const campCompareCtx = document.getElementById('campaignCompareChart').getContext('2d');
+        new Chart(campCompareCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Spring Collection', 'Summer Sale', 'Brand Awareness', 'Retargeting'],
+                datasets: [{
+                    label: 'Impressions',
+                    data: [425800, 380500, 245000, 150000],
+                    backgroundColor: '#6fa8dc'
+                }, {
+                    label: 'Clicks',
+                    data: [15400, 14200, 9800, 6400],
+                    backgroundColor: '#1a3040'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Funnel Chart
+        const funnelCtx = document.getElementById('funnelChart').getContext('2d');
+        new Chart(funnelCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Impressions', 'Clicks', 'Conversions'],
+                datasets: [{
+                    data: [1201300, 45800, 3248],
+                    backgroundColor: ['#6fa8dc', '#a0c4d4', '#1a3040']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Facebook Engagement Chart
+        const fbEngCtx = document.getElementById('fbEngagementChart').getContext('2d');
+        new Chart(fbEngCtx, {
+            type: 'line',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [{
+                    label: 'Impressions',
+                    data: [32000, 35000, 38000, 34000, 40000, 28000, 28600],
+                    borderColor: '#4267B2',
+                    backgroundColor: 'rgba(66, 103, 178, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Engagement',
+                    data: [1600, 1850, 2100, 1750, 2250, 1400, 1850],
+                    borderColor: '#1a3040',
+                    backgroundColor: 'rgba(26, 48, 64, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Facebook Post Type Chart
+        const fbPostCtx = document.getElementById('fbPostTypeChart').getContext('2d');
+        new Chart(fbPostCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Photo', 'Video', 'Link', 'Status'],
+                datasets: [{
+                    data: [45, 30, 15, 10],
+                    backgroundColor: ['#4267B2', '#6fa8dc', '#a0c4d4', '#d4e4ed']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // Instagram Metrics Chart
+        const igMetricsCtx = document.getElementById('igMetricsChart').getContext('2d');
+        new Chart(igMetricsCtx, {
+            type: 'line',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [{
+                    label: 'Reach',
+                    data: [62000, 68000, 71000, 65000, 75000, 58000, 59200],
+                    borderColor: '#E4405F',
+                    backgroundColor: 'rgba(228, 64, 95, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Impressions',
+                    data: [118000, 132000, 140000, 125000, 148000, 112000, 117500],
+                    borderColor: '#6fa8dc',
+                    backgroundColor: 'rgba(111, 168, 220, 0.1)',
+                    tension: 0.4
+                }, {
+                    label: 'Profile Views',
+                    data: [3200, 3600, 3900, 3400, 4100, 3000, 3200],
+                    borderColor: '#1a3040',
+                    backgroundColor: 'rgba(26, 48, 64, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
+        // Instagram Content Type Chart
+        const igContentCtx = document.getElementById('igContentChart').getContext('2d');
+        new Chart(igContentCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Reels', 'Carousel', 'Photo', 'Story'],
+                datasets: [{
+                    label: 'Avg Engagement',
+                    data: [8450, 6280, 5920, 4100],
+                    backgroundColor: ['#E4405F', '#6fa8dc', '#a0c4d4', '#d4e4ed']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
