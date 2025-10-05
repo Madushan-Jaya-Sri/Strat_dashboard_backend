@@ -101,33 +101,32 @@ class MetaManager:
         since = until - timedelta(days=30)
         return since.strftime('%Y-%m-%d'), until.strftime('%Y-%m-%d')
 
-    def _validate_date_range(self, start_date: str, end_date: str) -> None:
-        """Validate that date range is reasonable"""
-        start = datetime.strptime(start_date, '%Y-%m-%d')
-        end = datetime.strptime(end_date, '%Y-%m-%d')
-        
-        # Check that start is before end
-        if start > end:
-            raise HTTPException(
-                status_code=400,
-                detail="Start date must be before end date"
-            )
-        
-        # Check that range isn't too large (e.g., max 2 years)
-        days_diff = (end - start).days
-        if days_diff > 730:  # 2 years
-            raise HTTPException(
-                status_code=400,
-                detail="Date range cannot exceed 2 years (730 days)"
-            )
-        
-        # Check that dates aren't in the future
-        if end > datetime.now():
-            raise HTTPException(
-                status_code=400,
-                detail="End date cannot be in the future"
-            )
-        
+    def _validate_date_range(self, start_date: str, end_date: str):
+        """Validate date range"""
+        try:
+            start = datetime.strptime(start_date, '%Y-%m-%d')
+            end = datetime.strptime(end_date, '%Y-%m-%d')
+            
+            if start > end:
+                raise ValueError("Start date must be before end date")
+            
+            # Check if date range is too large (Meta API limitation: ~37 months max)
+            delta = end - start
+            if delta.days > 1100:  # Approximately 3 years
+                raise ValueError("Date range too large. Maximum allowed is approximately 3 years (1100 days)")
+            
+            # Check if end date is in the future
+            if end > datetime.now():
+                raise ValueError("End date cannot be in the future")
+            
+            # Meta API has limited historical data (typically 37 months)
+            max_historical_date = datetime.now() - timedelta(days=1100)
+            if start < max_historical_date:
+                logger.warning(f"Start date {start_date} may be beyond Meta's historical data limit")
+            
+        except ValueError as e:
+            logger.error(f"Date validation error: {e}")
+            raise
     # =========================================================================
     # AD ACCOUNTS
     # =========================================================================
@@ -178,17 +177,28 @@ class MetaManager:
 
     def get_ad_account_insights(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get insights for specific ad account"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
         try:
+            if start_date and end_date:
+                self._validate_date_range(start_date, end_date)
+            
+            since, until = self._period_to_dates(period, start_date, end_date)
+            
+            # Additional validation for Meta API
+            since_date = datetime.strptime(since, '%Y-%m-%d')
+            until_date = datetime.strptime(until, '%Y-%m-%d')
+            
+            # Meta API limit check
+            delta = until_date - since_date
+            if delta.days > 1100:
+                logger.error(f"Date range {delta.days} days exceeds Meta API limit")
+                raise ValueError("Date range exceeds Meta API limit of ~3 years")
+            
             data = self._make_request(f"{account_id}/insights", {
                 'time_range': f'{{"since":"{since}","until":"{until}"}}',
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                 'level': 'account',
-                'action_attribution_windows': ['7d_click', '1d_view']  # Match Ads Manager default
+                'action_attribution_windows': ['7d_click', '1d_view'],
+                'use_account_attribution_setting': 'true'
             })
             
             if not data.get('data'):
@@ -210,7 +220,6 @@ class MetaManager:
             conversions = 0
             actions = insights.get('actions', [])
             for action in actions:
-                # Include more action types that might be tracked
                 if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 
                                                 'omni_purchase', 'offsite_conversion.fb_pixel_purchase']:
                     conversions += int(action.get('value', 0))
@@ -226,9 +235,13 @@ class MetaManager:
                 'reach': int(insights.get('reach', 0)),
                 'frequency': float(insights.get('frequency', 0))
             }
+            
+        except ValueError as e:
+            logger.error(f"Validation error: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             logger.error(f"Error fetching ad account insights: {e}")
-            raise
+            raise HTTPException(status_code=500, detail=f"Failed to fetch insights: {str(e)}")
     
     # Don't sum reach - it's not additive across days
     # Instead, get account-level insights without time_increment for accurate reach
