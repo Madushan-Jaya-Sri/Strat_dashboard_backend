@@ -1604,6 +1604,112 @@ async def get_engagement_rates_comparison(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Campaign Demographics & Placements
+@app.get("/api/meta/campaigns/{campaign_id}/demographics")
+async def get_campaign_demographics_endpoint(
+    campaign_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get demographic breakdowns for campaign"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_campaign_demographics(campaign_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/campaigns/{campaign_id}/placements")
+async def get_campaign_placements_endpoint(
+    campaign_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get placement breakdowns for campaign"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_campaign_placements(campaign_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Ad Set Demographics & Placements
+@app.get("/api/meta/adsets/{adset_id}/demographics")
+async def get_adset_demographics_endpoint(
+    adset_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get demographic breakdowns for ad set"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_adset_demographics(adset_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/adsets/{adset_id}/placements")
+async def get_adset_placements_endpoint(
+    adset_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get placement breakdowns for ad set"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_adset_placements(adset_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Ad Demographics & Placements
+@app.get("/api/meta/ads/{ad_id}/demographics")
+async def get_ad_demographics_endpoint(
+    ad_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get demographic breakdowns for individual ad"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_ad_demographics(ad_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/ads/{ad_id}/placements")
+async def get_ad_placements_endpoint(
+    ad_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get placement breakdowns for individual ad"""
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        return meta_manager.get_ad_placements(ad_id, period, start_date, end_date)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+        
 # Chat endpoints
 @app.post("/api/chat/message", response_model=ChatResponse)
 async def send_chat_message(

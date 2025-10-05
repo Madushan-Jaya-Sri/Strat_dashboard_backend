@@ -427,6 +427,401 @@ class MetaManager:
             logger.error(f"Error fetching campaigns: {e}")
             return [] 
     
+    def get_campaign_demographics(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get demographic breakdowns for a campaign"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            # Age and Gender breakdown
+            age_gender_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'age,gender',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Country breakdown
+            country_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend',
+                'breakdowns': 'country',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Region breakdown
+            region_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend',
+                'breakdowns': 'region',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Process age and gender data
+            age_gender = []
+            for item in age_gender_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                age_gender.append({
+                    'age': item.get('age'),
+                    'gender': item.get('gender'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            # Process country data
+            countries = []
+            for item in country_data.get('data', []):
+                countries.append({
+                    'country': item.get('country'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0))
+                })
+            
+            # Process region data
+            regions = []
+            for item in region_data.get('data', []):
+                regions.append({
+                    'region': item.get('region'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0))
+                })
+            
+            return {
+                'age_gender': age_gender,
+                'countries': countries,
+                'regions': regions
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching campaign demographics: {e}")
+            return {
+                'age_gender': [],
+                'countries': [],
+                'regions': []
+            }
+
+
+    def get_campaign_placements(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get placement/platform breakdowns for a campaign"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            # Platform breakdown (Facebook, Instagram, Audience Network, Messenger)
+            platform_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'publisher_platform',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Platform position breakdown (Feed, Stories, Reels, etc.)
+            platform_position_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'platform_position',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Device platform breakdown (mobile, desktop)
+            device_data = self._make_request(f"{campaign_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'device_platform',
+                'level': 'campaign',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            # Process platform data
+            platforms = []
+            for item in platform_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                platforms.append({
+                    'platform': item.get('publisher_platform'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            # Process platform position data
+            positions = []
+            for item in platform_position_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                positions.append({
+                    'position': item.get('platform_position'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            # Process device data
+            devices = []
+            for item in device_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                devices.append({
+                    'device': item.get('device_platform'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            return {
+                'platforms': platforms,
+                'positions': positions,
+                'devices': devices
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching campaign placements: {e}")
+            return {
+                'platforms': [],
+                'positions': [],
+                'devices': []
+            }
+
+
+    # Similar functions for Ad Sets
+    def get_adset_demographics(self, adset_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get demographic breakdowns for an ad set"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            age_gender_data = self._make_request(f"{adset_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'age,gender',
+                'level': 'adset',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            country_data = self._make_request(f"{adset_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend',
+                'breakdowns': 'country',
+                'level': 'adset',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            age_gender = []
+            for item in age_gender_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                age_gender.append({
+                    'age': item.get('age'),
+                    'gender': item.get('gender'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            countries = []
+            for item in country_data.get('data', []):
+                countries.append({
+                    'country': item.get('country'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0))
+                })
+            
+            return {
+                'age_gender': age_gender,
+                'countries': countries
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching adset demographics: {e}")
+            return {'age_gender': [], 'countries': []}
+
+
+    def get_adset_placements(self, adset_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get placement breakdowns for an ad set"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            platform_data = self._make_request(f"{adset_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'publisher_platform',
+                'level': 'adset',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            device_data = self._make_request(f"{adset_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'device_platform',
+                'level': 'adset',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            platforms = []
+            for item in platform_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                platforms.append({
+                    'platform': item.get('publisher_platform'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            devices = []
+            for item in device_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                devices.append({
+                    'device': item.get('device_platform'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            return {
+                'platforms': platforms,
+                'devices': devices
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching adset placements: {e}")
+            return {'platforms': [], 'devices': []}
+
+
+    # Similar functions for Ads (individual ads)
+    def get_ad_demographics(self, ad_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get demographic breakdowns for an individual ad"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            age_gender_data = self._make_request(f"{ad_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'age,gender',
+                'level': 'ad',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            age_gender = []
+            for item in age_gender_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                age_gender.append({
+                    'age': item.get('age'),
+                    'gender': item.get('gender'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            return {'age_gender': age_gender}
+            
+        except Exception as e:
+            logger.error(f"Error fetching ad demographics: {e}")
+            return {'age_gender': []}
+
+
+    def get_ad_placements(self, ad_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get placement breakdowns for an individual ad"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            platform_data = self._make_request(f"{ad_id}/insights", {
+                'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                'fields': 'impressions,clicks,spend,actions',
+                'breakdowns': 'publisher_platform',
+                'level': 'ad',
+                'action_attribution_windows': ['7d_click', '1d_view']
+            })
+            
+            platforms = []
+            for item in platform_data.get('data', []):
+                conversions = 0
+                actions = item.get('actions', [])
+                for action in actions:
+                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
+                        conversions += int(action.get('value', 0))
+                
+                platforms.append({
+                    'platform': item.get('publisher_platform'),
+                    'impressions': int(item.get('impressions', 0)),
+                    'clicks': int(item.get('clicks', 0)),
+                    'spend': float(item.get('spend', 0)),
+                    'conversions': conversions
+                })
+            
+            return {'platforms': platforms}
+            
+        except Exception as e:
+            logger.error(f"Error fetching ad placements: {e}")
+            return {'platforms': []}
+
     def get_ad_sets(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get ad sets for a campaign with insights"""
         if start_date and end_date:
