@@ -310,6 +310,7 @@ class Creative(BaseModel):
     image_url: Optional[str]
     video_id: Optional[str]
     thumbnail_url: Optional[str]
+    media_url: Optional[str] 
 
 class AdInfo(BaseModel):
     id: str
@@ -317,6 +318,9 @@ class AdInfo(BaseModel):
     ad_set_id: str
     status: str
     creative: Creative
+    preview_link: Optional[str]  # Shareable preview link
+    ads_manager_link: str  # Direct link to Ads Manager
+    post_link: Optional[str]  # Direct link to Facebook post
     created_time: str
     updated_time: str
 

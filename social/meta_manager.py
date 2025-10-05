@@ -754,29 +754,57 @@ class MetaManager:
 
 
     def get_ads_by_adsets(self, adset_ids: List[str]) -> List[Dict]:
-        """Get ads for multiple ad sets"""
+        """Get ads for multiple ad sets with preview and direct links"""
         all_ads = []
         for adset_id in adset_ids:
             try:
                 data = self._make_request(f"{adset_id}/ads", {
-                    'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url},created_time,updated_time'
+                    'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url,image_hash,object_story_spec},preview_shareable_link,effective_object_story_id,created_time,updated_time'
                 })
                 
                 for ad in data.get('data', []):
                     creative = ad.get('creative', {})
                     
+                    # Build preview URL and direct link
+                    ad_id = ad.get('id')
+                    preview_link = ad.get('preview_shareable_link')
+                    
+                    # Construct Facebook Ads Manager link
+                    ads_manager_link = f"https://www.facebook.com/adsmanager/manage/ads?act={adset_id.split('_')[0]}&selected_ad_ids={ad_id}"
+                    
+                    # Get image URL from creative
+                    image_url = creative.get('image_url')
+                    
+                    # If no direct image_url, try to construct from image_hash
+                    if not image_url and creative.get('image_hash'):
+                        image_hash = creative.get('image_hash')
+                        image_url = f"https://scontent.xx.fbcdn.net/v/t45.1600-4/{image_hash}"
+                    
+                    # Get video thumbnail or image
+                    media_url = image_url or creative.get('thumbnail_url')
+                    
+                    # Try to get the post permalink if available
+                    post_link = None
+                    effective_story_id = ad.get('effective_object_story_id')
+                    if effective_story_id:
+                        post_link = f"https://www.facebook.com/{effective_story_id.replace('_', '/posts/')}"
+                    
                     all_ads.append({
-                        'id': ad.get('id'),
+                        'id': ad_id,
                         'name': ad.get('name'),
                         'ad_set_id': adset_id,
                         'status': ad.get('status'),
                         'creative': {
                             'title': creative.get('title'),
                             'body': creative.get('body'),
-                            'image_url': creative.get('image_url'),
+                            'image_url': image_url,
                             'video_id': creative.get('video_id'),
-                            'thumbnail_url': creative.get('thumbnail_url')
+                            'thumbnail_url': creative.get('thumbnail_url'),
+                            'media_url': media_url  # Primary media URL (image or video thumbnail)
                         },
+                        'preview_link': preview_link,  # Shareable preview link
+                        'ads_manager_link': ads_manager_link,  # Direct link to Ads Manager
+                        'post_link': post_link,  # Direct link to Facebook post (if published)
                         'created_time': ad.get('created_time'),
                         'updated_time': ad.get('updated_time')
                     })
@@ -784,7 +812,6 @@ class MetaManager:
                 logger.error(f"Error fetching ads for adset {adset_id}: {e}")
         
         return all_ads
-
 
     def get_ads_timeseries(self, ad_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get time-series data for multiple ads"""
