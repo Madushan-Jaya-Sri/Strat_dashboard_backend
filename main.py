@@ -979,46 +979,46 @@ async def facebook_login():
     """Initiate Facebook OAuth login"""
     return await auth_manager.initiate_facebook_login()
 
-@app.get("/auth/facebook/callback")
-async def facebook_auth_callback(code: str, state: Optional[str] = None):
-    """Handle Facebook OAuth callback"""
-    result = await auth_manager.handle_facebook_callback(code, state)
-    
-    # Return HTML with JavaScript to display token (similar to Google auth)
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head><title>Facebook Authentication Success</title></head>
-    <body>
-        <h2>Facebook Authentication Successful!</h2>
-        <p>Welcome, {result['user']['name']}!</p>
-        <p>Copy your JWT token:</p>
-        <textarea rows="10" cols="80">{result['token']}</textarea>
-        <script>
-            console.log('Facebook JWT Token:', '{result['token']}');
-            console.log('User Info:', {json.dumps(result['user'], indent=2)});
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
-
 # @app.get("/auth/facebook/callback")
 # async def facebook_auth_callback(code: str, state: Optional[str] = None):
-#     """Handle Facebook OAuth callback and redirect to frontend"""
-#     try:
-#         result = await auth_manager.handle_facebook_callback(code, state)
-#         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+#     """Handle Facebook OAuth callback"""
+#     result = await auth_manager.handle_facebook_callback(code, state)
+    
+#     # Return HTML with JavaScript to display token (similar to Google auth)
+#     html_content = f"""
+#     <!DOCTYPE html>
+#     <html>
+#     <head><title>Facebook Authentication Success</title></head>
+#     <body>
+#         <h2>Facebook Authentication Successful!</h2>
+#         <p>Welcome, {result['user']['name']}!</p>
+#         <p>Copy your JWT token:</p>
+#         <textarea rows="10" cols="80">{result['token']}</textarea>
+#         <script>
+#             console.log('Facebook JWT Token:', '{result['token']}');
+#             console.log('User Info:', {json.dumps(result['user'], indent=2)});
+#         </script>
+#     </body>
+#     </html>
+#     """
+#     return HTMLResponse(content=html_content)
+
+@app.get("/auth/facebook/callback")
+async def facebook_auth_callback(code: str, state: Optional[str] = None):
+    """Handle Facebook OAuth callback and redirect to frontend"""
+    try:
+        result = await auth_manager.handle_facebook_callback(code, state)
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         
-#         # Pass Facebook token as facebook_token parameter
-#         import urllib.parse
-#         encoded_token = urllib.parse.quote(result['token'])
-#         return RedirectResponse(url=f"{frontend_url}/dashboard?facebook_token={encoded_token}")
+        # Pass Facebook token as facebook_token parameter
+        import urllib.parse
+        encoded_token = urllib.parse.quote(result['token'])
+        return RedirectResponse(url=f"{frontend_url}/dashboard?facebook_token={encoded_token}")
         
-#     except Exception as e:
-#         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-#         error_message = str(e).replace(" ", "%20")
-#         return RedirectResponse(url=f"{frontend_url}/?error={error_message}")
+    except Exception as e:
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        error_message = str(e).replace(" ", "%20")
+        return RedirectResponse(url=f"{frontend_url}/?error={error_message}")
 
 # =============================================================================
 # META INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)
