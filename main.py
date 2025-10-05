@@ -1005,15 +1005,17 @@ async def facebook_login():
 
 @app.get("/auth/facebook/callback")
 async def facebook_auth_callback(code: str, state: Optional[str] = None):
-    """Handle Facebook OAuth callback and redirect to frontend"""
+    """Handle Facebook OAuth callback and redirect to frontend Meta Ads tab"""
     try:
         result = await auth_manager.handle_facebook_callback(code, state)
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         
-        # Pass Facebook token as facebook_token parameter
+        # Pass Facebook token and flag to switch to Meta Ads tab
         import urllib.parse
         encoded_token = urllib.parse.quote(result['token'])
-        return RedirectResponse(url=f"{frontend_url}/dashboard?facebook_token={encoded_token}")
+        return RedirectResponse(
+            url=f"{frontend_url}/dashboard?facebook_token={encoded_token}&switch_to_meta_ads=true"
+        )
         
     except Exception as e:
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
