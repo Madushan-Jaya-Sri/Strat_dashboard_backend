@@ -351,9 +351,11 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching ad account insights timeseries: {e}")
             raise   
-    
-    def get_campaigns(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None, limit: int = None) -> List[Dict]:
-        """Get campaigns for ad account with pagination support"""
+ 
+    # meta_manager.py - Essential functions only
+
+    def get_campaigns_with_totals(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get all campaigns with individual metrics and grand totals for an ad account"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
@@ -361,936 +363,562 @@ class MetaManager:
         
         try:
             campaigns = []
-            params = {
-                'fields': 'id,name,objective,status,created_time,updated_time',
-                'limit': 100  # Increase page size to reduce API calls
-            }
+            params = {'fields': 'id,name,status', 'limit': 100}
             
-            # Fetch all campaigns with pagination
+            # Pagination
             next_url = None
             while True:
                 if next_url:
-                    # Use the full next URL from pagination
                     response = requests.get(next_url)
                     if response.status_code != 200:
-                        logger.error(f"Error fetching paginated campaigns: {response.text}")
                         break
                     data = response.json()
                 else:
-                    # First request
                     data = self._make_request(f"{account_id}/campaigns", params)
                 
                 campaign_batch = data.get('data', [])
                 
-                # Process this batch of campaigns
                 for campaign in campaign_batch:
-                    # Get insights for each campaign
                     try:
                         insights = self._make_request(f"{campaign['id']}/insights", {
                             'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                            'fields': 'spend,impressions,clicks,cpc,cpm,ctr,actions'
+                            'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                            'action_attribution_windows': ['7d_click', '1d_view']
                         })
                         
-                        insights_data = insights.get('data', [])
-                        if insights_data:
-                            campaign_insights = insights_data[0]
-                        else:
-                            campaign_insights = {}
-                            logger.debug(f"No insights data for campaign {campaign.get('name')} in period {since} to {until}")
+                        insights_data = insights.get('data', [{}])[0]
                         
-                    except Exception as insight_error:
-                        logger.warning(f"Could not fetch insights for campaign {campaign.get('id')}: {insight_error}")
-                        campaign_insights = {}
-                    
-                    # Extract conversions
-                    conversions = 0
-                    actions = campaign_insights.get('actions', [])
-                    for action in actions:
-                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                            conversions += int(action.get('value', 0))
-                    
-                    campaigns.append({
-                        'id': campaign.get('id'),
-                        'name': campaign.get('name'),
-                        'objective': campaign.get('objective'),
-                        'status': campaign.get('status'),
-                        'spend': float(campaign_insights.get('spend', 0)),
-                        'impressions': int(campaign_insights.get('impressions', 0)),
-                        'clicks': int(campaign_insights.get('clicks', 0)),
-                        'conversions': conversions,
-                        'cpc': float(campaign_insights.get('cpc', 0)),
-                        'cpm': float(campaign_insights.get('cpm', 0)),
-                        'ctr': float(campaign_insights.get('ctr', 0)),
-                        'created_time': campaign.get('created_time'),
-                        'updated_time': campaign.get('updated_time')
-                    })
+                        conversions = sum(
+                            int(action.get('value', 0))
+                            for action in insights_data.get('actions', [])
+                            if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                        )
+                        
+                        campaigns.append({
+                            'campaign_id': campaign.get('id'),
+                            'campaign_name': campaign.get('name'),
+                            'status': campaign.get('status'),
+                            'spend': float(insights_data.get('spend', 0)),
+                            'impressions': int(insights_data.get('impressions', 0)),
+                            'clicks': int(insights_data.get('clicks', 0)),
+                            'conversions': conversions,
+                            'cpc': float(insights_data.get('cpc', 0)),
+                            'cpm': float(insights_data.get('cpm', 0)),
+                            'ctr': float(insights_data.get('ctr', 0)),
+                            'reach': int(insights_data.get('reach', 0)),
+                            'frequency': float(insights_data.get('frequency', 0))
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error fetching campaign {campaign.get('id')}: {e}")
                 
-                # Check if there's a next page
                 paging = data.get('paging', {})
                 next_url = paging.get('next')
-                
-                # Stop if no more pages or reached limit
-                if not next_url or (limit and len(campaigns) >= limit):
+                if not next_url:
                     break
             
-            logger.info(f"Retrieved {len(campaigns)} campaigns for account {account_id}")
-            return campaigns[:limit] if limit else campaigns
+            # Calculate grand totals
+            totals = {
+                'total_spend': sum(c['spend'] for c in campaigns),
+                'total_impressions': sum(c['impressions'] for c in campaigns),
+                'total_clicks': sum(c['clicks'] for c in campaigns),
+                'total_conversions': sum(c['conversions'] for c in campaigns),
+                'total_reach': 0  # Reach is not additive, need separate API call
+            }
             
+            # Get accurate total reach
+            try:
+                account_insights = self._make_request(f"{account_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'reach',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                totals['total_reach'] = int(account_insights.get('data', [{}])[0].get('reach', 0))
+            except:
+                pass
+            
+            return {
+                'campaigns': campaigns,
+                'totals': totals
+            }
         except Exception as e:
             logger.error(f"Error fetching campaigns: {e}")
-            return [] 
-    
-    def get_campaign_demographics(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get demographic breakdowns for a campaign"""
+            raise
+
+
+    def get_campaigns_timeseries(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get time-series data for multiple campaigns"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
-        try:
-            # Age and Gender breakdown
-            age_gender_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'age,gender',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Country breakdown
-            country_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend',
-                'breakdowns': 'country',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Region breakdown
-            region_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend',
-                'breakdowns': 'region',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Process age and gender data
-            age_gender = []
-            for item in age_gender_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
+        results = []
+        for campaign_id in campaign_ids:
+            try:
+                data = self._make_request(f"{campaign_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                    'time_increment': '1',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
                 
-                age_gender.append({
-                    'age': item.get('age'),
-                    'gender': item.get('gender'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            # Process country data
-            countries = []
-            for item in country_data.get('data', []):
-                countries.append({
-                    'country': item.get('country'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0))
-                })
-            
-            # Process region data
-            regions = []
-            for item in region_data.get('data', []):
-                regions.append({
-                    'region': item.get('region'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0))
-                })
-            
-            return {
-                'age_gender': age_gender,
-                'countries': countries,
-                'regions': regions
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching campaign demographics: {e}")
-            return {
-                'age_gender': [],
-                'countries': [],
-                'regions': []
-            }
-
-
-    def get_campaign_placements(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get placement/platform breakdowns for a campaign"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            # Platform breakdown (Facebook, Instagram, Audience Network, Messenger)
-            platform_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'publisher_platform',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Platform position breakdown (Feed, Stories, Reels, etc.)
-            platform_position_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'platform_position',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Device platform breakdown (mobile, desktop)
-            device_data = self._make_request(f"{campaign_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'device_platform',
-                'level': 'campaign',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            # Process platform data
-            platforms = []
-            for item in platform_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                platforms.append({
-                    'platform': item.get('publisher_platform'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            # Process platform position data
-            positions = []
-            for item in platform_position_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                positions.append({
-                    'position': item.get('platform_position'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            # Process device data
-            devices = []
-            for item in device_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                devices.append({
-                    'device': item.get('device_platform'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            return {
-                'platforms': platforms,
-                'positions': positions,
-                'devices': devices
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching campaign placements: {e}")
-            return {
-                'platforms': [],
-                'positions': [],
-                'devices': []
-            }
-
-
-    # Similar functions for Ad Sets
-    def get_adset_demographics(self, adset_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get demographic breakdowns for an ad set"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            age_gender_data = self._make_request(f"{adset_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'age,gender',
-                'level': 'adset',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            country_data = self._make_request(f"{adset_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend',
-                'breakdowns': 'country',
-                'level': 'adset',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            age_gender = []
-            for item in age_gender_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                age_gender.append({
-                    'age': item.get('age'),
-                    'gender': item.get('gender'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            countries = []
-            for item in country_data.get('data', []):
-                countries.append({
-                    'country': item.get('country'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0))
-                })
-            
-            return {
-                'age_gender': age_gender,
-                'countries': countries
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching adset demographics: {e}")
-            return {'age_gender': [], 'countries': []}
-
-
-    def get_adset_placements(self, adset_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get placement breakdowns for an ad set"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            platform_data = self._make_request(f"{adset_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'publisher_platform',
-                'level': 'adset',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            device_data = self._make_request(f"{adset_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'device_platform',
-                'level': 'adset',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            platforms = []
-            for item in platform_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                platforms.append({
-                    'platform': item.get('publisher_platform'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            devices = []
-            for item in device_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                devices.append({
-                    'device': item.get('device_platform'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            return {
-                'platforms': platforms,
-                'devices': devices
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching adset placements: {e}")
-            return {'platforms': [], 'devices': []}
-
-
-    # Similar functions for Ads (individual ads)
-    def get_ad_demographics(self, ad_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get demographic breakdowns for an individual ad"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            age_gender_data = self._make_request(f"{ad_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'age,gender',
-                'level': 'ad',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            age_gender = []
-            for item in age_gender_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                age_gender.append({
-                    'age': item.get('age'),
-                    'gender': item.get('gender'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            return {'age_gender': age_gender}
-            
-        except Exception as e:
-            logger.error(f"Error fetching ad demographics: {e}")
-            return {'age_gender': []}
-
-
-    def get_ad_placements(self, ad_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get placement breakdowns for an individual ad"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            platform_data = self._make_request(f"{ad_id}/insights", {
-                'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                'fields': 'impressions,clicks,spend,actions',
-                'breakdowns': 'publisher_platform',
-                'level': 'ad',
-                'action_attribution_windows': ['7d_click', '1d_view']
-            })
-            
-            platforms = []
-            for item in platform_data.get('data', []):
-                conversions = 0
-                actions = item.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                platforms.append({
-                    'platform': item.get('publisher_platform'),
-                    'impressions': int(item.get('impressions', 0)),
-                    'clicks': int(item.get('clicks', 0)),
-                    'spend': float(item.get('spend', 0)),
-                    'conversions': conversions
-                })
-            
-            return {'platforms': platforms}
-            
-        except Exception as e:
-            logger.error(f"Error fetching ad placements: {e}")
-            return {'platforms': []}
-
-    def get_ad_sets(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get ad sets for a campaign with insights"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            data = self._make_request(f"{campaign_id}/adsets", {
-                'fields': 'id,name,status,targeting,optimization_goal,billing_event,budget_remaining,daily_budget,lifetime_budget,created_time,updated_time'
-            })
-            
-            ad_sets = []
-            for ad_set in data.get('data', []):
-                # Get insights for each ad set
-                try:
-                    insights = self._make_request(f"{ad_set['id']}/insights", {
-                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,conversions'
+                timeseries = []
+                for day_data in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in day_data.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    timeseries.append({
+                        'date': day_data.get('date_start'),
+                        'spend': float(day_data.get('spend', 0)),
+                        'impressions': int(day_data.get('impressions', 0)),
+                        'clicks': int(day_data.get('clicks', 0)),
+                        'conversions': conversions,
+                        'cpc': float(day_data.get('cpc', 0)),
+                        'cpm': float(day_data.get('cpm', 0)),
+                        'ctr': float(day_data.get('ctr', 0)),
+                        'reach': int(day_data.get('reach', 0)),
+                        'frequency': float(day_data.get('frequency', 0))
                     })
-                    
-                    insights_data = insights.get('data', [])
-                    if insights_data:
-                        ad_set_insights = insights_data[0]
-                    else:
-                        ad_set_insights = {}
-                        logger.warning(f"No insights data for ad set {ad_set.get('id')}")
-                    
-                except Exception as insight_error:
-                    logger.warning(f"Could not fetch insights for ad set {ad_set.get('id')}: {insight_error}")
-                    ad_set_insights = {}
                 
-                # Extract conversions from actions
-                conversions = 0
-                actions = ad_set_insights.get('actions', [])
-                for action in actions:
-                    if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
-                        conversions += int(action.get('value', 0))
-                
-                # Parse targeting (simplified)
-                targeting = ad_set.get('targeting', {})
-                targeting_summary = {
-                    'locations': targeting.get('geo_locations', {}),
-                    'age_min': targeting.get('age_min'),
-                    'age_max': targeting.get('age_max'),
-                    'genders': targeting.get('genders', [])
-                }
-                
-                ad_sets.append({
-                    'id': ad_set.get('id'),
-                    'name': ad_set.get('name'),
+                results.append({
                     'campaign_id': campaign_id,
-                    'status': ad_set.get('status'),
-                    'optimization_goal': ad_set.get('optimization_goal'),
-                    'billing_event': ad_set.get('billing_event'),
-                    'daily_budget': float(ad_set.get('daily_budget', 0)) / 100 if ad_set.get('daily_budget') else None,
-                    'lifetime_budget': float(ad_set.get('lifetime_budget', 0)) / 100 if ad_set.get('lifetime_budget') else None,
-                    'budget_remaining': float(ad_set.get('budget_remaining', 0)) / 100 if ad_set.get('budget_remaining') else None,
-                    'targeting_summary': targeting_summary,
-                    'spend': float(ad_set_insights.get('spend', 0)),
-                    'impressions': int(ad_set_insights.get('impressions', 0)),
-                    'clicks': int(ad_set_insights.get('clicks', 0)),
-                    'conversions': conversions,
-                    'cpc': float(ad_set_insights.get('cpc', 0)),
-                    'cpm': float(ad_set_insights.get('cpm', 0)),
-                    'ctr': float(ad_set_insights.get('ctr', 0)),
-                    'reach': int(ad_set_insights.get('reach', 0)),
-                    'frequency': float(ad_set_insights.get('frequency', 0)),
-                    'created_time': ad_set.get('created_time'),
-                    'updated_time': ad_set.get('updated_time')
+                    'timeseries': timeseries
                 })
-            
-            logger.info(f"Retrieved {len(ad_sets)} ad sets for campaign {campaign_id}")
-            return ad_sets
-            
-        except Exception as e:
-            logger.error(f"Error fetching ad sets: {e}")
-            return []
+            except Exception as e:
+                logger.error(f"Error fetching timeseries for campaign {campaign_id}: {e}")
+        
+        return results
 
-    def get_ad_sets_timeseries(self, campaign_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get ad sets for a campaign with time-series insights"""
+
+    def get_campaigns_demographics(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get age/gender demographics for multiple campaigns"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
-        try:
-            data = self._make_request(f"{campaign_id}/adsets", {
-                'fields': 'id,name,status,targeting,optimization_goal,billing_event,budget_remaining,daily_budget,lifetime_budget,created_time,updated_time'
-            })
-            
-            ad_sets = []
-            for ad_set in data.get('data', []):
-                # Get time-series insights for each ad set
-                try:
-                    insights = self._make_request(f"{ad_set['id']}/insights", {
-                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,conversions',
-                        'time_increment': '1',  # Break down by day
-                        'level': 'adset'
+        results = []
+        for campaign_id in campaign_ids:
+            try:
+                data = self._make_request(f"{campaign_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'age,gender',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                demographics = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    demographics.append({
+                        'age': item.get('age'),
+                        'gender': item.get('gender'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
                     })
-                    
-                    insights_data = insights.get('data', [])
-                    
-                    if not insights_data:
-                        logger.warning(f"No insights data for ad set {ad_set.get('id')}")
-                        timeseries = []
-                        summary = self._get_empty_insights()
-                    else:
-                        # Process daily data
-                        timeseries = []
-                        total_spend = 0
-                        total_impressions = 0
-                        total_clicks = 0
-                        total_conversions = 0
-                        total_reach = 0
-                        
-                        for day_data in insights_data:
-                            # Extract conversions from actions for this day
-                            conversions = 0
-                            actions = day_data.get('actions', [])
-                            for action in actions:
-                                if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
-                                    conversions += int(action.get('value', 0))
-                            
-                            day_insights = {
-                                'date': day_data.get('date_start'),
-                                'spend': float(day_data.get('spend', 0)),
-                                'impressions': int(day_data.get('impressions', 0)),
-                                'clicks': int(day_data.get('clicks', 0)),
-                                'conversions': conversions,
-                                'cpc': float(day_data.get('cpc', 0)),
-                                'cpm': float(day_data.get('cpm', 0)),
-                                'ctr': float(day_data.get('ctr', 0)),
-                                'reach': int(day_data.get('reach', 0)),
-                                'frequency': float(day_data.get('frequency', 0))
-                            }
-                            
-                            timeseries.append(day_insights)
-                            
-                            # Accumulate totals
-                            total_spend += day_insights['spend']
-                            total_impressions += day_insights['impressions']
-                            total_clicks += day_insights['clicks']
-                            total_conversions += conversions
-                            total_reach += day_insights['reach']
-                        
-                        # Calculate summary metrics
-                        avg_cpc = total_spend / total_clicks if total_clicks > 0 else 0
-                        avg_cpm = (total_spend / total_impressions * 1000) if total_impressions > 0 else 0
-                        avg_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-                        avg_frequency = total_impressions / total_reach if total_reach > 0 else 0
-                        
-                        summary = {
-                            'spend': total_spend,
-                            'impressions': total_impressions,
-                            'clicks': total_clicks,
-                            'conversions': total_conversions,
-                            'cpc': avg_cpc,
-                            'cpm': avg_cpm,
-                            'ctr': avg_ctr,
-                            'reach': total_reach,
-                            'frequency': avg_frequency
-                        }
-                    
-                except Exception as insight_error:
-                    logger.warning(f"Could not fetch insights for ad set {ad_set.get('id')}: {insight_error}")
-                    timeseries = []
-                    summary = self._get_empty_insights()
                 
-                # Parse targeting (simplified)
-                targeting = ad_set.get('targeting', {})
-                targeting_summary = {
-                    'locations': targeting.get('geo_locations', {}),
-                    'age_min': targeting.get('age_min'),
-                    'age_max': targeting.get('age_max'),
-                    'genders': targeting.get('genders', [])
-                }
-                
-                ad_sets.append({
-                    'id': ad_set.get('id'),
-                    'name': ad_set.get('name'),
+                results.append({
                     'campaign_id': campaign_id,
-                    'status': ad_set.get('status'),
-                    'optimization_goal': ad_set.get('optimization_goal'),
-                    'billing_event': ad_set.get('billing_event'),
-                    'daily_budget': float(ad_set.get('daily_budget', 0)) / 100 if ad_set.get('daily_budget') else None,
-                    'lifetime_budget': float(ad_set.get('lifetime_budget', 0)) / 100 if ad_set.get('lifetime_budget') else None,
-                    'budget_remaining': float(ad_set.get('budget_remaining', 0)) / 100 if ad_set.get('budget_remaining') else None,
-                    'targeting_summary': targeting_summary,
-                    'created_time': ad_set.get('created_time'),
-                    'updated_time': ad_set.get('updated_time'),
-                    'timeseries': timeseries,
-                    'summary': summary
+                    'demographics': demographics
                 })
-            
-            logger.info(f"Retrieved {len(ad_sets)} ad sets with timeseries for campaign {campaign_id}")
-            return ad_sets
-            
-        except Exception as e:
-            logger.error(f"Error fetching ad sets timeseries: {e}")
-            return []
+            except Exception as e:
+                logger.error(f"Error fetching demographics for campaign {campaign_id}: {e}")
+        
+        return results
 
-    def _get_empty_insights(self) -> Dict:
-        """Helper method to return empty insights structure"""
-        return {
-            'spend': 0,
-            'impressions': 0,
-            'clicks': 0,
-            'conversions': 0,
-            'cpc': 0,
-            'cpm': 0,
-            'ctr': 0,
-            'reach': 0,
-            'frequency': 0
-        }
 
-    def get_ads(self, ad_set_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get ads for an ad set with insights"""
+    def get_campaigns_placements(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get platform placement data for multiple campaigns"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
-        try:
-            data = self._make_request(f"{ad_set_id}/ads", {
-                'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url,object_story_spec},created_time,updated_time'
-            })
-            
-            ads = []
-            for ad in data.get('data', []):
-                # Get insights for each ad
-                try:
-                    insights = self._make_request(f"{ad['id']}/insights", {
-                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,inline_link_clicks,cost_per_inline_link_click'
-                    })
-                    
-                    insights_data = insights.get('data', [])
-                    if insights_data:
-                        ad_insights = insights_data[0]
-                    else:
-                        ad_insights = {}
-                        logger.warning(f"No insights data for ad {ad.get('id')}")
-                    
-                except Exception as insight_error:
-                    logger.warning(f"Could not fetch insights for ad {ad.get('id')}: {insight_error}")
-                    ad_insights = {}
-                
-                # Extract conversions from actions
-                conversions = 0
-                link_clicks = 0
-                actions = ad_insights.get('actions', [])
-                for action in actions:
-                    action_type = action.get('action_type')
-                    value = int(action.get('value', 0))
-                    
-                    if action_type in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
-                        conversions += value
-                    elif action_type == 'link_click':
-                        link_clicks += value
-                
-                # Extract creative details
-                creative = ad.get('creative', {})
-                creative_details = {
-                    'title': creative.get('title'),
-                    'body': creative.get('body'),
-                    'image_url': creative.get('image_url'),
-                    'video_id': creative.get('video_id'),
-                    'thumbnail_url': creative.get('thumbnail_url')
-                }
-                
-                ads.append({
-                    'id': ad.get('id'),
-                    'name': ad.get('name'),
-                    'ad_set_id': ad_set_id,
-                    'status': ad.get('status'),
-                    'creative': creative_details,
-                    'spend': float(ad_insights.get('spend', 0)),
-                    'impressions': int(ad_insights.get('impressions', 0)),
-                    'clicks': int(ad_insights.get('clicks', 0)),
-                    'link_clicks': link_clicks,
-                    'conversions': conversions,
-                    'cpc': float(ad_insights.get('cpc', 0)),
-                    'cpm': float(ad_insights.get('cpm', 0)),
-                    'ctr': float(ad_insights.get('ctr', 0)),
-                    'reach': int(ad_insights.get('reach', 0)),
-                    'frequency': float(ad_insights.get('frequency', 0)),
-                    'cost_per_link_click': float(ad_insights.get('cost_per_inline_link_click', 0)),
-                    'created_time': ad.get('created_time'),
-                    'updated_time': ad.get('updated_time')
+        results = []
+        for campaign_id in campaign_ids:
+            try:
+                data = self._make_request(f"{campaign_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'publisher_platform',
+                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
-            
-            logger.info(f"Retrieved {len(ads)} ads for ad set {ad_set_id}")
-            return ads
-            
-        except Exception as e:
-            logger.error(f"Error fetching ads: {e}")
-            return []
+                
+                placements = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    placements.append({
+                        'platform': item.get('publisher_platform'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
+                    })
+                
+                results.append({
+                    'campaign_id': campaign_id,
+                    'placements': placements
+                })
+            except Exception as e:
+                logger.error(f"Error fetching placements for campaign {campaign_id}: {e}")
+        
+        return results
 
-    def get_ads_timeseries(self, ad_set_id: str, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get ads for an ad set with time-series insights"""
+
+    def get_adsets_by_campaigns(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get ad sets for multiple campaigns"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
-        try:
-            data = self._make_request(f"{ad_set_id}/ads", {
-                'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url,object_story_spec},created_time,updated_time'
-            })
-            
-            ads = []
-            for ad in data.get('data', []):
-                # Get time-series insights for each ad
-                try:
-                    insights = self._make_request(f"{ad['id']}/insights", {
-                        'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                        'fields': 'spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,inline_link_clicks,cost_per_inline_link_click',
-                        'time_increment': '1',  # Break down by day
-                        'level': 'ad'
-                    })
-                    
-                    insights_data = insights.get('data', [])
-                    
-                    if not insights_data:
-                        logger.warning(f"No insights data for ad {ad.get('id')}")
-                        timeseries = []
-                        summary = self._get_empty_ad_insights()
-                    else:
-                        # Process daily data
-                        timeseries = []
-                        total_spend = 0
-                        total_impressions = 0
-                        total_clicks = 0
-                        total_conversions = 0
-                        total_link_clicks = 0
-                        total_reach = 0
-                        total_cost_per_link_click = 0
-                        days_with_link_clicks = 0
-                        
-                        for day_data in insights_data:
-                            # Extract conversions and link clicks from actions for this day
-                            conversions = 0
-                            link_clicks = 0
-                            actions = day_data.get('actions', [])
-                            for action in actions:
-                                action_type = action.get('action_type')
-                                value = int(action.get('value', 0))
-                                
-                                if action_type in ['purchase', 'lead', 'complete_registration', 'offsite_conversion.fb_pixel_purchase']:
-                                    conversions += value
-                                elif action_type == 'link_click':
-                                    link_clicks += value
-                            
-                            cost_per_link_click = float(day_data.get('cost_per_inline_link_click', 0))
-                            
-                            day_insights = {
-                                'date': day_data.get('date_start'),
-                                'spend': float(day_data.get('spend', 0)),
-                                'impressions': int(day_data.get('impressions', 0)),
-                                'clicks': int(day_data.get('clicks', 0)),
-                                'link_clicks': link_clicks,
-                                'conversions': conversions,
-                                'cpc': float(day_data.get('cpc', 0)),
-                                'cpm': float(day_data.get('cpm', 0)),
-                                'ctr': float(day_data.get('ctr', 0)),
-                                'reach': int(day_data.get('reach', 0)),
-                                'frequency': float(day_data.get('frequency', 0)),
-                                'cost_per_link_click': cost_per_link_click
-                            }
-                            
-                            timeseries.append(day_insights)
-                            
-                            # Accumulate totals
-                            total_spend += day_insights['spend']
-                            total_impressions += day_insights['impressions']
-                            total_clicks += day_insights['clicks']
-                            total_conversions += conversions
-                            total_link_clicks += link_clicks
-                            total_reach += day_insights['reach']
-                            
-                            if cost_per_link_click > 0:
-                                total_cost_per_link_click += cost_per_link_click
-                                days_with_link_clicks += 1
-                        
-                        # Calculate summary metrics
-                        avg_cpc = total_spend / total_clicks if total_clicks > 0 else 0
-                        avg_cpm = (total_spend / total_impressions * 1000) if total_impressions > 0 else 0
-                        avg_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-                        avg_frequency = total_impressions / total_reach if total_reach > 0 else 0
-                        avg_cost_per_link_click = total_cost_per_link_click / days_with_link_clicks if days_with_link_clicks > 0 else 0
-                        
-                        summary = {
-                            'spend': total_spend,
-                            'impressions': total_impressions,
-                            'clicks': total_clicks,
-                            'link_clicks': total_link_clicks,
-                            'conversions': total_conversions,
-                            'cpc': avg_cpc,
-                            'cpm': avg_cpm,
-                            'ctr': avg_ctr,
-                            'reach': total_reach,
-                            'frequency': avg_frequency,
-                            'cost_per_link_click': avg_cost_per_link_click
-                        }
-                    
-                except Exception as insight_error:
-                    logger.warning(f"Could not fetch insights for ad {ad.get('id')}: {insight_error}")
-                    timeseries = []
-                    summary = self._get_empty_ad_insights()
-                
-                # Extract creative details
-                creative = ad.get('creative', {})
-                creative_details = {
-                    'title': creative.get('title'),
-                    'body': creative.get('body'),
-                    'image_url': creative.get('image_url'),
-                    'video_id': creative.get('video_id'),
-                    'thumbnail_url': creative.get('thumbnail_url')
-                }
-                
-                ads.append({
-                    'id': ad.get('id'),
-                    'name': ad.get('name'),
-                    'ad_set_id': ad_set_id,
-                    'status': ad.get('status'),
-                    'creative': creative_details,
-                    'created_time': ad.get('created_time'),
-                    'updated_time': ad.get('updated_time'),
-                    'timeseries': timeseries,
-                    'summary': summary
+        all_adsets = []
+        for campaign_id in campaign_ids:
+            try:
+                data = self._make_request(f"{campaign_id}/adsets", {
+                    'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining,targeting,created_time,updated_time'
                 })
-            
-            logger.info(f"Retrieved {len(ads)} ads with timeseries for ad set {ad_set_id}")
-            return ads
-            
-        except Exception as e:
-            logger.error(f"Error fetching ads timeseries: {e}")
-            return []
+                
+                for adset in data.get('data', []):
+                    targeting = adset.get('targeting', {})
+                    geo_locations = targeting.get('geo_locations', {})
+                    
+                    all_adsets.append({
+                        'id': adset.get('id'),
+                        'name': adset.get('name'),
+                        'campaign_id': campaign_id,
+                        'status': adset.get('status'),
+                        'optimization_goal': adset.get('optimization_goal'),
+                        'billing_event': adset.get('billing_event'),
+                        'daily_budget': float(adset.get('daily_budget', 0)) / 100 if adset.get('daily_budget') else None,
+                        'lifetime_budget': float(adset.get('lifetime_budget', 0)) / 100 if adset.get('lifetime_budget') else None,
+                        'budget_remaining': float(adset.get('budget_remaining', 0)) / 100 if adset.get('budget_remaining') else None,
+                        'locations': geo_locations.get('countries', []),
+                        'created_time': adset.get('created_time'),
+                        'updated_time': adset.get('updated_time')
+                    })
+            except Exception as e:
+                logger.error(f"Error fetching adsets for campaign {campaign_id}: {e}")
+        
+        return all_adsets
 
-    def _get_empty_ad_insights(self) -> Dict:
-        """Helper method to return empty ad insights structure"""
-        return {
-            'spend': 0,
-            'impressions': 0,
-            'clicks': 0,
-            'link_clicks': 0,
-            'conversions': 0,
-            'cpc': 0,
-            'cpm': 0,
-            'ctr': 0,
-            'reach': 0,
-            'frequency': 0,
-            'cost_per_link_click': 0
-        }
+
+    def get_adsets_timeseries(self, adset_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get time-series data for multiple ad sets"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for adset_id in adset_ids:
+            try:
+                data = self._make_request(f"{adset_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                    'time_increment': '1',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                timeseries = []
+                for day_data in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in day_data.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    timeseries.append({
+                        'date': day_data.get('date_start'),
+                        'spend': float(day_data.get('spend', 0)),
+                        'impressions': int(day_data.get('impressions', 0)),
+                        'clicks': int(day_data.get('clicks', 0)),
+                        'conversions': conversions,
+                        'cpc': float(day_data.get('cpc', 0)),
+                        'cpm': float(day_data.get('cpm', 0)),
+                        'ctr': float(day_data.get('ctr', 0)),
+                        'reach': int(day_data.get('reach', 0)),
+                        'frequency': float(day_data.get('frequency', 0))
+                    })
+                
+                results.append({
+                    'adset_id': adset_id,
+                    'timeseries': timeseries
+                })
+            except Exception as e:
+                logger.error(f"Error fetching timeseries for adset {adset_id}: {e}")
+        
+        return results
+
+
+    def get_adsets_demographics(self, adset_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get age/gender demographics for multiple ad sets"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for adset_id in adset_ids:
+            try:
+                data = self._make_request(f"{adset_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'age,gender',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                demographics = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    demographics.append({
+                        'age': item.get('age'),
+                        'gender': item.get('gender'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
+                    })
+                
+                results.append({
+                    'adset_id': adset_id,
+                    'demographics': demographics
+                })
+            except Exception as e:
+                logger.error(f"Error fetching demographics for adset {adset_id}: {e}")
+        
+        return results
+
+
+    def get_adsets_placements(self, adset_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get platform placement data for multiple ad sets"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for adset_id in adset_ids:
+            try:
+                data = self._make_request(f"{adset_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'publisher_platform',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                placements = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    placements.append({
+                        'platform': item.get('publisher_platform'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
+                    })
+                
+                results.append({
+                    'adset_id': adset_id,
+                    'placements': placements
+                })
+            except Exception as e:
+                logger.error(f"Error fetching placements for adset {adset_id}: {e}")
+        
+        return results
+
+
+    def get_ads_by_adsets(self, adset_ids: List[str]) -> List[Dict]:
+        """Get ads for multiple ad sets"""
+        all_ads = []
+        for adset_id in adset_ids:
+            try:
+                data = self._make_request(f"{adset_id}/ads", {
+                    'fields': 'id,name,status,creative{title,body,image_url,video_id,thumbnail_url},created_time,updated_time'
+                })
+                
+                for ad in data.get('data', []):
+                    creative = ad.get('creative', {})
+                    
+                    all_ads.append({
+                        'id': ad.get('id'),
+                        'name': ad.get('name'),
+                        'ad_set_id': adset_id,
+                        'status': ad.get('status'),
+                        'creative': {
+                            'title': creative.get('title'),
+                            'body': creative.get('body'),
+                            'image_url': creative.get('image_url'),
+                            'video_id': creative.get('video_id'),
+                            'thumbnail_url': creative.get('thumbnail_url')
+                        },
+                        'created_time': ad.get('created_time'),
+                        'updated_time': ad.get('updated_time')
+                    })
+            except Exception as e:
+                logger.error(f"Error fetching ads for adset {adset_id}: {e}")
+        
+        return all_ads
+
+
+    def get_ads_timeseries(self, ad_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get time-series data for multiple ads"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for ad_id in ad_ids:
+            try:
+                data = self._make_request(f"{ad_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                    'time_increment': '1',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                timeseries = []
+                for day_data in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in day_data.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    timeseries.append({
+                        'date': day_data.get('date_start'),
+                        'spend': float(day_data.get('spend', 0)),
+                        'impressions': int(day_data.get('impressions', 0)),
+                        'clicks': int(day_data.get('clicks', 0)),
+                        'conversions': conversions,
+                        'cpc': float(day_data.get('cpc', 0)),
+                        'cpm': float(day_data.get('cpm', 0)),
+                        'ctr': float(day_data.get('ctr', 0)),
+                        'reach': int(day_data.get('reach', 0)),
+                        'frequency': float(day_data.get('frequency', 0))
+                    })
+                
+                results.append({
+                    'ad_id': ad_id,
+                    'timeseries': timeseries
+                })
+            except Exception as e:
+                logger.error(f"Error fetching timeseries for ad {ad_id}: {e}")
+        
+        return results
+
+
+    def get_ads_demographics(self, ad_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get age/gender demographics for multiple ads"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for ad_id in ad_ids:
+            try:
+                data = self._make_request(f"{ad_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'age,gender',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                demographics = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    demographics.append({
+                        'age': item.get('age'),
+                        'gender': item.get('gender'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
+                    })
+                
+                results.append({
+                    'ad_id': ad_id,
+                    'demographics': demographics
+                })
+            except Exception as e:
+                logger.error(f"Error fetching demographics for ad {ad_id}: {e}")
+        
+        return results
+
+
+    def get_ads_placements(self, ad_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
+        """Get platform placement data for multiple ads"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        results = []
+        for ad_id in ad_ids:
+            try:
+                data = self._make_request(f"{ad_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'spend,impressions,reach,actions',
+                    'breakdowns': 'publisher_platform',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                
+                placements = []
+                for item in data.get('data', []):
+                    conversions = sum(
+                        int(action.get('value', 0))
+                        for action in item.get('actions', [])
+                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                    )
+                    
+                    placements.append({
+                        'platform': item.get('publisher_platform'),
+                        'spend': float(item.get('spend', 0)),
+                        'impressions': int(item.get('impressions', 0)),
+                        'reach': int(item.get('reach', 0)),
+                        'results': conversions
+                    })
+                
+                results.append({
+                    'ad_id': ad_id,
+                    'placements': placements
+                })
+            except Exception as e:
+                logger.error(f"Error fetching placements for ad {ad_id}: {e}")
+        
+        return results
 
     # =========================================================================
     # FACEBOOK PAGES
@@ -2119,7 +1747,8 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching page posts timeseries: {e}", exc_info=True)
             return []    
-    # =========================================================================
+  
+  # =========================================================================
     # INSTAGRAM
     # =========================================================================
     

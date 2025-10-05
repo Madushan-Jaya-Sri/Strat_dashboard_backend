@@ -206,6 +206,132 @@ class MetaAdTimeseries(BaseModel):
     timeseries: List[AdMetricDay]
     summary: AdMetricSummary
 
+# models/meta_response_models.py
+
+from pydantic import BaseModel
+from typing import List, Optional
+
+# Campaign Models
+class CampaignMetrics(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    status: str
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+
+class CampaignTotals(BaseModel):
+    total_spend: float
+    total_impressions: int
+    total_clicks: int
+    total_conversions: int
+    total_reach: int
+
+class CampaignsWithTotals(BaseModel):
+    campaigns: List[CampaignMetrics]
+    totals: CampaignTotals
+
+class DailyMetrics(BaseModel):
+    date: str
+    spend: float
+    impressions: int
+    clicks: int
+    conversions: int
+    cpc: float
+    cpm: float
+    ctr: float
+    reach: int
+    frequency: float
+
+class CampaignTimeseries(BaseModel):
+    campaign_id: str
+    timeseries: List[DailyMetrics]
+
+class DemographicItem(BaseModel):
+    age: str
+    gender: str
+    spend: float
+    impressions: int
+    reach: int
+    results: int
+
+class CampaignDemographics(BaseModel):
+    campaign_id: str
+    demographics: List[DemographicItem]
+
+class PlacementItem(BaseModel):
+    platform: str
+    spend: float
+    impressions: int
+    reach: int
+    results: int
+
+class CampaignPlacements(BaseModel):
+    campaign_id: str
+    placements: List[PlacementItem]
+
+# Ad Set Models
+class AdSetInfo(BaseModel):
+    id: str
+    name: str
+    campaign_id: str
+    status: str
+    optimization_goal: Optional[str]
+    billing_event: Optional[str]
+    daily_budget: Optional[float]
+    lifetime_budget: Optional[float]
+    budget_remaining: Optional[float]
+    locations: List[str]
+    created_time: str
+    updated_time: str
+
+class AdSetTimeseries(BaseModel):
+    adset_id: str
+    timeseries: List[DailyMetrics]
+
+class AdSetDemographics(BaseModel):
+    adset_id: str
+    demographics: List[DemographicItem]
+
+class AdSetPlacements(BaseModel):
+    adset_id: str
+    placements: List[PlacementItem]
+
+# Ad Models
+class Creative(BaseModel):
+    title: Optional[str]
+    body: Optional[str]
+    image_url: Optional[str]
+    video_id: Optional[str]
+    thumbnail_url: Optional[str]
+
+class AdInfo(BaseModel):
+    id: str
+    name: str
+    ad_set_id: str
+    status: str
+    creative: Creative
+    created_time: str
+    updated_time: str
+
+class AdTimeseries(BaseModel):
+    ad_id: str
+    timeseries: List[DailyMetrics]
+
+class AdDemographics(BaseModel):
+    ad_id: str
+    demographics: List[DemographicItem]
+
+class AdPlacements(BaseModel):
+    ad_id: str
+    placements: List[PlacementItem]
+
 # =============================================================================
 # FACEBOOK PAGES
 # =============================================================================
