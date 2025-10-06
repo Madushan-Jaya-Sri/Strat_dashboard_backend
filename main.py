@@ -229,6 +229,7 @@ async def terms_page():
 
 
 # Google Ads Routes
+# Google Ads Routes with Custom Date Support
 @app.get("/api/ads/customers", response_model=List[AdCustomer])
 @save_response("ads_customers")
 async def get_ads_customers(current_user: dict = Depends(get_current_user)):
@@ -245,13 +246,18 @@ async def get_ads_customers(current_user: dict = Depends(get_current_user)):
 @save_response("ads_key_stats")
 async def get_ads_key_stats(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads key statistics for dashboard cards"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        key_stats = ads_manager.get_overall_key_stats(customer_id, period)
+        key_stats = ads_manager.get_overall_key_stats(customer_id, period, start_date, end_date)
         return AdKeyStats(**key_stats)
     except Exception as e:
         logger.error(f"Error fetching key stats: {e}")
@@ -261,13 +267,18 @@ async def get_ads_key_stats(
 @save_response("ads_campaigns")
 async def get_ads_campaigns(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads campaigns for a customer"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        campaigns = ads_manager.get_campaigns_with_period(customer_id, period)
+        campaigns = ads_manager.get_campaigns_with_period(customer_id, period, start_date, end_date)
         return [EnhancedAdCampaign(**campaign) for campaign in campaigns]
     except Exception as e:
         logger.error(f"Error fetching campaigns: {e}")
@@ -277,15 +288,20 @@ async def get_ads_campaigns(
 @save_response("ads_keywords")    
 async def get_ads_keywords(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     offset: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads keywords data with pagination"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        result = ads_manager.get_keywords_data(customer_id, period, offset, limit)
+        result = ads_manager.get_keywords_data(customer_id, period, start_date, end_date, offset, limit)
         return KeywordResponse(
             keywords=[AdKeyword(**kw) for kw in result["keywords"]],
             has_more=result["has_more"],
@@ -301,13 +317,18 @@ async def get_ads_keywords(
 @save_response("ads_performance")
 async def get_ads_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads performance metrics"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        metrics = ads_manager.get_advanced_metrics(customer_id, period)
+        metrics = ads_manager.get_advanced_metrics(customer_id, period, start_date, end_date)
         return [PerformanceMetric(**metric) for metric in metrics]
     except Exception as e:
         logger.error(f"Error fetching ads performance: {e}")
@@ -317,13 +338,18 @@ async def get_ads_performance(
 @save_response("ads_geographic_performance")
 async def get_ads_geographic(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads geographic performance"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        geo_data = ads_manager.get_geographic_data(customer_id, period)
+        geo_data = ads_manager.get_geographic_data(customer_id, period, start_date, end_date)
         return [GeographicPerformance(**geo) for geo in geo_data]
     except Exception as e:
         logger.error(f"Error fetching ads geographic data: {e}")
@@ -333,13 +359,18 @@ async def get_ads_geographic(
 @save_response("ads_device_performance")
 async def get_ads_device_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads device performance"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        device_data = ads_manager.get_device_performance_data(customer_id, period)
+        device_data = ads_manager.get_device_performance_data(customer_id, period, start_date, end_date)
         return [DevicePerformance(**device) for device in device_data]
     except Exception as e:
         logger.error(f"Error fetching device performance: {e}")
@@ -349,13 +380,18 @@ async def get_ads_device_performance(
 @save_response("ads_time_performance")
 async def get_ads_time_performance(
     customer_id: str,
-    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS)$"),
+    period: str = Query("LAST_30_DAYS", pattern="^(LAST_7_DAYS|LAST_30_DAYS|LAST_90_DAYS|LAST_365_DAYS|CUSTOM)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get Google Ads time-based performance"""
     try:
+        if period == "CUSTOM" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for CUSTOM period")
+        
         ads_manager = GoogleAdsManager(current_user["email"], auth_manager)
-        time_data = ads_manager.get_time_performance_data(customer_id, period)
+        time_data = ads_manager.get_time_performance_data(customer_id, period, start_date, end_date)
         return [TimePerformance(**time) for time in time_data]
     except Exception as e:
         logger.error(f"Error fetching time performance: {e}")
@@ -385,7 +421,7 @@ async def get_keyword_ideas(
     except Exception as e:
         logger.error(f"Error fetching keyword ideas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 
 # Google Analytics Routes
 @app.get("/api/analytics/properties", response_model=List[GAProperty])

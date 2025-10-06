@@ -1,4 +1,3 @@
-
 import os
 import logging
 from datetime import datetime, timedelta
@@ -16,9 +15,8 @@ logger = logging.getLogger(__name__)
 class GoogleAdsManager:
     """Manager class for Google Ads API operations"""
     
-    def __init__(self, user_email: str,auth_manager):
+    def __init__(self, user_email: str, auth_manager):
         self.auth_manager = auth_manager
-
         self.user_email = user_email
         self.developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
         
@@ -48,14 +46,24 @@ class GoogleAdsManager:
         
         return self._client
     
-    def _get_date_filter(self, period: str) -> str:
-        """Get the appropriate date filter for the given period"""
-        if period in ["LAST_90_DAYS", "LAST_365_DAYS"]:  # UPDATE THIS LINE
+    def _get_date_filter(self, period: str, start_date: str = None, end_date: str = None) -> str:
+        """Get the appropriate date filter for the given period or custom dates"""
+        if period == "CUSTOM":
+            if not start_date or not end_date:
+                raise ValueError("start_date and end_date are required for CUSTOM period")
+            # Validate date format
+            try:
+                datetime.strptime(start_date, '%Y-%m-%d')
+                datetime.strptime(end_date, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError("Dates must be in YYYY-MM-DD format")
+            return f"segments.date >= '{start_date}' AND segments.date <= '{end_date}'"
+        elif period in ["LAST_90_DAYS", "LAST_365_DAYS"]:
             end_date = datetime.now().date()
             
             if period == "LAST_90_DAYS":
                 start_date = end_date - timedelta(days=90)
-            elif period == "LAST_365_DAYS":  # ADD THIS
+            elif period == "LAST_365_DAYS":
                 start_date = end_date - timedelta(days=365)
                 
             return f"segments.date >= '{start_date}' AND segments.date <= '{end_date}'"
@@ -149,17 +157,25 @@ class GoogleAdsManager:
             logger.warning(f"Error getting customer info for {customer_id}: {e}")
             raise
 
-    def get_campaigns_with_period(self, customer_id: str, period: str = "LAST_30_DAYS") -> List[Dict[str, Any]]:
+    def get_campaigns_with_period(self, customer_id: str, period: str = "LAST_30_DAYS", 
+                                  start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get campaigns for a customer with specified time period"""
         try:
-            # Handle custom date ranges for 90 days and 1 year
-            if period in ["LAST_90_DAYS", "LAST_365_DAYS"]:
-                end_date = datetime.now().date()
-                
-                if period == "LAST_90_DAYS":
-                    start_date = end_date - timedelta(days=90)
-                elif period == "LAST_365_DAYS":  # ADD 1 YEAR SUPPORT
-                    start_date = end_date - timedelta(days=365)
+            # Handle custom date ranges and predefined periods
+            if period == "CUSTOM" or period in ["LAST_90_DAYS", "LAST_365_DAYS"]:
+                if period == "CUSTOM":
+                    if not start_date or not end_date:
+                        raise ValueError("start_date and end_date are required for CUSTOM period")
+                    query_start_date = start_date
+                    query_end_date = end_date
+                else:
+                    end = datetime.now().date()
+                    if period == "LAST_90_DAYS":
+                        start = end - timedelta(days=90)
+                    elif period == "LAST_365_DAYS":
+                        start = end - timedelta(days=365)
+                    query_start_date = str(start)
+                    query_end_date = str(end)
                 
                 query = f"""
                     SELECT
@@ -175,7 +191,7 @@ class GoogleAdsManager:
                         metrics.conversions,
                         metrics.ctr
                     FROM campaign
-                    WHERE segments.date >= '{start_date}' AND segments.date <= '{end_date}'
+                    WHERE segments.date >= '{query_start_date}' AND segments.date <= '{query_end_date}'
                     ORDER BY metrics.impressions DESC
                 """
             else:
@@ -227,6 +243,9 @@ class GoogleAdsManager:
             logger.info(f"Found {len(campaigns)} campaigns for customer {customer_id} ({period})")
             return campaigns
             
+        except ValueError as ve:
+            logger.error(f"Validation error: {ve}")
+            raise HTTPException(status_code=400, detail=str(ve))
         except GoogleAdsException as ex:
             logger.error(f"Google Ads API error getting campaigns: {ex}")
             raise HTTPException(status_code=400, detail=f"Failed to get campaigns: {ex.error.message}")
@@ -234,11 +253,13 @@ class GoogleAdsManager:
             logger.error(f"Unexpected error getting campaigns: {e}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching campaigns")
            
-    def get_keywords_data(self, customer_id: str, period: str = "LAST_30_DAYS", offset: int = 0, limit: int = 10) -> Dict[str, Any]:
+    def get_keywords_data(self, customer_id: str, period: str = "LAST_30_DAYS", 
+                         start_date: str = None, end_date: str = None,
+                         offset: int = 0, limit: int = 10) -> Dict[str, Any]:
         """Get top performing keywords with pagination"""
         try:
             googleads_service = self.client.get_service("GoogleAdsService")
-            date_filter = self._get_date_filter(period)
+            date_filter = self._get_date_filter(period, start_date, end_date)
             
             query = f"""
                 SELECT
@@ -298,11 +319,12 @@ class GoogleAdsManager:
             logger.error(f"Error getting keywords for {customer_id}: {e}")
             return {'keywords': [], 'has_more': False, 'total': 0}
     
-    def get_advanced_metrics(self, customer_id: str, period: str = "LAST_30_DAYS") -> List[Dict[str, Any]]:
+    def get_advanced_metrics(self, customer_id: str, period: str = "LAST_30_DAYS",
+                           start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get advanced metrics like Quality Score, Impression Share, etc."""
         try:
             googleads_service = self.client.get_service("GoogleAdsService")
-            date_filter = self._get_date_filter(period)
+            date_filter = self._get_date_filter(period, start_date, end_date)
             
             query = f"""
                 SELECT
@@ -371,11 +393,12 @@ class GoogleAdsManager:
             logger.error(f"Error getting advanced metrics for {customer_id}: {e}")
             return []
     
-    def get_geographic_data(self, customer_id: str, period: str = "LAST_30_DAYS") -> List[Dict[str, Any]]:
+    def get_geographic_data(self, customer_id: str, period: str = "LAST_30_DAYS",
+                           start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get campaign performance by geographic location"""
         try:
             googleads_service = self.client.get_service("GoogleAdsService")
-            date_filter = self._get_date_filter(period)
+            date_filter = self._get_date_filter(period, start_date, end_date)
             
             query = f"""
                 SELECT
@@ -415,11 +438,12 @@ class GoogleAdsManager:
             logger.error(f"Error getting geographic data for {customer_id}: {e}")
             return []
     
-    def get_device_performance_data(self, customer_id: str, period: str = "LAST_30_DAYS") -> List[Dict[str, Any]]:
+    def get_device_performance_data(self, customer_id: str, period: str = "LAST_30_DAYS",
+                                   start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get campaign performance by device type"""
         try:
             googleads_service = self.client.get_service("GoogleAdsService")
-            date_filter = self._get_date_filter(period)
+            date_filter = self._get_date_filter(period, start_date, end_date)
             
             query = f"""
                 SELECT
@@ -459,11 +483,12 @@ class GoogleAdsManager:
             logger.error(f"Error getting device performance for {customer_id}: {e}")
             return []
     
-    def get_time_performance_data(self, customer_id: str, period: str = "LAST_30_DAYS") -> List[Dict[str, Any]]:
+    def get_time_performance_data(self, customer_id: str, period: str = "LAST_30_DAYS",
+                                 start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get daily campaign performance over time"""
         try:
             googleads_service = self.client.get_service("GoogleAdsService")
-            date_filter = self._get_date_filter(period)
+            date_filter = self._get_date_filter(period, start_date, end_date)
             
             query = f"""
                 SELECT
@@ -556,11 +581,12 @@ class GoogleAdsManager:
             logger.error(f"Unexpected error getting keyword ideas: {e}")
             raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching keyword ideas")
         
-    def get_total_cost_for_period(self, customer_id: str, period: str) -> float:
+    def get_total_cost_for_period(self, customer_id: str, period: str, 
+                                 start_date: str = None, end_date: str = None) -> float:
         """Get total ad spend for a specific period"""
         try:
             # Use existing method to get campaigns with costs
-            campaigns = self.get_campaigns_with_period(customer_id, period)
+            campaigns = self.get_campaigns_with_period(customer_id, period, start_date, end_date)
             
             # Sum up all campaign costs
             total_cost = sum(campaign.get('cost', 0) for campaign in campaigns)
@@ -571,121 +597,126 @@ class GoogleAdsManager:
             logger.error(f"Error fetching total ad cost for customer {customer_id}: {e}")
             return 0.0
             
-    def get_overall_key_stats(self, customer_id: str, period: str = "LAST_30_DAYS") -> Dict[str, Any]:
-            """Get overall key statistics for dashboard cards"""
-            try:
-                googleads_service = self.client.get_service("GoogleAdsService")
-                date_filter = self._get_date_filter(period)
-                
-                # Get overall campaign metrics
-                query = f"""
-                    SELECT
-                        metrics.impressions,
-                        metrics.clicks,
-                        metrics.cost_micros,
-                        metrics.conversions,
-                        metrics.ctr,
-                        metrics.average_cpc
-                    FROM campaign
-                    WHERE {date_filter}
-                    AND campaign.status != 'REMOVED'
-                """
-                
-                response = googleads_service.search(customer_id=customer_id, query=query)
-                
-                # Aggregate all metrics
-                total_impressions = 0
-                total_clicks = 0
-                total_cost = 0.0
-                total_conversions = 0.0
-                total_ctr_sum = 0.0
-                total_cpc_sum = 0.0
-                row_count = 0
-                
-                for row in response:
-                    metrics = row.metrics
-                    total_impressions += metrics.impressions
-                    total_clicks += metrics.clicks
-                    total_cost += metrics.cost_micros / 1_000_000
-                    total_conversions += metrics.conversions
-                    total_ctr_sum += metrics.ctr
-                    total_cpc_sum += metrics.average_cpc / 1_000_000 if metrics.average_cpc else 0
-                    row_count += 1
-                
-                # Calculate derived metrics
-                overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-                conversion_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
-                avg_cpc = total_cpc_sum / row_count if row_count > 0 else 0
-                cost_per_conversion = total_cost / total_conversions if total_conversions > 0 else 0
-                
-                # Format numbers for display
-                from utils.helpers import format_large_number, format_currency
-                
-                key_stats = {
-                    'total_impressions': {
-                        'value': total_impressions,
-                        'formatted': format_large_number(total_impressions),
-                        'label': 'TOTAL IMPRESSIONS',
-                        'description': 'Reach and Visibility'
-                    },
-                    'total_cost': {
-                        'value': total_cost,
-                        'formatted': format_currency(total_cost),
-                        'label': 'TOTAL COST',
-                        'description': 'Budget utilization'
-                    },
-                    'total_clicks': {
-                        'value': total_clicks,
-                        'formatted': format_large_number(total_clicks),
-                        'label': 'TOTAL CLICKS',
-                        'description': 'User engagement'
-                    },
-                    'conversion_rate': {
-                        'value': conversion_rate,
-                        'formatted': f"{conversion_rate:.2f}%",
-                        'label': 'CONVERSION RATE',
-                        'description': 'Campaign effectiveness'
-                    },
-                    'total_conversions': {
-                        'value': total_conversions,
-                        'formatted': f"{total_conversions:.1f}",
-                        'label': 'TOTAL CONVERSIONS',
-                        'description': 'Goal achievements'
-                    },
-                    'avg_cost_per_click': {
-                        'value': avg_cpc,
-                        'formatted': format_currency(avg_cpc),
-                        'label': 'AVG. COST PER CLICK',
-                        'description': 'Bidding efficiency'
-                    },
-                    'cost_per_conversion': {
-                        'value': cost_per_conversion,
-                        'formatted': format_currency(cost_per_conversion),
-                        'label': 'COST PER CONV.',
-                        'description': 'ROI efficiency'
-                    },
-                    'click_through_rate': {
-                        'value': overall_ctr,
-                        'formatted': f"{overall_ctr:.2f}%",
-                        'label': 'CLICK-THROUGH RATE',
-                        'description': 'Ad relevance'
-                    }
+    def get_overall_key_stats(self, customer_id: str, period: str = "LAST_30_DAYS",
+                            start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Get overall key statistics for dashboard cards"""
+        try:
+            googleads_service = self.client.get_service("GoogleAdsService")
+            date_filter = self._get_date_filter(period, start_date, end_date)
+            
+            # Get overall campaign metrics
+            query = f"""
+                SELECT
+                    metrics.impressions,
+                    metrics.clicks,
+                    metrics.cost_micros,
+                    metrics.conversions,
+                    metrics.ctr,
+                    metrics.average_cpc
+                FROM campaign
+                WHERE {date_filter}
+                AND campaign.status != 'REMOVED'
+            """
+            
+            response = googleads_service.search(customer_id=customer_id, query=query)
+            
+            # Aggregate all metrics
+            total_impressions = 0
+            total_clicks = 0
+            total_cost = 0.0
+            total_conversions = 0.0
+            total_ctr_sum = 0.0
+            total_cpc_sum = 0.0
+            row_count = 0
+            
+            for row in response:
+                metrics = row.metrics
+                total_impressions += metrics.impressions
+                total_clicks += metrics.clicks
+                total_cost += metrics.cost_micros / 1_000_000
+                total_conversions += metrics.conversions
+                total_ctr_sum += metrics.ctr
+                total_cpc_sum += metrics.average_cpc / 1_000_000 if metrics.average_cpc else 0
+                row_count += 1
+            
+            # Calculate derived metrics
+            overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+            conversion_rate = (total_conversions / total_clicks * 100) if total_clicks > 0 else 0
+            avg_cpc = total_cpc_sum / row_count if row_count > 0 else 0
+            cost_per_conversion = total_cost / total_conversions if total_conversions > 0 else 0
+            
+            # Format numbers for display
+            from utils.helpers import format_large_number, format_currency
+            
+            key_stats = {
+                'total_impressions': {
+                    'value': total_impressions,
+                    'formatted': format_large_number(total_impressions),
+                    'label': 'TOTAL IMPRESSIONS',
+                    'description': 'Reach and Visibility'
+                },
+                'total_cost': {
+                    'value': total_cost,
+                    'formatted': format_currency(total_cost),
+                    'label': 'TOTAL COST',
+                    'description': 'Budget utilization'
+                },
+                'total_clicks': {
+                    'value': total_clicks,
+                    'formatted': format_large_number(total_clicks),
+                    'label': 'TOTAL CLICKS',
+                    'description': 'User engagement'
+                },
+                'conversion_rate': {
+                    'value': conversion_rate,
+                    'formatted': f"{conversion_rate:.2f}%",
+                    'label': 'CONVERSION RATE',
+                    'description': 'Campaign effectiveness'
+                },
+                'total_conversions': {
+                    'value': total_conversions,
+                    'formatted': f"{total_conversions:.1f}",
+                    'label': 'TOTAL CONVERSIONS',
+                    'description': 'Goal achievements'
+                },
+                'avg_cost_per_click': {
+                    'value': avg_cpc,
+                    'formatted': format_currency(avg_cpc),
+                    'label': 'AVG. COST PER CLICK',
+                    'description': 'Bidding efficiency'
+                },
+                'cost_per_conversion': {
+                    'value': cost_per_conversion,
+                    'formatted': format_currency(cost_per_conversion),
+                    'label': 'COST PER CONV.',
+                    'description': 'ROI efficiency'
+                },
+                'click_through_rate': {
+                    'value': overall_ctr,
+                    'formatted': f"{overall_ctr:.2f}%",
+                    'label': 'CLICK-THROUGH RATE',
+                    'description': 'Ad relevance'
                 }
-                
-                # Add summary info
-                key_stats['summary'] = {
-                    'period': period,
-                    'customer_id': customer_id,
-                    'campaigns_count': row_count,
-                    'generated_at': datetime.now().isoformat()
-                }
-                
-                logger.info(f"Generated key stats for customer {customer_id} ({period})")
-                return key_stats
-                
-            except GoogleAdsException as ex:
-                logger.error(f"Google Ads API error getting key stats: {ex}")
-                raise HTTPException(status_code=400, detail=f"Failed to get key stats: {ex.error.message}")
-            except Exception as e:
-                logger.error(f"Unexpected error getting key stats: {e}")
-                raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching key stats")
+            }
+            
+            # Add summary info
+            key_stats['summary'] = {
+                'period': period,
+                'customer_id': customer_id,
+                'campaigns_count': row_count,
+                'generated_at': datetime.now().isoformat()
+            }
+            
+            if period == "CUSTOM" and start_date and end_date:
+                key_stats['summary']['start_date'] = start_date
+                key_stats['summary']['end_date'] = end_date
+            
+            logger.info(f"Generated key stats for customer {customer_id} ({period})")
+            return key_stats
+            
+        except GoogleAdsException as ex:
+            logger.error(f"Google Ads API error getting key stats: {ex}")
+            raise HTTPException(status_code=400, detail=f"Failed to get key stats: {ex.error.message}")
+        except Exception as e:
+            logger.error(f"Unexpected error getting key stats: {e}")
+            raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching key stats")
