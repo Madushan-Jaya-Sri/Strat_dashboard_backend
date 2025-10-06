@@ -4,7 +4,7 @@ Unified Marketing Dashboard Backend
 Combines Google Ads and Google Analytics data in a single FastAPI application
 """
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Request
+from fastapi import FastAPI, HTTPException, Query, Depends, Request ,Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -28,7 +28,12 @@ from models.response_models import AdKeyStats
 from models.response_models import EnhancedAdCampaign, FunnelRequest
 from utils.charts_helper import ChartsDataTransformer
 from database.mongo_manager import MongoManager
+from social.meta_manager import MetaManager
 
+
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 
 from chat.chat_manager import chat_manager
 from models.chat_models import *
@@ -1095,6 +1100,122 @@ async def get_campaigns_with_totals(
         return meta_manager.get_campaigns_with_totals(account_id, period, start_date, end_date)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/stream")
+async def get_campaigns_stream(
+    account_id: str,
+    period: str = "LAST_30_DAYS",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    authorization: str = Header(None)
+):
+    """Stream campaigns data progressively"""
+    
+    async def campaign_generator():
+        try:
+            token = authorization.replace("Bearer ", "")
+            user_email = auth_manager.verify_jwt_token(token)["email"]
+            fb_token = auth_manager.get_facebook_access_token(user_email)
+            
+            meta_manager = MetaManager(fb_token)
+            
+            if start_date and end_date:
+                meta_manager._validate_date_range(start_date, end_date)
+            
+            since, until = meta_manager._period_to_dates(period, start_date, end_date)
+            
+            # Get all campaigns first
+            all_campaigns = meta_manager._get_all_campaigns_paginated(account_id)
+            total_campaigns = len(all_campaigns)
+            
+            # Send initial message with total count
+            yield f"data: {json.dumps({'type': 'init', 'total': total_campaigns})}\n\n"
+            
+            campaigns_with_insights = []
+            batch_size = 50
+            
+            for i in range(0, len(all_campaigns), batch_size):
+                batch = all_campaigns[i:i + batch_size]
+                
+                # Get insights for this batch
+                batch_results = meta_manager._get_campaigns_insights_batch(
+                    batch, since, until
+                )
+                
+                campaigns_with_insights.extend(batch_results)
+                
+                # Sort current results - active first
+                campaigns_with_insights.sort(
+                    key=lambda x: (x['status'] != 'ACTIVE', x['campaign_name'])
+                )
+                
+                # Calculate current totals
+                current_totals = {
+                    'total_spend': sum(c['spend'] for c in campaigns_with_insights),
+                    'total_impressions': sum(c['impressions'] for c in campaigns_with_insights),
+                    'total_clicks': sum(c['clicks'] for c in campaigns_with_insights),
+                    'total_conversions': sum(c['conversions'] for c in campaigns_with_insights),
+                    'total_reach': 0
+                }
+                
+                # Send progress update
+                progress_data = {
+                    'type': 'progress',
+                    'loaded': len(campaigns_with_insights),
+                    'total': total_campaigns,
+                    'percentage': int((len(campaigns_with_insights) / total_campaigns) * 100),
+                    'campaigns': campaigns_with_insights,
+                    'totals': current_totals
+                }
+                
+                yield f"data: {json.dumps(progress_data)}\n\n"
+                await asyncio.sleep(0.1)  # Prevent overwhelming client
+            
+            # Get final account-level reach
+            try:
+                account_insights = meta_manager._make_request(f"{account_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'reach',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                final_reach = int(account_insights.get('data', [{}])[0].get('reach', 0))
+            except:
+                final_reach = 0
+            
+            # Send completion message
+            final_totals = {
+                'total_spend': sum(c['spend'] for c in campaigns_with_insights),
+                'total_impressions': sum(c['impressions'] for c in campaigns_with_insights),
+                'total_clicks': sum(c['clicks'] for c in campaigns_with_insights),
+                'total_conversions': sum(c['conversions'] for c in campaigns_with_insights),
+                'total_reach': final_reach
+            }
+            
+            completion_data = {
+                'type': 'complete',
+                'campaigns': campaigns_with_insights,
+                'totals': final_totals
+            }
+            
+            yield f"data: {json.dumps(completion_data)}\n\n"
+            
+        except Exception as e:
+            error_data = {
+                'type': 'error',
+                'message': str(e)
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+    
+    return StreamingResponse(
+        campaign_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 # 3. Get campaign timeseries
