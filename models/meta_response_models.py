@@ -336,6 +336,39 @@ class AdPlacements(BaseModel):
     ad_id: str
     placements: List[PlacementItem]
 
+
+class CampaignBasic(BaseModel):
+    id: str
+    name: str
+    status: str
+    objective: Optional[str] = None
+    created_time: Optional[str] = None
+    updated_time: Optional[str] = None
+    start_time: Optional[str] = None
+    stop_time: Optional[str] = None
+
+class CampaignsList(BaseModel):
+    account_id: str
+    total_campaigns: int
+    status_summary: dict
+    campaigns: List[CampaignBasic]
+
+class CampaignMetadata(BaseModel):
+    total_campaigns: int
+    campaigns_with_data: int
+    campaigns_without_data: int
+    date_range: dict
+
+class CampaignsWithTotalsOptimized(BaseModel):
+    campaigns: List[dict]
+    totals: dict
+    metadata: CampaignMetadata
+
+
+class BatchCampaignsRequest(BaseModel):
+    account_ids: List[str]
+    period: Optional[str] = "30d"
+    max_workers: Optional[int] = 10
 # =============================================================================
 # FACEBOOK PAGES
 # =============================================================================

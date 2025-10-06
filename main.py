@@ -1080,22 +1080,238 @@ async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
 
 
 # 2. Get campaigns with totals
-@app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=CampaignsWithTotals)
+# @app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=CampaignsWithTotals)
+# async def get_campaigns_with_totals(
+#     account_id: str,
+#     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+#     start_date: Optional[str] = Query(None),
+#     end_date: Optional[str] = Query(None),
+#     current_user: dict = Depends(get_current_user)
+# ):
+#     """Get all campaigns with metrics and grand totals"""
+#     try:
+#         from social.meta_manager import MetaManager
+#         meta_manager = MetaManager(current_user["email"], auth_manager)
+#         return meta_manager.get_campaigns_with_totals(account_id, period, start_date, end_date)
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
+async def get_campaigns_list(
+    account_id: str,
+    status: Optional[str] = Query(None, description="Comma-separated status values: ACTIVE,PAUSED,ARCHIVED"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get list of all campaigns for an ad account without insights (very fast).
+    This returns ALL campaigns regardless of activity in any time period.
+    
+    Args:
+        account_id: Ad account ID (e.g., act_303894480866908)
+        status: Optional filter by status (e.g., "ACTIVE" or "ACTIVE,PAUSED")
+    
+    Example:
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list?status=ACTIVE
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list?status=ACTIVE,PAUSED
+    """
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Parse status filter
+        include_status = None
+        if status:
+            include_status = [s.strip().upper() for s in status.split(',')]
+        
+        result = meta_manager.get_campaigns_list(account_id, include_status)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Get campaigns with totals (optimized with concurrency)
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=CampaignsWithTotalsOptimized)
 async def get_campaigns_with_totals(
     account_id: str,
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    max_workers: Optional[int] = Query(10, ge=1, le=20, description="Number of concurrent workers (1-20)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get all campaigns with metrics and grand totals"""
+    """
+    Get all campaigns with metrics and grand totals (optimized with concurrent requests).
+    Only returns campaigns that have activity in the specified time period.
+    
+    Args:
+        account_id: Ad account ID
+        period: Time period (7d, 30d, 90d, 365d)
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        max_workers: Number of concurrent workers for faster fetching (default: 10)
+    
+    Example:
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns?period=30d
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns?start_date=2025-01-01&end_date=2025-01-31
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns?period=30d&max_workers=15
+    """
     try:
         from social.meta_manager import MetaManager
         meta_manager = MetaManager(current_user["email"], auth_manager)
-        return meta_manager.get_campaigns_with_totals(account_id, period, start_date, end_date)
+        
+        result = meta_manager.get_campaigns_with_totals(
+            account_id, 
+            period, 
+            start_date, 
+            end_date,
+            max_workers
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Compare all campaigns vs campaigns with activity
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/compare")
+async def compare_campaigns(
+    account_id: str,
+    period: Optional[str] = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Compare total campaigns in account vs campaigns with activity in a specific period.
+    Useful for understanding which campaigns are actually running.
+    
+    Args:
+        account_id: Ad account ID
+        period: Time period to check for activity (default: 30d)
+    
+    Example:
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/compare
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/compare?period=7d
+    
+    Returns:
+        {
+            "account_id": "act_xxx",
+            "period": "30d",
+            "all_campaigns": {
+                "total": 241,
+                "status_breakdown": {"ACTIVE": 50, "PAUSED": 191}
+            },
+            "campaigns_with_activity": {
+                "total": 4,
+                "campaigns": [...]
+            },
+            "campaigns_without_activity": {
+                "total": 237
+            },
+            "totals": {...}
+        }
+    """
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Get all campaigns
+        all_campaigns_result = meta_manager.get_campaigns_list(account_id)
+        
+        # Get campaigns with insights
+        insights_result = meta_manager.get_campaigns_with_totals(
+            account_id=account_id,
+            period=period
+        )
+        
+        # Build comparison
+        comparison = {
+            'account_id': account_id,
+            'period': period,
+            'all_campaigns': {
+                'total': all_campaigns_result['total_campaigns'],
+                'status_breakdown': all_campaigns_result['status_summary']
+            },
+            'campaigns_with_activity': {
+                'total': insights_result['metadata']['campaigns_with_data'],
+                'campaigns': insights_result['campaigns']
+            },
+            'campaigns_without_activity': {
+                'total': insights_result['metadata']['campaigns_without_data']
+            },
+            'totals': insights_result['totals']
+        }
+        
+        return comparison
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@app.post("/api/meta/ad-accounts/campaigns/batch")
+async def batch_get_campaigns(
+    request: BatchCampaignsRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get campaign insights for multiple ad accounts in one request.
+    
+    Body:
+    {
+        "account_ids": ["act_303894480866908", "act_123456789"],
+        "period": "30d",
+        "max_workers": 10
+    }
+    
+    Returns:
+        {
+            "results": {
+                "act_xxx": {...},
+                "act_yyy": {...}
+            },
+            "errors": {
+                "act_zzz": "error message"
+            },
+            "summary": {
+                "total_accounts": 3,
+                "successful": 2,
+                "failed": 1
+            }
+        }
+    """
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        results = {}
+        errors = {}
+        
+        for account_id in request.account_ids:
+            try:
+                result = meta_manager.get_campaigns_with_totals(
+                    account_id=account_id,
+                    period=request.period,
+                    max_workers=request.max_workers
+                )
+                results[account_id] = result
+            except Exception as e:
+                errors[account_id] = str(e)
+        
+        return {
+            'results': results,
+            'errors': errors,
+            'summary': {
+                'total_accounts': len(request.account_ids),
+                'successful': len(results),
+                'failed': len(errors)
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 3. Get campaign timeseries
 @app.post("/api/meta/campaigns/timeseries", response_model=List[CampaignTimeseries])
