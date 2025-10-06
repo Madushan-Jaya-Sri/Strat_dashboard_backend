@@ -214,13 +214,56 @@ class AuthManager:
             logger.error(f"Google authentication error: {e}")
             raise HTTPException(status_code=400, detail=f"Authentication failed: {str(e)}")
     
+
+    async def logout_user(self, user_email: str, auth_provider: str = "google"):
+        """Logout user and cleanup all related state"""
+        logger.info(f"🚪 Logging out {auth_provider} user: {user_email}")
+        
+        # Clear sessions
+        if auth_provider == "google" and user_email in self.user_sessions:
+            del self.user_sessions[user_email]
+            logger.info(f"✅ Google user {user_email} logged out")
+        elif auth_provider == "facebook" and user_email in self.facebook_sessions:
+            del self.facebook_sessions[user_email]
+            logger.info(f"✅ Facebook user {user_email} logged out")
+        
+        # Also cleanup any orphaned states
+        self.cleanup_expired_states(max_age_minutes=0)  # Force cleanup all states
+        
+        return {"message": "Logged out successfully", "auth_provider": auth_provider}
     # =============================================================================
     # FACEBOOK AUTHENTICATION METHODS
     # =============================================================================
-    
+    def cleanup_expired_states(self, max_age_minutes: int = 10):
+        """Remove states older than max_age_minutes"""
+        from datetime import datetime, timedelta
+        
+        cutoff_time = datetime.now() - timedelta(minutes=max_age_minutes)
+        
+        # Clean Google states
+        expired_oauth = [
+            state for state, timestamp in self.oauth_states.items()
+            if datetime.fromisoformat(timestamp) < cutoff_time
+        ]
+        for state in expired_oauth:
+            del self.oauth_states[state]
+        
+        # Clean Facebook states
+        expired_fb = [
+            state for state, timestamp in self.facebook_states.items()
+            if datetime.fromisoformat(timestamp) < cutoff_time
+        ]
+        for state in expired_fb:
+            del self.facebook_states[state]
+        
+        if expired_oauth or expired_fb:
+            logger.info(f"🧹 Cleaned up {len(expired_oauth)} Google and {len(expired_fb)} Facebook expired states")
+
+
     async def initiate_facebook_login(self):
         """Initiate Facebook OAuth login with comprehensive debugging"""
         logger.info("🚀 FACEBOOK LOGIN INITIATION STARTED")
+        self.cleanup_expired_states(max_age_minutes=10)
         logger.info("=" * 60)
         
         try:
