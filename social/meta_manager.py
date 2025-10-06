@@ -7,10 +7,6 @@ import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import HTTPException
-import asyncio
-import aiohttp
-from concurrent.futures import ThreadPoolExecutor
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -359,76 +355,19 @@ class MetaManager:
     # meta_manager.py - Essential functions only
 
     def get_campaigns_with_totals(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get all campaigns with individual metrics and grand totals - optimized version"""
+        """Get all campaigns with individual metrics and grand totals for an ad account"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
         since, until = self._period_to_dates(period, start_date, end_date)
         
         try:
-            # Step 1: Get ALL campaigns (not just active) in one batch call
-            all_campaigns = self._get_all_campaigns_paginated(account_id)
+            campaigns = []
+            params = {'fields': 'id,name,status', 'limit': 100}
             
-            if not all_campaigns:
-                return {'campaigns': [], 'totals': {
-                    'total_spend': 0,
-                    'total_impressions': 0,
-                    'total_clicks': 0,
-                    'total_conversions': 0,
-                    'total_reach': 0
-                }}
-            
-            # Step 2: Use batch API to get insights for multiple campaigns at once
-            campaigns_with_insights = self._get_campaigns_insights_batch(
-                all_campaigns, 
-                since, 
-                until
-            )
-            
-            # Step 3: Sort - Active campaigns first, then others
-            campaigns_with_insights.sort(
-                key=lambda x: (x['status'] != 'ACTIVE', x['campaign_name'])
-            )
-            
-            # Step 4: Calculate grand totals
-            totals = {
-                'total_spend': sum(c['spend'] for c in campaigns_with_insights),
-                'total_impressions': sum(c['impressions'] for c in campaigns_with_insights),
-                'total_clicks': sum(c['clicks'] for c in campaigns_with_insights),
-                'total_conversions': sum(c['conversions'] for c in campaigns_with_insights),
-                'total_reach': 0
-            }
-            
-            # Get account-level reach (single API call)
-            try:
-                account_insights = self._make_request(f"{account_id}/insights", {
-                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
-                    'fields': 'reach',
-                    'action_attribution_windows': ['7d_click', '1d_view']
-                })
-                totals['total_reach'] = int(account_insights.get('data', [{}])[0].get('reach', 0))
-            except Exception as e:
-                logger.warning(f"Could not fetch total reach: {e}")
-            
-            return {
-                'campaigns': campaigns_with_insights,
-                'totals': totals
-            }
-        except Exception as e:
-            logger.error(f"Error fetching campaigns: {e}")
-            raise
-
-    def _get_all_campaigns_paginated(self, account_id: str) -> List[Dict]:
-        """Get all campaigns with pagination - no status filter"""
-        campaigns = []
-        params = {
-            'fields': 'id,name,status',
-            'limit': 500  # Increased limit to reduce pagination calls
-        }
-        
-        next_url = None
-        while True:
-            try:
+            # Pagination
+            next_url = None
+            while True:
                 if next_url:
                     response = requests.get(next_url)
                     if response.status_code != 200:
@@ -438,109 +377,8 @@ class MetaManager:
                     data = self._make_request(f"{account_id}/campaigns", params)
                 
                 campaign_batch = data.get('data', [])
-                campaigns.extend(campaign_batch)
                 
-                paging = data.get('paging', {})
-                next_url = paging.get('next')
-                if not next_url:
-                    break
-                    
-            except Exception as e:
-                logger.error(f"Error in pagination: {e}")
-                break
-        
-        logger.info(f"Retrieved {len(campaigns)} total campaigns")
-        return campaigns
-
-    def _get_campaigns_insights_batch(self, campaigns: List[Dict], since: str, until: str, batch_size: int = 50) -> List[Dict]:
-        """Get insights for campaigns using batch requests - much faster"""
-        campaigns_with_insights = []
-        
-        # Process in batches
-        for i in range(0, len(campaigns), batch_size):
-            batch = campaigns[i:i + batch_size]
-            
-            # Create batch request
-            batch_requests = []
-            for idx, campaign in enumerate(batch):
-                batch_requests.append({
-                    'method': 'GET',
-                    'relative_url': f"{campaign['id']}/insights?time_range={{'since':'{since}','until':'{until}'}}&fields=spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency&action_attribution_windows=['7d_click','1d_view']"
-                })
-            
-            # Execute batch request
-            try:
-                batch_response = self._make_request('', {
-                    'batch': json.dumps(batch_requests)
-                }, method='POST')
-                
-                # Process batch response
-                for idx, result in enumerate(batch_response):
-                    campaign = batch[idx]
-                    
-                    try:
-                        if result.get('code') == 200:
-                            body = json.loads(result.get('body', '{}'))
-                            insights_data = body.get('data', [{}])[0]
-                            
-                            conversions = sum(
-                                int(action.get('value', 0))
-                                for action in insights_data.get('actions', [])
-                                if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
-                            )
-                            
-                            campaigns_with_insights.append({
-                                'campaign_id': campaign.get('id'),
-                                'campaign_name': campaign.get('name'),
-                                'status': campaign.get('status'),
-                                'spend': float(insights_data.get('spend', 0)),
-                                'impressions': int(insights_data.get('impressions', 0)),
-                                'clicks': int(insights_data.get('clicks', 0)),
-                                'conversions': conversions,
-                                'cpc': float(insights_data.get('cpc', 0)),
-                                'cpm': float(insights_data.get('cpm', 0)),
-                                'ctr': float(insights_data.get('ctr', 0)),
-                                'reach': int(insights_data.get('reach', 0)),
-                                'frequency': float(insights_data.get('frequency', 0))
-                            })
-                        else:
-                            # Campaign has no data for this period
-                            campaigns_with_insights.append({
-                                'campaign_id': campaign.get('id'),
-                                'campaign_name': campaign.get('name'),
-                                'status': campaign.get('status'),
-                                'spend': 0,
-                                'impressions': 0,
-                                'clicks': 0,
-                                'conversions': 0,
-                                'cpc': 0,
-                                'cpm': 0,
-                                'ctr': 0,
-                                'reach': 0,
-                                'frequency': 0
-                            })
-                    except Exception as e:
-                        logger.warning(f"Error processing campaign {campaign.get('id')}: {e}")
-                        # Add campaign with zero metrics
-                        campaigns_with_insights.append({
-                            'campaign_id': campaign.get('id'),
-                            'campaign_name': campaign.get('name'),
-                            'status': campaign.get('status'),
-                            'spend': 0,
-                            'impressions': 0,
-                            'clicks': 0,
-                            'conversions': 0,
-                            'cpc': 0,
-                            'cpm': 0,
-                            'ctr': 0,
-                            'reach': 0,
-                            'frequency': 0
-                        })
-            
-            except Exception as e:
-                logger.error(f"Batch request failed: {e}")
-                # Fallback to individual requests for this batch
-                for campaign in batch:
+                for campaign in campaign_batch:
                     try:
                         insights = self._make_request(f"{campaign['id']}/insights", {
                             'time_range': f'{{"since":"{since}","until":"{until}"}}',
@@ -556,7 +394,7 @@ class MetaManager:
                             if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
                         )
                         
-                        campaigns_with_insights.append({
+                        campaigns.append({
                             'campaign_id': campaign.get('id'),
                             'campaign_name': campaign.get('name'),
                             'status': campaign.get('status'),
@@ -571,9 +409,41 @@ class MetaManager:
                             'frequency': float(insights_data.get('frequency', 0))
                         })
                     except Exception as e:
-                        logger.warning(f"Error with campaign {campaign.get('id')}: {e}")
-        
-        return campaigns_with_insights
+                        logger.warning(f"Error fetching campaign {campaign.get('id')}: {e}")
+                
+                paging = data.get('paging', {})
+                next_url = paging.get('next')
+                if not next_url:
+                    break
+            
+            # Calculate grand totals
+            totals = {
+                'total_spend': sum(c['spend'] for c in campaigns),
+                'total_impressions': sum(c['impressions'] for c in campaigns),
+                'total_clicks': sum(c['clicks'] for c in campaigns),
+                'total_conversions': sum(c['conversions'] for c in campaigns),
+                'total_reach': 0  # Reach is not additive, need separate API call
+            }
+            
+            # Get accurate total reach
+            try:
+                account_insights = self._make_request(f"{account_id}/insights", {
+                    'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                    'fields': 'reach',
+                    'action_attribution_windows': ['7d_click', '1d_view']
+                })
+                totals['total_reach'] = int(account_insights.get('data', [{}])[0].get('reach', 0))
+            except:
+                pass
+            
+            return {
+                'campaigns': campaigns,
+                'totals': totals
+            }
+        except Exception as e:
+            logger.error(f"Error fetching campaigns: {e}")
+            raise
+
 
     def get_campaigns_timeseries(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get time-series data for multiple campaigns"""
