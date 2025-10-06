@@ -358,13 +358,12 @@ class MetaManager:
  
     # meta_manager.py - Essential functions only
 
-
-
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
                                 start_date: str = None, end_date: str = None,
                                 max_workers: int = 10) -> Dict:
         """
-        Get all campaigns with individual metrics and grand totals for an ad account.
+        Get ALL campaigns with individual metrics and grand totals for an ad account.
+        Returns ALL campaigns, even those without activity (with zero metrics).
         Optimized with concurrent requests.
         
         Args:
@@ -385,9 +384,8 @@ class MetaManager:
             # Step 1: Get all campaigns first (fast, no insights)
             all_campaigns = []
             params = {
-                'fields': 'id,name,status,objective',
+                'fields': 'id,name,status,objective,created_time,updated_time',
                 'limit': 500,
-                # Don't filter by status - get ALL campaigns
             }
             
             next_url = None
@@ -424,15 +422,36 @@ class MetaManager:
                     'metadata': {
                         'total_campaigns': 0,
                         'campaigns_with_data': 0,
+                        'campaigns_without_data': 0,
                         'date_range': {'since': since, 'until': until}
                     }
                 }
             
             # Step 2: Fetch insights concurrently
-            campaigns_with_insights = []
+            campaigns_data = []
+            campaigns_with_activity = 0
             
-            def fetch_campaign_insights(campaign: Dict) -> Optional[Dict]:
-                """Fetch insights for a single campaign"""
+            def fetch_campaign_insights(campaign: Dict) -> Dict:
+                """Fetch insights for a single campaign, return campaign with zero metrics if no data"""
+                campaign_result = {
+                    'campaign_id': campaign.get('id'),
+                    'campaign_name': campaign.get('name'),
+                    'status': campaign.get('status'),
+                    'objective': campaign.get('objective'),
+                    'created_time': campaign.get('created_time'),
+                    'updated_time': campaign.get('updated_time'),
+                    'spend': 0.0,
+                    'impressions': 0,
+                    'clicks': 0,
+                    'conversions': 0,
+                    'cpc': 0.0,
+                    'cpm': 0.0,
+                    'ctr': 0.0,
+                    'reach': 0,
+                    'frequency': 0.0,
+                    'has_data': False
+                }
+                
                 try:
                     insights = self._make_request(f"{campaign['id']}/insights", {
                         'time_range': json.dumps({"since": since, "until": until}),
@@ -442,38 +461,39 @@ class MetaManager:
                     
                     insights_data = insights.get('data', [])
                     
-                    # If no data for this period, return None (campaign had no activity)
-                    if not insights_data:
-                        logger.debug(f"No insights for campaign {campaign['id']} in date range")
-                        return None
-                    
-                    insights_data = insights_data[0]
-                    
-                    # Calculate conversions
-                    conversions = sum(
-                        int(action.get('value', 0))
-                        for action in insights_data.get('actions', [])
-                        if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
-                    )
-                    
-                    return {
-                        'campaign_id': campaign.get('id'),
-                        'campaign_name': campaign.get('name'),
-                        'status': campaign.get('status'),
-                        'objective': campaign.get('objective'),
-                        'spend': float(insights_data.get('spend', 0)),
-                        'impressions': int(insights_data.get('impressions', 0)),
-                        'clicks': int(insights_data.get('clicks', 0)),
-                        'conversions': conversions,
-                        'cpc': float(insights_data.get('cpc', 0)),
-                        'cpm': float(insights_data.get('cpm', 0)),
-                        'ctr': float(insights_data.get('ctr', 0)),
-                        'reach': int(insights_data.get('reach', 0)),
-                        'frequency': float(insights_data.get('frequency', 0))
-                    }
+                    # If we have insights data, populate the metrics
+                    if insights_data:
+                        insights_data = insights_data[0]
+                        
+                        # Calculate conversions
+                        conversions = sum(
+                            int(action.get('value', 0))
+                            for action in insights_data.get('actions', [])
+                            if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                        )
+                        
+                        # Update with actual data
+                        campaign_result.update({
+                            'spend': float(insights_data.get('spend', 0)),
+                            'impressions': int(insights_data.get('impressions', 0)),
+                            'clicks': int(insights_data.get('clicks', 0)),
+                            'conversions': conversions,
+                            'cpc': float(insights_data.get('cpc', 0)),
+                            'cpm': float(insights_data.get('cpm', 0)),
+                            'ctr': float(insights_data.get('ctr', 0)),
+                            'reach': int(insights_data.get('reach', 0)),
+                            'frequency': float(insights_data.get('frequency', 0)),
+                            'has_data': True
+                        })
+                        
+                        logger.debug(f"Campaign {campaign['id']} has data: spend=${campaign_result['spend']}")
+                    else:
+                        logger.debug(f"Campaign {campaign['id']} has no data in period")
+                        
                 except Exception as e:
                     logger.warning(f"Error fetching insights for campaign {campaign.get('id')}: {e}")
-                    return None
+                
+                return campaign_result
             
             # Use ThreadPoolExecutor for concurrent requests
             logger.info(f"Fetching insights for {len(all_campaigns)} campaigns with {max_workers} workers...")
@@ -493,17 +513,21 @@ class MetaManager:
                         logger.info(f"Progress: {completed}/{len(all_campaigns)} campaigns processed")
                     
                     result = future.result()
-                    if result:
-                        campaigns_with_insights.append(result)
+                    campaigns_data.append(result)
+                    
+                    if result['has_data']:
+                        campaigns_with_activity += 1
             
-            logger.info(f"Campaigns with data in period: {len(campaigns_with_insights)}/{len(all_campaigns)}")
+            logger.info(f"All {len(campaigns_data)} campaigns processed. {campaigns_with_activity} have data in period.")
             
-            # Step 3: Calculate grand totals
+            # Step 3: Calculate grand totals (only from campaigns with data)
+            campaigns_with_metrics = [c for c in campaigns_data if c['has_data']]
+            
             totals = {
-                'total_spend': sum(c['spend'] for c in campaigns_with_insights),
-                'total_impressions': sum(c['impressions'] for c in campaigns_with_insights),
-                'total_clicks': sum(c['clicks'] for c in campaigns_with_insights),
-                'total_conversions': sum(c['conversions'] for c in campaigns_with_insights),
+                'total_spend': sum(c['spend'] for c in campaigns_with_metrics),
+                'total_impressions': sum(c['impressions'] for c in campaigns_with_metrics),
+                'total_clicks': sum(c['clicks'] for c in campaigns_with_metrics),
+                'total_conversions': sum(c['conversions'] for c in campaigns_with_metrics),
                 'total_reach': 0  # Will fetch separately
             }
             
@@ -519,12 +543,12 @@ class MetaManager:
                 logger.warning(f"Could not fetch account-level reach: {e}")
             
             return {
-                'campaigns': campaigns_with_insights,
+                'campaigns': campaigns_data,  # ALL campaigns, including those with zero metrics
                 'totals': totals,
                 'metadata': {
                     'total_campaigns': len(all_campaigns),
-                    'campaigns_with_data': len(campaigns_with_insights),
-                    'campaigns_without_data': len(all_campaigns) - len(campaigns_with_insights),
+                    'campaigns_with_data': campaigns_with_activity,
+                    'campaigns_without_data': len(all_campaigns) - campaigns_with_activity,
                     'date_range': {'since': since, 'until': until}
                 }
             }
