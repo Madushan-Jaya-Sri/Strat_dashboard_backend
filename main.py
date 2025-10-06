@@ -1102,6 +1102,11 @@ async def get_campaigns_with_totals(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# In your main FastAPI file, add the streaming endpoint:
+
+from fastapi import Header
+from typing import Optional
+import json
 
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/stream")
 async def get_campaigns_stream(
@@ -1115,38 +1120,114 @@ async def get_campaigns_stream(
     
     async def campaign_generator():
         try:
+            if not authorization:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'No authorization token'})}\n\n"
+                return
+                
             token = authorization.replace("Bearer ", "")
-            user_email = auth_manager.verify_jwt_token(token)["email"]
-            fb_token = auth_manager.get_facebook_access_token(user_email)
+            user_info = auth_manager.verify_jwt_token(token)
+            user_email = user_info["email"]
             
-            meta_manager = MetaManager(fb_token)
+            # Initialize MetaManager correctly
+            from social.meta_manager import MetaManager
+            meta_manager = MetaManager(user_email, auth_manager)
+            
+            # Convert period format if needed
+            if period and not start_date and not end_date:
+                period_map = {
+                    'LAST_7_DAYS': '7d',
+                    'LAST_30_DAYS': '30d',
+                    'LAST_3_MONTHS': '90d',
+                    'LAST_1_YEAR': '365d'
+                }
+                period = period_map.get(period, '30d')
             
             if start_date and end_date:
-                meta_manager._validate_date_range(start_date, end_date)
+                # Validate date range
+                from datetime import datetime
+                start = datetime.strptime(start_date, '%Y-%m-%d')
+                end = datetime.strptime(end_date, '%Y-%m-%d')
+                if start > end:
+                    raise ValueError("start_date must be before end_date")
             
+            # Get date range
             since, until = meta_manager._period_to_dates(period, start_date, end_date)
             
-            # Get all campaigns first
-            all_campaigns = meta_manager._get_all_campaigns_paginated(account_id)
+            # Get all campaigns (no status filter)
+            all_campaigns = []
+            params = {'fields': 'id,name,status', 'limit': 500}
+            
+            try:
+                data = meta_manager._make_request(f"{account_id}/campaigns", params)
+                all_campaigns = data.get('data', [])
+                
+                # Handle pagination
+                while data.get('paging', {}).get('next'):
+                    next_url = data['paging']['next']
+                    response = requests.get(next_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        all_campaigns.extend(data.get('data', []))
+                    else:
+                        break
+            except Exception as e:
+                logger.error(f"Error fetching campaigns: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
+            
             total_campaigns = len(all_campaigns)
             
-            # Send initial message with total count
+            # Send initial message
             yield f"data: {json.dumps({'type': 'init', 'total': total_campaigns})}\n\n"
             
             campaigns_with_insights = []
             batch_size = 50
             
+            # Process campaigns in batches
             for i in range(0, len(all_campaigns), batch_size):
                 batch = all_campaigns[i:i + batch_size]
                 
-                # Get insights for this batch
-                batch_results = meta_manager._get_campaigns_insights_batch(
-                    batch, since, until
-                )
+                for campaign in batch:
+                    try:
+                        insights = meta_manager._make_request(f"{campaign['id']}/insights", {
+                            'time_range': f'{{"since":"{since}","until":"{until}"}}',
+                            'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                            'action_attribution_windows': ['7d_click', '1d_view']
+                        })
+                        
+                        insights_data = insights.get('data', [{}])[0] if insights.get('data') else {}
+                        
+                        conversions = sum(
+                            int(action.get('value', 0))
+                            for action in insights_data.get('actions', [])
+                            if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                        )
+                        
+                        campaigns_with_insights.append({
+                            'campaign_id': campaign.get('id'),
+                            'campaign_name': campaign.get('name'),
+                            'status': campaign.get('status'),
+                            'spend': float(insights_data.get('spend', 0)),
+                            'impressions': int(insights_data.get('impressions', 0)),
+                            'clicks': int(insights_data.get('clicks', 0)),
+                            'conversions': conversions,
+                            'cpc': float(insights_data.get('cpc', 0)),
+                            'cpm': float(insights_data.get('cpm', 0)),
+                            'ctr': float(insights_data.get('ctr', 0)),
+                            'reach': int(insights_data.get('reach', 0)),
+                            'frequency': float(insights_data.get('frequency', 0))
+                        })
+                    except Exception as e:
+                        logger.warning(f"Error with campaign {campaign.get('id')}: {e}")
+                        campaigns_with_insights.append({
+                            'campaign_id': campaign.get('id'),
+                            'campaign_name': campaign.get('name'),
+                            'status': campaign.get('status'),
+                            'spend': 0, 'impressions': 0, 'clicks': 0, 'conversions': 0,
+                            'cpc': 0, 'cpm': 0, 'ctr': 0, 'reach': 0, 'frequency': 0
+                        })
                 
-                campaigns_with_insights.extend(batch_results)
-                
-                # Sort current results - active first
+                # Sort: active first, then by name
                 campaigns_with_insights.sort(
                     key=lambda x: (x['status'] != 'ACTIVE', x['campaign_name'])
                 )
@@ -1165,13 +1246,13 @@ async def get_campaigns_stream(
                     'type': 'progress',
                     'loaded': len(campaigns_with_insights),
                     'total': total_campaigns,
-                    'percentage': int((len(campaigns_with_insights) / total_campaigns) * 100),
+                    'percentage': int((len(campaigns_with_insights) / total_campaigns) * 100) if total_campaigns > 0 else 0,
                     'campaigns': campaigns_with_insights,
                     'totals': current_totals
                 }
                 
                 yield f"data: {json.dumps(progress_data)}\n\n"
-                await asyncio.sleep(0.1)  # Prevent overwhelming client
+                await asyncio.sleep(0.1)
             
             # Get final account-level reach
             try:
@@ -1181,10 +1262,11 @@ async def get_campaigns_stream(
                     'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 final_reach = int(account_insights.get('data', [{}])[0].get('reach', 0))
-            except:
+            except Exception as e:
+                logger.warning(f"Could not fetch account reach: {e}")
                 final_reach = 0
             
-            # Send completion message
+            # Send completion
             final_totals = {
                 'total_spend': sum(c['spend'] for c in campaigns_with_insights),
                 'total_impressions': sum(c['impressions'] for c in campaigns_with_insights),
@@ -1202,10 +1284,8 @@ async def get_campaigns_stream(
             yield f"data: {json.dumps(completion_data)}\n\n"
             
         except Exception as e:
-            error_data = {
-                'type': 'error',
-                'message': str(e)
-            }
+            logger.error(f"Streaming error: {e}", exc_info=True)
+            error_data = {'type': 'error', 'message': str(e)}
             yield f"data: {json.dumps(error_data)}\n\n"
     
     return StreamingResponse(
@@ -1213,10 +1293,10 @@ async def get_campaigns_stream(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
         }
     )
-
 
 # 3. Get campaign timeseries
 @app.post("/api/meta/campaigns/timeseries", response_model=List[CampaignTimeseries])
