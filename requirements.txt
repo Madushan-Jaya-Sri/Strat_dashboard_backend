@@ -37,3 +37,4 @@ motor
 pymongo
 
 openai
+aiohttp

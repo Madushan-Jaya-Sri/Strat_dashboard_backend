@@ -1062,6 +1062,7 @@ async def get_meta_overview(
         logger.error(f"Error fetching Meta overview: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# 1. Get ad accounts
 @app.get("/api/meta/ad-accounts", response_model=List[MetaAdAccount])
 @save_response("meta_ad_accounts")
 async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
@@ -1077,48 +1078,6 @@ async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
         logger.error(f"Error fetching Meta ad accounts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# @app.get("/api/meta/ad-accounts/{account_id}/insights", response_model=MetaAdAccountInsights)
-# @save_response("meta_ad_account_insights")
-# async def get_meta_ad_insights(
-#     account_id: str,
-#     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
-#     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-#     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get insights for Meta ad account with custom date range support"""
-#     try:
-#         from social.meta_manager import MetaManager
-#         from models.meta_response_models import MetaAdAccountInsights
-        
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         insights = meta_manager.get_ad_account_insights(account_id, period, start_date, end_date)
-#         return MetaAdAccountInsights(**insights)
-#     except Exception as e:
-#         logger.error(f"Error fetching Meta ad insights: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/meta/ad-accounts/{account_id}/insights/timeseries")
-# @save_response("meta_ad_account_insights_timeseries")
-# async def get_meta_ad_insights_timeseries(
-#     account_id: str,
-#     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
-#     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-#     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """Get time-series insights for Meta ad account (for line charts)"""
-#     try:
-#         from social.meta_manager import MetaManager
-        
-#         meta_manager = MetaManager(current_user["email"], auth_manager)
-#         insights = meta_manager.get_ad_account_insights_timeseries(account_id, period, start_date, end_date)
-#         return insights
-#     except Exception as e:
-#         logger.error(f"Error fetching Meta ad insights timeseries: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-    
-# 1. Get ad accounts (existing - keep as is)
 
 # 2. Get campaigns with totals
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=CampaignsWithTotals)
