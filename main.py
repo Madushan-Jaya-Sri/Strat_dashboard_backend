@@ -1107,7 +1107,6 @@ async def get_campaigns_with_totals(
 from fastapi import Header
 from typing import Optional
 import json
-
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/stream")
 async def get_campaigns_stream(
     account_id: str,
@@ -1132,7 +1131,8 @@ async def get_campaigns_stream(
             from social.meta_manager import MetaManager
             meta_manager = MetaManager(user_email, auth_manager)
             
-            # Convert period format if needed
+            # Convert period format - FIX: Use a different variable name
+            api_period = period  # Keep original period value
             if period and not start_date and not end_date:
                 period_map = {
                     'LAST_7_DAYS': '7d',
@@ -1140,7 +1140,7 @@ async def get_campaigns_stream(
                     'LAST_3_MONTHS': '90d',
                     'LAST_1_YEAR': '365d'
                 }
-                period = period_map.get(period, '30d')
+                api_period = period_map.get(period, '30d')
             
             if start_date and end_date:
                 # Validate date range
@@ -1149,9 +1149,10 @@ async def get_campaigns_stream(
                 end = datetime.strptime(end_date, '%Y-%m-%d')
                 if start > end:
                     raise ValueError("start_date must be before end_date")
+                api_period = None  # Use dates instead of period
             
-            # Get date range
-            since, until = meta_manager._period_to_dates(period, start_date, end_date)
+            # Get date range - use api_period instead of period
+            since, until = meta_manager._period_to_dates(api_period, start_date, end_date)
             
             # Get all campaigns (no status filter)
             all_campaigns = []
@@ -1164,6 +1165,7 @@ async def get_campaigns_stream(
                 # Handle pagination
                 while data.get('paging', {}).get('next'):
                     next_url = data['paging']['next']
+                    import requests
                     response = requests.get(next_url)
                     if response.status_code == 200:
                         data = response.json()
