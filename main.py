@@ -1411,14 +1411,38 @@ async def get_adsets_by_campaigns(
     end_date: Optional[str] = Query(None),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get ad sets for multiple campaigns"""
+    """
+    Get ad sets for multiple campaigns.
+    Note: Date parameters are accepted but not used - returns ALL ad sets for the campaigns.
+    
+    Body example:
+    ["120212345678901234", "120212345678901235"]
+    """
     try:
         from social.meta_manager import MetaManager
+        
+        logger.info(f"Fetching ad sets for {len(campaign_ids)} campaigns")
+        logger.info(f"Campaign IDs: {campaign_ids}")
+        
+        if not campaign_ids:
+            raise HTTPException(status_code=400, detail="No campaign IDs provided")
+        
         meta_manager = MetaManager(current_user["email"], auth_manager)
-        return meta_manager.get_adsets_by_campaigns(campaign_ids, period, start_date, end_date)
+        adsets = meta_manager.get_adsets_by_campaigns(campaign_ids, period, start_date, end_date)
+        
+        logger.info(f"Successfully retrieved {len(adsets)} ad sets")
+        
+        if not adsets:
+            logger.warning(f"No ad sets found for campaigns: {campaign_ids}")
+        
+        return adsets
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Error fetching ad sets: {e}")
+        logger.error(f"Campaign IDs: {campaign_ids}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch ad sets: {str(e)}")
 
 # 7. Get ad set timeseries
 @app.post("/api/meta/adsets/timeseries", response_model=List[AdSetTimeseries])

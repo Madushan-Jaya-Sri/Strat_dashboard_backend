@@ -775,45 +775,86 @@ class MetaManager:
                 logger.error(f"Error fetching placements for campaign {campaign_id}: {e}")
         
         return results
-
-
+    
     def get_adsets_by_campaigns(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """Get ad sets for multiple campaigns"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
+        """
+        Get ad sets for multiple campaigns.
+        Note: Date parameters are accepted but not used - we fetch ALL ad sets regardless of activity period.
+        """
+        logger.info(f"Fetching ad sets for {len(campaign_ids)} campaigns")
         
         all_adsets = []
+        failed_campaigns = []
+        
         for campaign_id in campaign_ids:
             try:
+                logger.info(f"Fetching ad sets for campaign: {campaign_id}")
+                
+                # Fetch ad sets with all necessary fields
                 data = self._make_request(f"{campaign_id}/adsets", {
-                    'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining,targeting,created_time,updated_time'
+                    'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining,targeting,created_time,updated_time,start_time,end_time',
+                    'limit': 500  # Increased limit
                 })
                 
-                for adset in data.get('data', []):
-                    targeting = adset.get('targeting', {})
-                    geo_locations = targeting.get('geo_locations', {})
-                    
-                    all_adsets.append({
-                        'id': adset.get('id'),
-                        'name': adset.get('name'),
-                        'campaign_id': campaign_id,
-                        'status': adset.get('status'),
-                        'optimization_goal': adset.get('optimization_goal'),
-                        'billing_event': adset.get('billing_event'),
-                        'daily_budget': float(adset.get('daily_budget', 0)) / 100 if adset.get('daily_budget') else None,
-                        'lifetime_budget': float(adset.get('lifetime_budget', 0)) / 100 if adset.get('lifetime_budget') else None,
-                        'budget_remaining': float(adset.get('budget_remaining', 0)) / 100 if adset.get('budget_remaining') else None,
-                        'locations': geo_locations.get('countries', []),
-                        'created_time': adset.get('created_time'),
-                        'updated_time': adset.get('updated_time')
-                    })
+                adsets_batch = data.get('data', [])
+                logger.info(f"Campaign {campaign_id}: Found {len(adsets_batch)} ad sets")
+                
+                if not adsets_batch:
+                    logger.warning(f"No ad sets found for campaign {campaign_id}")
+                    continue
+                
+                for adset in adsets_batch:
+                    try:
+                        # Extract targeting information
+                        targeting = adset.get('targeting', {})
+                        geo_locations = targeting.get('geo_locations', {})
+                        
+                        # Build location string
+                        locations = []
+                        if geo_locations.get('countries'):
+                            locations.extend(geo_locations.get('countries', []))
+                        if geo_locations.get('regions'):
+                            locations.extend([r.get('name', r.get('key', '')) for r in geo_locations.get('regions', [])])
+                        if geo_locations.get('cities'):
+                            locations.extend([c.get('name', c.get('key', '')) for c in geo_locations.get('cities', [])])
+                        
+                        # Safely convert budget values
+                        daily_budget = adset.get('daily_budget')
+                        lifetime_budget = adset.get('lifetime_budget')
+                        budget_remaining = adset.get('budget_remaining')
+                        
+                        adset_data = {
+                            'id': adset.get('id'),
+                            'name': adset.get('name'),
+                            'campaign_id': campaign_id,
+                            'status': adset.get('status'),
+                            'optimization_goal': adset.get('optimization_goal', 'N/A'),
+                            'billing_event': adset.get('billing_event', 'N/A'),
+                            'daily_budget': float(daily_budget) / 100 if daily_budget else 0,
+                            'lifetime_budget': float(lifetime_budget) / 100 if lifetime_budget else 0,
+                            'budget_remaining': float(budget_remaining) / 100 if budget_remaining else 0,
+                            'locations': locations if locations else ['N/A'],
+                            'created_time': adset.get('created_time'),
+                            'updated_time': adset.get('updated_time'),
+                            'start_time': adset.get('start_time'),
+                            'end_time': adset.get('end_time')
+                        }
+                        
+                        all_adsets.append(adset_data)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing ad set {adset.get('id', 'unknown')}: {e}")
+                        continue
+                
             except Exception as e:
-                logger.error(f"Error fetching adsets for campaign {campaign_id}: {e}")
+                logger.error(f"Error fetching ad sets for campaign {campaign_id}: {e}")
+                failed_campaigns.append({'campaign_id': campaign_id, 'error': str(e)})
+        
+        logger.info(f"Total ad sets retrieved: {len(all_adsets)}")
+        if failed_campaigns:
+            logger.warning(f"Failed to fetch ad sets for {len(failed_campaigns)} campaigns: {failed_campaigns}")
         
         return all_adsets
-
 
     def get_adsets_timeseries(self, adset_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get time-series data for multiple ad sets"""
