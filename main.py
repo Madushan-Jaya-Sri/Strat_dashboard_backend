@@ -1174,27 +1174,40 @@ async def get_campaigns_with_totals(
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    max_workers: Optional[int] = Query(3, ge=1, le=8, description="Number of concurrent workers (1-8)"),
+    max_workers: Optional[int] = Query(5, ge=1, le=8, description="Number of concurrent workers (1-8, default: 5)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all campaigns with metrics and grand totals (optimized with concurrent requests).
-    Only returns campaigns that have activity in the specified time period.
+    Get all campaigns with metrics and grand totals (with rate limiting).
+    
+    IMPORTANT: Default max_workers reduced to 5 to prevent Facebook API rate limiting.
+    This ensures subsequent requests (ad sets, ads) work immediately after.
     
     Args:
         account_id: Ad account ID
         period: Time period (7d, 30d, 90d, 365d)
         start_date: Start date (YYYY-MM-DD)
         end_date: End date (YYYY-MM-DD)
-        max_workers: Number of concurrent workers for faster fetching (default: 10)
+        max_workers: Number of concurrent workers (default: 5, max: 8)
+    
+    Rate Limiting Info:
+        - Uses 200ms delay between requests
+        - Implements exponential backoff on errors
+        - Automatically retries up to 3 times
+        - Lower max_workers = fewer rate limit issues
     
     Example:
         GET /api/meta/ad-accounts/act_303894480866908/campaigns?period=30d
-        GET /api/meta/ad-accounts/act_303894480866908/campaigns?start_date=2025-01-01&end_date=2025-01-31
-        GET /api/meta/ad-accounts/act_303894480866908/campaigns?period=30d&max_workers=15
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns?period=30d&max_workers=3
     """
     try:
         from social.meta_manager import MetaManager
+        
+        # Cap max_workers to prevent rate limiting
+        safe_max_workers = min(max_workers, 8)
+        
+        logger.info(f"Fetching campaigns with max_workers={safe_max_workers}")
+        
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
         result = meta_manager.get_campaigns_with_totals(
@@ -1202,14 +1215,18 @@ async def get_campaigns_with_totals(
             period, 
             start_date, 
             end_date,
-            max_workers
+            safe_max_workers
         )
+        
+        logger.info(f"Successfully fetched {result['metadata']['total_campaigns']} campaigns")
+        
         return result
+        
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        logger.error(f"Error fetching campaigns: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch campaigns: {str(e)}")
 
 # Compare all campaigns vs campaigns with activity
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/compare")

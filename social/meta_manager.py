@@ -20,12 +20,83 @@ class MetaManager:
     
     GRAPH_API_VERSION = "v21.0"
     BASE_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+
+      
+    # Rate limiting configuration
+    RATE_LIMIT_DELAY = 0.2  # 200ms delay between requests
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2  # Initial retry delay in seconds
     
     def __init__(self, user_email: str, auth_manager):
         self.user_email = user_email
         self.auth_manager = auth_manager
         self.access_token = self._get_access_token()
+        self.last_request_time = 0
     
+    def _rate_limited_request(self, endpoint: str, params: Dict = None, retry_count: int = 0) -> Dict:
+        """
+        Make a rate-limited request to Facebook Graph API with exponential backoff.
+        """
+        if params is None:
+            params = {}
+        
+        # Only add access_token if not already provided
+        if 'access_token' not in params:
+            params['access_token'] = self.access_token
+        
+        # Rate limiting: ensure minimum delay between requests
+        current_time = time.time()
+        time_since_last_request = current_time - self.last_request_time
+        
+        if time_since_last_request < self.RATE_LIMIT_DELAY:
+            sleep_time = self.RATE_LIMIT_DELAY - time_since_last_request
+            logger.debug(f"Rate limiting: sleeping for {sleep_time:.3f}s")
+            time.sleep(sleep_time)
+        
+        url = f"{self.BASE_URL}/{endpoint}"
+        
+        try:
+            response = requests.get(url, params=params)
+            self.last_request_time = time.time()
+            
+            # Check for rate limiting error
+            if response.status_code == 429 or (response.status_code == 400 and 'rate limit' in response.text.lower()):
+                if retry_count < self.MAX_RETRIES:
+                    retry_delay = self.RETRY_DELAY * (2 ** retry_count)  # Exponential backoff
+                    logger.warning(f"Rate limited! Retrying in {retry_delay}s (attempt {retry_count + 1}/{self.MAX_RETRIES})")
+                    time.sleep(retry_delay)
+                    return self._rate_limited_request(endpoint, params, retry_count + 1)
+                else:
+                    raise Exception("Rate limit exceeded and max retries reached")
+            
+            # Check for other errors
+            if response.status_code != 200:
+                error_data = response.json() if response.text else {}
+                error_message = error_data.get('error', {}).get('message', 'Unknown error')
+                
+                # Check if it's a temporary error that should be retried
+                if response.status_code >= 500 and retry_count < self.MAX_RETRIES:
+                    retry_delay = self.RETRY_DELAY * (2 ** retry_count)
+                    logger.warning(f"Server error {response.status_code}. Retrying in {retry_delay}s")
+                    time.sleep(retry_delay)
+                    return self._rate_limited_request(endpoint, params, retry_count + 1)
+                
+                logger.error(f"Meta API error: {response.text}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Meta API error: {error_message}"
+                )
+            
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            if retry_count < self.MAX_RETRIES:
+                retry_delay = self.RETRY_DELAY * (2 ** retry_count)
+                logger.warning(f"Request failed: {e}. Retrying in {retry_delay}s")
+                time.sleep(retry_delay)
+                return self._rate_limited_request(endpoint, params, retry_count + 1)
+            raise
+
     def _get_access_token(self) -> str:
         """Get Facebook access token for user"""
         try:
@@ -46,25 +117,29 @@ class MetaManager:
             )
     
     def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
-        """Make request to Facebook Graph API"""
-        if params is None:
-            params = {}
+        """Legacy method - redirects to rate-limited request"""
+        return self._rate_limited_request(endpoint, params)
+    
+    # def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
+    #     """Make request to Facebook Graph API"""
+    #     if params is None:
+    #         params = {}
         
-        # Only add access_token if not already provided
-        if 'access_token' not in params:
-            params['access_token'] = self.access_token
+    #     # Only add access_token if not already provided
+    #     if 'access_token' not in params:
+    #         params['access_token'] = self.access_token
         
-        url = f"{self.BASE_URL}/{endpoint}"
-        response = requests.get(url, params=params)
+    #     url = f"{self.BASE_URL}/{endpoint}"
+    #     response = requests.get(url, params=params)
         
-        if response.status_code != 200:
-            logger.error(f"Meta API error: {response.text}")
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Meta API error: {response.json().get('error', {}).get('message', 'Unknown error')}"
-            )
+    #     if response.status_code != 200:
+    #         logger.error(f"Meta API error: {response.text}")
+    #         raise HTTPException(
+    #             status_code=response.status_code,
+    #             detail=f"Meta API error: {response.json().get('error', {}).get('message', 'Unknown error')}"
+    #         )
         
-        return response.json()
+    #     return response.json()
     
     def _period_to_dates(self, period: str = None, start_date: str = None, end_date: str = None) -> tuple:
         """
@@ -361,18 +436,17 @@ class MetaManager:
 
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
                                 start_date: str = None, end_date: str = None,
-                                max_workers: int = 10) -> Dict:
+                                max_workers: int = 5) -> Dict:  # Reduced default from 10 to 5
         """
         Get ALL campaigns with individual metrics and grand totals for an ad account.
-        Returns ALL campaigns, even those without activity (with zero metrics).
-        Optimized with concurrent requests.
+        Uses reduced concurrency to avoid rate limiting issues.
         
         Args:
             account_id: The ad account ID
             period: Time period (e.g., 'last_30_days')
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
-            max_workers: Number of concurrent workers (default: 10)
+            max_workers: Number of concurrent workers (default: 5, max recommended: 8)
         """
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
@@ -380,6 +454,10 @@ class MetaManager:
         since, until = self._period_to_dates(period, start_date, end_date)
         
         logger.info(f"Fetching campaigns for {account_id} from {since} to {until}")
+        logger.info(f"Using {max_workers} concurrent workers")
+        
+        # Cap max_workers to avoid rate limiting
+        max_workers = min(max_workers, 8)
         
         try:
             # Step 1: Get all campaigns first (fast, no insights)
@@ -395,13 +473,15 @@ class MetaManager:
             while True:
                 page_count += 1
                 if next_url:
+                    # Add rate limiting for pagination
+                    time.sleep(self.RATE_LIMIT_DELAY)
                     response = requests.get(next_url)
                     if response.status_code != 200:
                         logger.warning(f"Pagination failed at page {page_count}")
                         break
                     data = response.json()
                 else:
-                    data = self._make_request(f"{account_id}/campaigns", params)
+                    data = self._rate_limited_request(f"{account_id}/campaigns", params)
                 
                 campaign_batch = data.get('data', [])
                 all_campaigns.extend(campaign_batch)
@@ -428,13 +508,12 @@ class MetaManager:
                     }
                 }
             
-            # Step 2: Fetch insights concurrently
+            # Step 2: Fetch insights concurrently with rate limiting
             campaigns_data = []
             campaigns_with_activity = 0
             
             def fetch_campaign_insights(campaign: Dict) -> Dict:
-                time.sleep(0.2)
-                """Fetch insights for a single campaign, return campaign with zero metrics if no data"""
+                """Fetch insights for a single campaign with rate limiting"""
                 campaign_result = {
                     'campaign_id': campaign.get('id'),
                     'campaign_name': campaign.get('name'),
@@ -455,7 +534,8 @@ class MetaManager:
                 }
                 
                 try:
-                    insights = self._make_request(f"{campaign['id']}/insights", {
+                    # Use rate-limited request
+                    insights = self._rate_limited_request(f"{campaign['id']}/insights", {
                         'time_range': json.dumps({"since": since, "until": until}),
                         'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                         'action_attribution_windows': ['7d_click', '1d_view']
@@ -463,18 +543,15 @@ class MetaManager:
                     
                     insights_data = insights.get('data', [])
                     
-                    # If we have insights data, populate the metrics
                     if insights_data:
                         insights_data = insights_data[0]
                         
-                        # Calculate conversions
                         conversions = sum(
                             int(action.get('value', 0))
                             for action in insights_data.get('actions', [])
                             if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
                         )
                         
-                        # Update with actual data
                         campaign_result.update({
                             'spend': float(insights_data.get('spend', 0)),
                             'impressions': int(insights_data.get('impressions', 0)),
@@ -488,30 +565,26 @@ class MetaManager:
                             'has_data': True
                         })
                         
-                        logger.debug(f"Campaign {campaign['id']} has data: spend=${campaign_result['spend']}")
-                    else:
-                        logger.debug(f"Campaign {campaign['id']} has no data in period")
+                        logger.debug(f"Campaign {campaign['id']} has data")
                         
                 except Exception as e:
                     logger.warning(f"Error fetching insights for campaign {campaign.get('id')}: {e}")
                 
                 return campaign_result
             
-            # Use ThreadPoolExecutor for concurrent requests
+            # Use ThreadPoolExecutor with reduced concurrency
             logger.info(f"Fetching insights for {len(all_campaigns)} campaigns with {max_workers} workers...")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all tasks
                 future_to_campaign = {
                     executor.submit(fetch_campaign_insights, campaign): campaign 
                     for campaign in all_campaigns
                 }
                 
-                # Collect results as they complete
                 completed = 0
                 for future in as_completed(future_to_campaign):
                     completed += 1
-                    if completed % 20 == 0:
+                    if completed % 10 == 0:
                         logger.info(f"Progress: {completed}/{len(all_campaigns)} campaigns processed")
                     
                     result = future.result()
@@ -520,9 +593,9 @@ class MetaManager:
                     if result['has_data']:
                         campaigns_with_activity += 1
             
-            logger.info(f"All {len(campaigns_data)} campaigns processed. {campaigns_with_activity} have data in period.")
+            logger.info(f"All {len(campaigns_data)} campaigns processed. {campaigns_with_activity} have data.")
             
-            # Step 3: Calculate grand totals (only from campaigns with data)
+            # Step 3: Calculate totals
             campaigns_with_metrics = [c for c in campaigns_data if c['has_data']]
             
             totals = {
@@ -530,12 +603,12 @@ class MetaManager:
                 'total_impressions': sum(c['impressions'] for c in campaigns_with_metrics),
                 'total_clicks': sum(c['clicks'] for c in campaigns_with_metrics),
                 'total_conversions': sum(c['conversions'] for c in campaigns_with_metrics),
-                'total_reach': 0  # Will fetch separately
+                'total_reach': 0
             }
             
-            # Step 4: Get accurate total reach from account level
+            # Step 4: Get accurate total reach
             try:
-                account_insights = self._make_request(f"{account_id}/insights", {
+                account_insights = self._rate_limited_request(f"{account_id}/insights", {
                     'time_range': json.dumps({"since": since, "until": until}),
                     'fields': 'reach',
                     'action_attribution_windows': ['7d_click', '1d_view']
@@ -545,7 +618,7 @@ class MetaManager:
                 logger.warning(f"Could not fetch account-level reach: {e}")
             
             return {
-                'campaigns': campaigns_data,  # ALL campaigns, including those with zero metrics
+                'campaigns': campaigns_data,
                 'totals': totals,
                 'metadata': {
                     'total_campaigns': len(all_campaigns),
@@ -558,7 +631,7 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching campaigns: {e}")
             raise
-
+        
     def _get_empty_totals(self) -> Dict:
         """Return empty totals structure"""
         return {
@@ -779,84 +852,96 @@ class MetaManager:
         return results
     
     def get_adsets_by_campaigns(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
-        """
-        Get ad sets for multiple campaigns.
-        Note: Date parameters are accepted but not used - we fetch ALL ad sets regardless of activity period.
-        """
-        logger.info(f"Fetching ad sets for {len(campaign_ids)} campaigns")
-        
-        all_adsets = []
-        failed_campaigns = []
-        
-        for campaign_id in campaign_ids:
-            try:
-                logger.info(f"Fetching ad sets for campaign: {campaign_id}")
-                
-                # Fetch ad sets with all necessary fields
-                data = self._make_request(f"{campaign_id}/adsets", {
-                    'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining,targeting,created_time,updated_time,start_time,end_time',
-                    'limit': 500  # Increased limit
-                })
-                
-                adsets_batch = data.get('data', [])
-                logger.info(f"Campaign {campaign_id}: Found {len(adsets_batch)} ad sets")
-                
-                if not adsets_batch:
-                    logger.warning(f"No ad sets found for campaign {campaign_id}")
+            """
+            Get ad sets for multiple campaigns with proper rate limiting.
+            """
+            logger.info(f"Fetching ad sets for {len(campaign_ids)} campaigns")
+            
+            all_adsets = []
+            
+            for campaign_id in campaign_ids:
+                try:
+                    logger.info(f"Fetching ad sets for campaign: {campaign_id}")
+                    
+                    # Use rate-limited request
+                    data = self._rate_limited_request(f"{campaign_id}/adsets", {
+                        'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining,targeting,created_time,updated_time',
+                        'limit': 100
+                    })
+                    
+                    adsets_batch = data.get('data', [])
+                    logger.info(f"Campaign {campaign_id}: Found {len(adsets_batch)} ad sets")
+                    
+                    # Handle pagination with rate limiting
+                    next_url = data.get('paging', {}).get('next')
+                    page_count = 1
+                    
+                    while next_url:
+                        logger.info(f"Fetching page {page_count + 1} for campaign {campaign_id}")
+                        
+                        # Rate limit for pagination
+                        time.sleep(self.RATE_LIMIT_DELAY)
+                        
+                        response = requests.get(next_url)
+                        if response.status_code != 200:
+                            logger.warning(f"Pagination failed at page {page_count + 1}")
+                            break
+                        
+                        page_data = response.json()
+                        page_batch = page_data.get('data', [])
+                        adsets_batch.extend(page_batch)
+                        
+                        next_url = page_data.get('paging', {}).get('next')
+                        page_count += 1
+                    
+                    # Process ad sets
+                    for adset in adsets_batch:
+                        try:
+                            targeting = adset.get('targeting', {})
+                            geo_locations = targeting.get('geo_locations', {})
+                            
+                            locations = []
+                            if geo_locations.get('countries'):
+                                locations.extend(geo_locations.get('countries', []))
+                            if geo_locations.get('regions'):
+                                locations.extend([r.get('name', r.get('key', '')) for r in geo_locations.get('regions', [])])
+                            if geo_locations.get('cities'):
+                                locations.extend([c.get('name', c.get('key', '')) for c in geo_locations.get('cities', [])])
+                            
+                            if not locations:
+                                locations = ['Not specified']
+                            
+                            daily_budget = adset.get('daily_budget')
+                            lifetime_budget = adset.get('lifetime_budget')
+                            budget_remaining = adset.get('budget_remaining')
+                            
+                            adset_data = {
+                                'id': adset.get('id'),
+                                'name': adset.get('name'),
+                                'campaign_id': campaign_id,
+                                'status': adset.get('status'),
+                                'optimization_goal': adset.get('optimization_goal', 'N/A'),
+                                'billing_event': adset.get('billing_event', 'N/A'),
+                                'daily_budget': float(daily_budget) / 100 if daily_budget else 0,
+                                'lifetime_budget': float(lifetime_budget) / 100 if lifetime_budget else 0,
+                                'budget_remaining': float(budget_remaining) / 100 if budget_remaining else 0,
+                                'locations': locations,
+                                'created_time': adset.get('created_time'),
+                                'updated_time': adset.get('updated_time')
+                            }
+                            
+                            all_adsets.append(adset_data)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing ad set {adset.get('id')}: {e}")
+                            continue
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching ad sets for campaign {campaign_id}: {e}")
                     continue
-                
-                for adset in adsets_batch:
-                    try:
-                        # Extract targeting information
-                        targeting = adset.get('targeting', {})
-                        geo_locations = targeting.get('geo_locations', {})
-                        
-                        # Build location string
-                        locations = []
-                        if geo_locations.get('countries'):
-                            locations.extend(geo_locations.get('countries', []))
-                        if geo_locations.get('regions'):
-                            locations.extend([r.get('name', r.get('key', '')) for r in geo_locations.get('regions', [])])
-                        if geo_locations.get('cities'):
-                            locations.extend([c.get('name', c.get('key', '')) for c in geo_locations.get('cities', [])])
-                        
-                        # Safely convert budget values
-                        daily_budget = adset.get('daily_budget')
-                        lifetime_budget = adset.get('lifetime_budget')
-                        budget_remaining = adset.get('budget_remaining')
-                        
-                        adset_data = {
-                            'id': adset.get('id'),
-                            'name': adset.get('name'),
-                            'campaign_id': campaign_id,
-                            'status': adset.get('status'),
-                            'optimization_goal': adset.get('optimization_goal', 'N/A'),
-                            'billing_event': adset.get('billing_event', 'N/A'),
-                            'daily_budget': float(daily_budget) / 100 if daily_budget else 0,
-                            'lifetime_budget': float(lifetime_budget) / 100 if lifetime_budget else 0,
-                            'budget_remaining': float(budget_remaining) / 100 if budget_remaining else 0,
-                            'locations': locations if locations else ['N/A'],
-                            'created_time': adset.get('created_time'),
-                            'updated_time': adset.get('updated_time'),
-                            'start_time': adset.get('start_time'),
-                            'end_time': adset.get('end_time')
-                        }
-                        
-                        all_adsets.append(adset_data)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing ad set {adset.get('id', 'unknown')}: {e}")
-                        continue
-                
-            except Exception as e:
-                logger.error(f"Error fetching ad sets for campaign {campaign_id}: {e}")
-                failed_campaigns.append({'campaign_id': campaign_id, 'error': str(e)})
-        
-        logger.info(f"Total ad sets retrieved: {len(all_adsets)}")
-        if failed_campaigns:
-            logger.warning(f"Failed to fetch ad sets for {len(failed_campaigns)} campaigns: {failed_campaigns}")
-        
-        return all_adsets
+            
+            logger.info(f"Total ad sets retrieved: {len(all_adsets)}")
+            return all_adsets
 
     def get_adsets_timeseries(self, adset_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get time-series data for multiple ad sets"""
