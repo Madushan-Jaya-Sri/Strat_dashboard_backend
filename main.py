@@ -1461,6 +1461,270 @@ async def get_adsets_by_campaigns(
         logger.error(f"Campaign IDs: {campaign_ids}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch ad sets: {str(e)}")
 
+
+# Add this endpoint to your FastAPI app for debugging
+
+@app.post("/api/meta/campaigns/adsets/debug")
+async def debug_adsets_fetch(
+    campaign_ids: List[str],
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Debug endpoint to diagnose ad sets fetching issues.
+    Returns detailed diagnostic information about each step.
+    """
+    import requests
+    import json
+    from datetime import datetime
+    
+    diagnostic_result = {
+        'timestamp': datetime.now().isoformat(),
+        'campaign_ids': campaign_ids,
+        'steps': []
+    }
+    
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Step 1: Check access token
+        step1 = {
+            'step': 'Access Token Check',
+            'success': False,
+            'details': {}
+        }
+        try:
+            token = meta_manager.access_token
+            step1['details']['token_prefix'] = token[:15] + '...' if token else 'None'
+            step1['details']['token_length'] = len(token) if token else 0
+            step1['success'] = bool(token)
+        except Exception as e:
+            step1['details']['error'] = str(e)
+        diagnostic_result['steps'].append(step1)
+        
+        # Step 2: Test direct Facebook API call for each campaign
+        for campaign_id in campaign_ids:
+            step2 = {
+                'step': f'Direct Facebook API Test for Campaign {campaign_id}',
+                'campaign_id': campaign_id,
+                'success': False,
+                'details': {}
+            }
+            
+            try:
+                # Try direct API call
+                url = f"https://graph.facebook.com/v21.0/{campaign_id}/adsets"
+                params = {
+                    'access_token': meta_manager.access_token,
+                    'fields': 'id,name,status',
+                    'limit': 10
+                }
+                
+                step2['details']['url'] = url
+                step2['details']['fields'] = params['fields']
+                
+                response = requests.get(url, params=params, timeout=30)
+                step2['details']['status_code'] = response.status_code
+                step2['details']['response_time'] = response.elapsed.total_seconds()
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    step2['details']['adsets_count'] = len(data.get('data', []))
+                    step2['details']['has_paging'] = 'paging' in data
+                    step2['details']['sample_data'] = data.get('data', [])[:2]  # First 2 ad sets
+                    step2['success'] = True
+                else:
+                    step2['details']['error_response'] = response.text
+                    
+            except Exception as e:
+                step2['details']['exception'] = str(e)
+            
+            diagnostic_result['steps'].append(step2)
+        
+        # Step 3: Test with MetaManager method
+        step3 = {
+            'step': 'MetaManager Method Test',
+            'success': False,
+            'details': {}
+        }
+        
+        try:
+            logger.info(f"Testing MetaManager.get_adsets_by_campaigns with: {campaign_ids}")
+            adsets = meta_manager.get_adsets_by_campaigns(campaign_ids)
+            
+            step3['details']['adsets_count'] = len(adsets)
+            step3['details']['sample_adsets'] = adsets[:2] if adsets else []
+            step3['success'] = len(adsets) > 0
+            
+        except Exception as e:
+            step3['details']['exception'] = str(e)
+            step3['details']['exception_type'] = type(e).__name__
+            import traceback
+            step3['details']['traceback'] = traceback.format_exc()
+        
+        diagnostic_result['steps'].append(step3)
+        
+        # Step 4: Check campaign validity
+        step4 = {
+            'step': 'Campaign Validation',
+            'success': False,
+            'details': {}
+        }
+        
+        for campaign_id in campaign_ids:
+            try:
+                # Get campaign info
+                url = f"https://graph.facebook.com/v21.0/{campaign_id}"
+                params = {
+                    'access_token': meta_manager.access_token,
+                    'fields': 'id,name,status,account_id'
+                }
+                
+                response = requests.get(url, params=params, timeout=30)
+                
+                if response.status_code == 200:
+                    campaign_data = response.json()
+                    step4['details'][campaign_id] = {
+                        'name': campaign_data.get('name'),
+                        'status': campaign_data.get('status'),
+                        'account_id': campaign_data.get('account_id'),
+                        'valid': True
+                    }
+                    step4['success'] = True
+                else:
+                    step4['details'][campaign_id] = {
+                        'valid': False,
+                        'error': response.text
+                    }
+                    
+            except Exception as e:
+                step4['details'][campaign_id] = {
+                    'valid': False,
+                    'exception': str(e)
+                }
+        
+        diagnostic_result['steps'].append(step4)
+        
+        # Summary
+        diagnostic_result['summary'] = {
+            'total_steps': len(diagnostic_result['steps']),
+            'successful_steps': sum(1 for s in diagnostic_result['steps'] if s.get('success')),
+            'has_access_token': diagnostic_result['steps'][0]['success'],
+            'can_reach_facebook_api': any(s.get('details', {}).get('status_code') == 200 for s in diagnostic_result['steps']),
+            'meta_manager_works': diagnostic_result['steps'][-2]['success'] if len(diagnostic_result['steps']) >= 2 else False
+        }
+        
+        return diagnostic_result
+        
+    except Exception as e:
+        diagnostic_result['fatal_error'] = str(e)
+        import traceback
+        diagnostic_result['traceback'] = traceback.format_exc()
+        return diagnostic_result
+    
+
+# Add this SIMPLIFIED endpoint that bypasses MetaManager completely
+
+@app.post("/api/meta/campaigns/adsets/simple")
+async def get_adsets_simple(
+    campaign_ids: List[str],
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Simplified ad sets endpoint that makes direct API calls.
+    This bypasses MetaManager to isolate the issue.
+    """
+    import requests
+    import time
+    
+    logger.info(f"=== SIMPLE ADSETS FETCH ===")
+    logger.info(f"User: {current_user['email']}")
+    logger.info(f"Campaign IDs: {campaign_ids}")
+    
+    try:
+        # Get Facebook token directly from auth_manager
+        facebook_token = auth_manager.get_facebook_access_token(current_user["email"])
+        
+        if not facebook_token:
+            raise HTTPException(status_code=401, detail="No Facebook token found")
+        
+        logger.info(f"Token found: {facebook_token[:15]}...")
+        
+        all_adsets = []
+        
+        for campaign_id in campaign_ids:
+            logger.info(f"\n--- Processing Campaign: {campaign_id} ---")
+            
+            try:
+                # Direct Facebook API call
+                url = f"https://graph.facebook.com/v21.0/{campaign_id}/adsets"
+                params = {
+                    'access_token': facebook_token,
+                    'fields': 'id,name,status,optimization_goal,billing_event,daily_budget,lifetime_budget,budget_remaining',
+                    'limit': 100
+                }
+                
+                logger.info(f"Making request to: {url}")
+                
+                # Add small delay to avoid rate limiting
+                time.sleep(0.3)
+                
+                response = requests.get(url, params=params, timeout=30)
+                
+                logger.info(f"Response Status: {response.status_code}")
+                logger.info(f"Response Headers: {dict(response.headers)}")
+                
+                if response.status_code != 200:
+                    logger.error(f"Error Response: {response.text}")
+                    continue
+                
+                data = response.json()
+                logger.info(f"Response keys: {list(data.keys())}")
+                
+                adsets = data.get('data', [])
+                logger.info(f"Found {len(adsets)} ad sets")
+                
+                # Process ad sets
+                for adset in adsets:
+                    processed = {
+                        'id': adset.get('id'),
+                        'name': adset.get('name'),
+                        'campaign_id': campaign_id,
+                        'status': adset.get('status'),
+                        'optimization_goal': adset.get('optimization_goal', 'N/A'),
+                        'billing_event': adset.get('billing_event', 'N/A'),
+                        'daily_budget': float(adset.get('daily_budget', 0)) / 100 if adset.get('daily_budget') else 0,
+                        'lifetime_budget': float(adset.get('lifetime_budget', 0)) / 100 if adset.get('lifetime_budget') else 0,
+                        'budget_remaining': float(adset.get('budget_remaining', 0)) / 100 if adset.get('budget_remaining') else 0,
+                        'locations': ['N/A'],  # Simplified
+                        'created_time': adset.get('created_time', ''),
+                        'updated_time': adset.get('updated_time', '')
+                    }
+                    
+                    all_adsets.append(processed)
+                    logger.info(f"  ✓ Processed: {processed['name']}")
+                
+            except Exception as e:
+                logger.error(f"Error for campaign {campaign_id}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
+                continue
+        
+        logger.info(f"\n=== TOTAL AD SETS: {len(all_adsets)} ===")
+        
+        return {
+            'success': True,
+            'count': len(all_adsets),
+            'adsets': all_adsets
+        }
+        
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
 # 7. Get ad set timeseries
 @app.post("/api/meta/adsets/timeseries", response_model=List[AdSetTimeseries])
 async def get_adsets_timeseries(
