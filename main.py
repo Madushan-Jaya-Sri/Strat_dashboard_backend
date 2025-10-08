@@ -1174,7 +1174,7 @@ async def get_campaigns_with_totals(
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    max_workers: Optional[int] = Query(10, ge=1, le=20, description="Number of concurrent workers (1-20)"),
+    max_workers: Optional[int] = Query(3, ge=1, le=8, description="Number of concurrent workers (1-8)"),
     current_user: dict = Depends(get_current_user)
 ):
     """

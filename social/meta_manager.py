@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 import json
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -432,6 +433,7 @@ class MetaManager:
             campaigns_with_activity = 0
             
             def fetch_campaign_insights(campaign: Dict) -> Dict:
+                time.sleep(0.2)
                 """Fetch insights for a single campaign, return campaign with zero metrics if no data"""
                 campaign_result = {
                     'campaign_id': campaign.get('id'),
