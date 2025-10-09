@@ -276,7 +276,17 @@ class MetaManager:
             })
             
             if not data.get('data'):
-                return self._get_empty_totals()
+                return {
+                    'total_spend': 0,
+                    'total_impressions': 0,
+                    'total_clicks': 0,
+                    'total_conversions': 0,
+                    'total_reach': 0,
+                    'avg_cpc': 0,
+                    'avg_cpm': 0,
+                    'avg_ctr': 0,
+                    'avg_frequency': 0
+                }
             
             insights = data['data'][0]
             
@@ -303,7 +313,7 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching account insights summary: {e}")
             raise
-
+        
     def get_ad_account_insights(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get insights for specific ad account"""
         try:

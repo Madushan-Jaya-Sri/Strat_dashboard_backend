@@ -31,6 +31,7 @@ from database.mongo_manager import MongoManager
 
 
 from models.meta_response_models import (
+    MetaAdAccount,
     AccountInsightsSummary,
     PaginatedCampaignsResponse
 )
