@@ -369,6 +369,34 @@ class BatchCampaignsRequest(BaseModel):
     account_ids: List[str]
     period: Optional[str] = "30d"
     max_workers: Optional[int] = 10
+
+class AccountInsightsSummary(BaseModel):
+    """Account-level insights summary for metric cards"""
+    total_spend: float
+    total_impressions: int
+    total_clicks: int
+    total_conversions: int
+    total_reach: int
+    avg_cpc: float
+    avg_cpm: float
+    avg_ctr: float
+    avg_frequency: float
+
+
+class PaginationInfo(BaseModel):
+    """Pagination information"""
+    total: int
+    offset: int
+    limit: int
+    has_more: bool
+    current_page: int
+    total_pages: int
+
+
+class PaginatedCampaignsResponse(BaseModel):
+    """Paginated campaigns response"""
+    campaigns: List[Dict[str, Any]]
+    pagination: PaginationInfo
 # =============================================================================
 # FACEBOOK PAGES
 # =============================================================================
