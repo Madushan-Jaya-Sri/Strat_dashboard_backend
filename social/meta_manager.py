@@ -1528,8 +1528,8 @@ class MetaManager:
             logger.error(f"Error fetching pages: {e}")
             return []
     
-    def get_page_insights(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get insights for specific Facebook page using Page Access Token"""
+    def get_page_insights_timeseries(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get time-series insights for specific Facebook page with improved error handling"""
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
         
@@ -1539,150 +1539,93 @@ class MetaManager:
             # Get page access token
             page_access_token = self._get_page_access_token(page_id)
             
-            # Get basic page info with detailed fields
-            page_info = self._make_request(page_id, {
-                'access_token': page_access_token,
-                'fields': 'followers_count,fan_count,new_like_count,talking_about_count,were_here_count,checkins'
-            })
-            
-            # Try to get insights using page token
-            insights_data = {}
-            
-            metrics_to_try = [
-                'page_impressions',
-                'page_impressions_unique', 
-                'page_post_engagements',
-                'page_total_actions',
-                'page_views_total'
-            ]
-            
-            for metric in metrics_to_try:
-                try:
-                    data = self._make_request(f"{page_id}/insights/{metric}", {
-                        'access_token': page_access_token,
-                        'since': since,
-                        'until': until,
-                        'period': 'day'
-                    })
-                    
-                    if data.get('data'):
-                        values = data['data'][0].get('values', [])
-                        total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
-                        insights_data[metric] = total
-                except Exception as metric_error:
-                    logger.debug(f"Metric {metric} not available: {metric_error}")
-                    insights_data[metric] = 0
-            
-            return {
-                'impressions': insights_data.get('page_impressions', 0),
-                'unique_impressions': insights_data.get('page_impressions_unique', 0),
-                'engaged_users': insights_data.get('page_total_actions', 0),
-                'post_engagements': insights_data.get('page_post_engagements', 0),
-                'fans': page_info.get('fan_count', 0),
-                'followers': page_info.get('followers_count', 0),
-                'page_views': insights_data.get('page_views_total', 0),
-                'new_likes': page_info.get('new_like_count', 0),
-                'talking_about_count': page_info.get('talking_about_count', 0),
-                'checkins': page_info.get('checkins', 0)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching page insights: {e}")
-            # Fallback: return basic info only
+            # Get basic page info first
             try:
                 page_info = self._make_request(page_id, {
-                    'fields': 'followers_count,fan_count'
+                    'access_token': page_access_token,
+                    'fields': 'followers_count,fan_count,talking_about_count,checkins'
                 })
-                return {
-                    'impressions': 0,
-                    'unique_impressions': 0,
-                    'engaged_users': 0,
-                    'post_engagements': 0,
-                    'fans': page_info.get('fan_count', 0),
-                    'followers': page_info.get('followers_count', 0),
-                    'page_views': 0,
-                    'new_likes': 0,
+            except Exception as e:
+                logger.error(f"Error fetching basic page info: {e}")
+                page_info = {
+                    'followers_count': 0,
+                    'fan_count': 0,
                     'talking_about_count': 0,
                     'checkins': 0
                 }
-            except:
-                return {
-                    'impressions': 0,
-                    'unique_impressions': 0,
-                    'engaged_users': 0,
-                    'post_engagements': 0,
-                    'fans': 0,
-                    'followers': 0,
-                    'page_views': 0,
-                    'new_likes': 0,
-                    'talking_about_count': 0,
-                    'checkins': 0
-                }
-        
-    def get_page_insights_timeseries(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get time-series insights for specific Facebook page"""
-        if start_date and end_date:
-            self._validate_date_range(start_date, end_date)
-        
-        since, until = self._period_to_dates(period, start_date, end_date)
-        
-        try:
-            # Get page access token
-            page_access_token = self._get_page_access_token(page_id)
             
-            # Get basic page info (these are current values, not time-series)
-            page_info = self._make_request(page_id, {
-                'access_token': page_access_token,
-                'fields': 'followers_count,fan_count,talking_about_count,checkins'
-            })
-            
-            # Define metrics to fetch with their time-series data
-            metrics_config = {
+            # Define metrics to fetch - SPLIT INTO SMALLER GROUPS
+            basic_metrics = {
                 'page_impressions': 'impressions',
                 'page_impressions_unique': 'unique_impressions',
+            }
+            
+            engagement_metrics = {
                 'page_post_engagements': 'post_engagements',
-                'page_total_actions': 'engaged_users',
+                'page_consumptions': 'engaged_users',
+            }
+            
+            view_metrics = {
                 'page_views_total': 'page_views',
+            }
+            
+            fan_metrics = {
                 'page_fan_adds': 'new_likes',
-                'page_fans': 'fans'  # Total fans over time
             }
             
             # Collect all daily data
             daily_data = {}
             
-            for metric_key, metric_name in metrics_config.items():
-                try:
-                    data = self._make_request(f"{page_id}/insights/{metric_key}", {
-                        'access_token': page_access_token,
-                        'since': since,
-                        'until': until,
-                        'period': 'day'
-                    })
-                    
-                    if data.get('data') and len(data['data']) > 0:
-                        values = data['data'][0].get('values', [])
+            # Fetch each metric group separately with error handling
+            all_metric_groups = [
+                ('basic', basic_metrics),
+                ('engagement', engagement_metrics),
+                ('view', view_metrics),
+                ('fan', fan_metrics)
+            ]
+            
+            for group_name, metrics_config in all_metric_groups:
+                for metric_key, metric_name in metrics_config.items():
+                    try:
+                        logger.info(f"Fetching metric: {metric_key}")
                         
-                        for value_entry in values:
-                            date = value_entry.get('end_time', '').split('T')[0]
-                            value = value_entry.get('value', 0)
+                        data = self._make_request(f"{page_id}/insights/{metric_key}", {
+                            'access_token': page_access_token,
+                            'since': since,
+                            'until': until,
+                            'period': 'day'
+                        })
+                        
+                        if data.get('data') and len(data['data']) > 0:
+                            values = data['data'][0].get('values', [])
                             
-                            if date:
-                                if date not in daily_data:
-                                    daily_data[date] = {
-                                        'date': date,
-                                        'impressions': 0,
-                                        'unique_impressions': 0,
-                                        'post_engagements': 0,
-                                        'engaged_users': 0,
-                                        'page_views': 0,
-                                        'new_likes': 0,
-                                        'fans': 0
-                                    }
+                            for value_entry in values:
+                                date = value_entry.get('end_time', '').split('T')[0]
+                                value = value_entry.get('value')
                                 
-                                daily_data[date][metric_name] = value if value is not None else 0
-                                
-                except Exception as metric_error:
-                    logger.debug(f"Metric {metric_key} not available: {metric_error}")
+                                if date:
+                                    if date not in daily_data:
+                                        daily_data[date] = {
+                                            'date': date,
+                                            'impressions': 0,
+                                            'unique_impressions': 0,
+                                            'post_engagements': 0,
+                                            'engaged_users': 0,
+                                            'page_views': 0,
+                                            'new_likes': 0,
+                                            'fans': 0
+                                        }
+                                    
+                                    # Handle different value types
+                                    if value is not None:
+                                        if isinstance(value, dict):
+                                            # For metrics that return objects, sum the values
+                                            value = sum(v for v in value.values() if isinstance(v, (int, float)))
+                                        daily_data[date][metric_name] = value if isinstance(value, (int, float)) else 0
+                                        
+                    except Exception as metric_error:
+                        logger.warning(f"Metric {metric_key} not available: {metric_error}")
+                        continue
             
             # Convert to sorted list
             timeseries = sorted(daily_data.values(), key=lambda x: x['date'])
@@ -1695,8 +1638,10 @@ class MetaManager:
             total_page_views = sum(day['page_views'] for day in timeseries)
             total_new_likes = sum(day['new_likes'] for day in timeseries)
             
-            # Get the latest fan count (or use current from page_info)
-            latest_fans = timeseries[-1]['fans'] if timeseries and timeseries[-1]['fans'] > 0 else page_info.get('fan_count', 0)
+            # Get the latest fan count
+            latest_fans = page_info.get('fan_count', 0)
+            if timeseries and any(day['fans'] > 0 for day in timeseries):
+                latest_fans = max((day['fans'] for day in timeseries), default=latest_fans)
             
             summary = {
                 'impressions': total_impressions,
@@ -1717,7 +1662,7 @@ class MetaManager:
             }
             
         except Exception as e:
-            logger.error(f"Error fetching page insights timeseries: {e}")
+            logger.error(f"Error fetching page insights timeseries: {e}", exc_info=True)
             # Fallback: return empty timeseries with basic info
             try:
                 page_info = self._make_request(page_id, {
@@ -1755,8 +1700,120 @@ class MetaManager:
                     }
                 }
 
+    def get_page_insights(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get insights for specific Facebook page using Page Access Token with improved error handling"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            # Get page access token
+            page_access_token = self._get_page_access_token(page_id)
+            
+            # Get basic page info with detailed fields
+            try:
+                page_info = self._make_request(page_id, {
+                    'access_token': page_access_token,
+                    'fields': 'followers_count,fan_count,new_like_count,talking_about_count,were_here_count,checkins'
+                })
+            except Exception as e:
+                logger.warning(f"Error fetching detailed page info: {e}")
+                # Try simpler fields
+                try:
+                    page_info = self._make_request(page_id, {
+                        'access_token': page_access_token,
+                        'fields': 'followers_count,fan_count'
+                    })
+                except:
+                    page_info = {'fan_count': 0, 'followers_count': 0}
+            
+            # Try to get insights using page token
+            insights_data = {}
+            
+            # Try metrics individually to identify which ones fail
+            metrics_to_try = [
+                'page_impressions',
+                'page_impressions_unique', 
+                'page_post_engagements',
+                'page_consumptions',
+                'page_views_total'
+            ]
+            
+            for metric in metrics_to_try:
+                try:
+                    logger.info(f"Fetching metric: {metric}")
+                    data = self._make_request(f"{page_id}/insights/{metric}", {
+                        'access_token': page_access_token,
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    })
+                    
+                    if data.get('data'):
+                        values = data['data'][0].get('values', [])
+                        total = 0
+                        for v in values:
+                            val = v.get('value', 0)
+                            if val is not None:
+                                if isinstance(val, dict):
+                                    # Sum dict values for metrics that return objects
+                                    total += sum(x for x in val.values() if isinstance(x, (int, float)))
+                                else:
+                                    total += val
+                        insights_data[metric] = total
+                except Exception as metric_error:
+                    logger.warning(f"Metric {metric} not available: {metric_error}")
+                    insights_data[metric] = 0
+            
+            return {
+                'impressions': insights_data.get('page_impressions', 0),
+                'unique_impressions': insights_data.get('page_impressions_unique', 0),
+                'engaged_users': insights_data.get('page_consumptions', 0),
+                'post_engagements': insights_data.get('page_post_engagements', 0),
+                'fans': page_info.get('fan_count', 0),
+                'followers': page_info.get('followers_count', 0),
+                'page_views': insights_data.get('page_views_total', 0),
+                'new_likes': page_info.get('new_like_count', 0),
+                'talking_about_count': page_info.get('talking_about_count', 0),
+                'checkins': page_info.get('checkins', 0)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching page insights: {e}", exc_info=True)
+            # Fallback: return basic info only
+            try:
+                page_info = self._make_request(page_id, {
+                    'fields': 'followers_count,fan_count'
+                })
+                return {
+                    'impressions': 0,
+                    'unique_impressions': 0,
+                    'engaged_users': 0,
+                    'post_engagements': 0,
+                    'fans': page_info.get('fan_count', 0),
+                    'followers': page_info.get('followers_count', 0),
+                    'page_views': 0,
+                    'new_likes': 0,
+                    'talking_about_count': 0,
+                    'checkins': 0
+                }
+            except:
+                return {
+                    'impressions': 0,
+                    'unique_impressions': 0,
+                    'engaged_users': 0,
+                    'post_engagements': 0,
+                    'fans': 0,
+                    'followers': 0,
+                    'page_views': 0,
+                    'new_likes': 0,
+                    'talking_about_count': 0,
+                    'checkins': 0
+                }
+
     def _get_page_access_token(self, page_id: str) -> str:
-        """Get page access token for a specific page"""
+        """Get page access token for a specific page with better error handling"""
         try:
             # Get page access token using the user's access token
             data = self._make_request(f"{page_id}", {
@@ -1765,14 +1822,15 @@ class MetaManager:
             
             page_access_token = data.get('access_token')
             if not page_access_token:
-                logger.warning(f"No page access token available for page {page_id}")
+                logger.warning(f"No page access token available for page {page_id}, using user token")
                 return self.access_token  # Fallback to user token
             
+            logger.info(f"Successfully retrieved page access token for page {page_id}")
             return page_access_token
         except Exception as e:
-            logger.warning(f"Could not get page access token: {e}")
+            logger.warning(f"Could not get page access token: {e}, using user token as fallback")
             return self.access_token
-
+    
     def get_page_posts(self, page_id: str, limit: int = 10, period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get posts with comprehensive statistics"""
         

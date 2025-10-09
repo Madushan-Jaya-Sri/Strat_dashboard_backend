@@ -1485,7 +1485,9 @@ async def get_ads_placements(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# =============================================================================
+# FACEBOOK INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)
+# =============================================================================
 
 @app.get("/api/meta/pages", response_model=List[FacebookPageBasic])
 @save_response("meta_pages")
