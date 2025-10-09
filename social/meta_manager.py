@@ -520,6 +520,207 @@ class MetaManager:
             logger.error(f"Error fetching campaigns list: {e}")
             raise
     
+    def get_campaigns_with_totals(self, account_id: str, period: str = None, 
+                                    start_date: str = None, end_date: str = None,
+                                    max_workers: int = 2) -> Dict:
+            """
+            Get ALL campaigns with individual metrics and grand totals for an ad account.
+            Uses reduced concurrency (max 2 workers) to avoid rate limiting.
+            
+            Args:
+                account_id: The ad account ID
+                period: Time period (e.g., '7d', '30d', '90d', '365d')
+                start_date: Start date in YYYY-MM-DD format
+                end_date: End date in YYYY-MM-DD format
+                max_workers: Number of concurrent workers (default: 2, max: 2)
+            """
+            if start_date and end_date:
+                self._validate_date_range(start_date, end_date)
+            
+            since, until = self._period_to_dates(period, start_date, end_date)
+            
+            # FORCE max_workers to be 2 or less to avoid rate limiting
+            max_workers = min(max_workers, 2)
+            
+            logger.info(f"Fetching campaigns for {account_id} from {since} to {until}")
+            logger.info(f"Using {max_workers} concurrent workers (rate limit safe mode)")
+            
+            try:
+                # Step 1: Get all campaigns first (fast, no insights)
+                all_campaigns = []
+                params = {
+                    'fields': 'id,name,status,objective,created_time,updated_time',
+                    'limit': 500,
+                }
+                
+                next_url = None
+                page_count = 0
+                
+                while True:
+                    page_count += 1
+                    if next_url:
+                        # Add rate limiting for pagination
+                        time.sleep(0.5)
+                        response = requests.get(next_url)
+                        if response.status_code != 200:
+                            logger.warning(f"Pagination failed at page {page_count}")
+                            break
+                        data = response.json()
+                    else:
+                        data = self._rate_limited_request(f"{account_id}/campaigns", params)
+                    
+                    campaign_batch = data.get('data', [])
+                    all_campaigns.extend(campaign_batch)
+                    
+                    logger.info(f"Page {page_count}: Retrieved {len(campaign_batch)} campaigns")
+                    
+                    paging = data.get('paging', {})
+                    next_url = paging.get('next')
+                    if not next_url:
+                        break
+                
+                logger.info(f"Total campaigns found: {len(all_campaigns)}")
+                
+                if not all_campaigns:
+                    logger.warning(f"No campaigns found for account {account_id}")
+                    return {
+                        'campaigns': [],
+                        'totals': self._get_empty_totals(),
+                        'metadata': {
+                            'total_campaigns': 0,
+                            'campaigns_with_data': 0,
+                            'campaigns_without_data': 0,
+                            'date_range': {'since': since, 'until': until}
+                        }
+                    }
+                
+                # Step 2: Fetch insights concurrently with VERY LOW concurrency
+                campaigns_data = []
+                campaigns_with_activity = 0
+                
+                def fetch_campaign_insights(campaign: Dict) -> Dict:
+                    """Fetch insights for a single campaign with rate limiting"""
+                    campaign_result = {
+                        'campaign_id': campaign.get('id'),
+                        'campaign_name': campaign.get('name'),
+                        'status': campaign.get('status'),
+                        'objective': campaign.get('objective'),
+                        'created_time': campaign.get('created_time'),
+                        'updated_time': campaign.get('updated_time'),
+                        'spend': 0.0,
+                        'impressions': 0,
+                        'clicks': 0,
+                        'conversions': 0,
+                        'cpc': 0.0,
+                        'cpm': 0.0,
+                        'ctr': 0.0,
+                        'reach': 0,
+                        'frequency': 0.0,
+                        'has_data': False
+                    }
+                    
+                    try:
+                        # ADD DELAY before each request
+                        time.sleep(0.5)  # 500ms delay = max 2 requests/second
+                        
+                        insights = self._rate_limited_request(f"{campaign['id']}/insights", {
+                            'time_range': json.dumps({"since": since, "until": until}),
+                            'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
+                            'action_attribution_windows': ['7d_click', '1d_view']
+                        })
+                        
+                        insights_data = insights.get('data', [])
+                        
+                        if insights_data:
+                            insights_data = insights_data[0]
+                            
+                            conversions = sum(
+                                int(action.get('value', 0))
+                                for action in insights_data.get('actions', [])
+                                if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 'omni_purchase']
+                            )
+                            
+                            campaign_result.update({
+                                'spend': float(insights_data.get('spend', 0)),
+                                'impressions': int(insights_data.get('impressions', 0)),
+                                'clicks': int(insights_data.get('clicks', 0)),
+                                'conversions': conversions,
+                                'cpc': float(insights_data.get('cpc', 0)),
+                                'cpm': float(insights_data.get('cpm', 0)),
+                                'ctr': float(insights_data.get('ctr', 0)),
+                                'reach': int(insights_data.get('reach', 0)),
+                                'frequency': float(insights_data.get('frequency', 0)),
+                                'has_data': True
+                            })
+                            
+                            logger.debug(f"Campaign {campaign['id']} has data")
+                            
+                    except Exception as e:
+                        logger.warning(f"Error fetching insights for campaign {campaign.get('id')}: {e}")
+                    
+                    return campaign_result
+                
+                # Use MINIMAL concurrency (2 workers max)
+                logger.info(f"Fetching insights for {len(all_campaigns)} campaigns with {max_workers} workers...")
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_campaign = {
+                        executor.submit(fetch_campaign_insights, campaign): campaign 
+                        for campaign in all_campaigns
+                    }
+                    
+                    completed = 0
+                    for future in as_completed(future_to_campaign):
+                        completed += 1
+                        if completed % 10 == 0:
+                            logger.info(f"Progress: {completed}/{len(all_campaigns)} campaigns processed")
+                        
+                        result = future.result()
+                        campaigns_data.append(result)
+                        
+                        if result['has_data']:
+                            campaigns_with_activity += 1
+                
+                logger.info(f"All {len(campaigns_data)} campaigns processed. {campaigns_with_activity} have data in period.")
+                
+                # Step 3: Calculate grand totals (only from campaigns with data)
+                campaigns_with_metrics = [c for c in campaigns_data if c['has_data']]
+                
+                totals = {
+                    'total_spend': sum(c['spend'] for c in campaigns_with_metrics),
+                    'total_impressions': sum(c['impressions'] for c in campaigns_with_metrics),
+                    'total_clicks': sum(c['clicks'] for c in campaigns_with_metrics),
+                    'total_conversions': sum(c['conversions'] for c in campaigns_with_metrics),
+                    'total_reach': 0  # Will fetch separately
+                }
+                
+                # Step 4: Get accurate total reach from account level
+                try:
+                    time.sleep(0.5)  # Delay before final request
+                    account_insights = self._rate_limited_request(f"{account_id}/insights", {
+                        'time_range': json.dumps({"since": since, "until": until}),
+                        'fields': 'reach',
+                        'action_attribution_windows': ['7d_click', '1d_view']
+                    })
+                    totals['total_reach'] = int(account_insights.get('data', [{}])[0].get('reach', 0))
+                except Exception as e:
+                    logger.warning(f"Could not fetch account-level reach: {e}")
+                
+                return {
+                    'campaigns': campaigns_data,  # ALL campaigns, including those with zero metrics
+                    'totals': totals,
+                    'metadata': {
+                        'total_campaigns': len(all_campaigns),
+                        'campaigns_with_data': campaigns_with_activity,
+                        'campaigns_without_data': len(all_campaigns) - campaigns_with_activity,
+                        'date_range': {'since': since, 'until': until}
+                    }
+                }
+                
+            except Exception as e:
+                logger.error(f"Error fetching campaigns: {e}")
+                raise
+
     def get_campaigns_timeseries(self, campaign_ids: List[str], period: str = None, start_date: str = None, end_date: str = None) -> List[Dict]:
         """Get time-series data for multiple campaigns"""
         if start_date and end_date:
