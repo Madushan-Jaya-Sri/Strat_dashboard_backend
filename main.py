@@ -1018,9 +1018,42 @@ async def get_keyword_insights(
 # =============================================================================
 
 @app.get("/auth/facebook/login")
-async def facebook_login():
-    """Initiate Facebook OAuth login"""
-    return await auth_manager.initiate_facebook_login()
+async def facebook_login(source_tab: str = Query(default="meta_ads", pattern="^(facebook|instagram|meta_ads)$")):
+    """Initiate Facebook OAuth login with source tab tracking"""
+    import json
+    import base64
+    import secrets
+    
+    # Create state with source tab information
+    state_data = {
+        'source_tab': source_tab,
+        'random': secrets.token_urlsafe(32)
+    }
+    state = base64.urlsafe_b64encode(json.dumps(state_data).encode()).decode()
+    
+    auth_manager.facebook_states[state] = datetime.now().isoformat()
+    
+    # Build OAuth URL
+    scopes = ",".join(auth_manager.FACEBOOK_SCOPES)
+    base_url = "https://www.facebook.com/v18.0/dialog/oauth"
+    params = {
+        "client_id": auth_manager.FACEBOOK_APP_ID,
+        "redirect_uri": auth_manager.FACEBOOK_REDIRECT_URI,
+        "scope": scopes,
+        "state": state,
+        "response_type": "code"
+    }
+    
+    if auth_manager.FACEBOOK_CONFIG_ID:
+        params["config_id"] = auth_manager.FACEBOOK_CONFIG_ID
+    
+    auth_url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
+    
+    logger.info(f"Facebook login initiated from {source_tab} tab")
+    
+    # Redirect directly to Facebook instead of returning JSON
+    return RedirectResponse(url=auth_url)
+
 
 # @app.get("/auth/facebook/callback")
 # async def facebook_auth_callback(code: str, state: Optional[str] = None):
@@ -1053,15 +1086,17 @@ async def facebook_auth_callback(code: str, state: Optional[str] = None):
         result = await auth_manager.handle_facebook_callback(code, state)
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         
-        # Check if state contains source_tab information
-        source_tab = None
+        # Decode state to get source tab
+        source_tab = 'meta_ads'  # default
         if state:
             try:
                 import json
-                state_data = json.loads(state)
-                source_tab = state_data.get('source_tab')
-            except:
-                pass
+                import base64
+                decoded_state = json.loads(base64.urlsafe_b64decode(state.encode()).decode())
+                source_tab = decoded_state.get('source_tab', 'meta_ads')
+                logger.info(f"Decoded source_tab from state: {source_tab}")
+            except Exception as e:
+                logger.warning(f"Could not decode state: {e}")
         
         # Pass Facebook token and redirect to appropriate tab
         import urllib.parse
@@ -1075,15 +1110,17 @@ async def facebook_auth_callback(code: str, state: Optional[str] = None):
         else:
             redirect_param = 'switch_to_meta_ads_tab'
         
-        return RedirectResponse(
-            url=f"{frontend_url}/dashboard?facebook_token={encoded_token}&{redirect_param}=true"
-        )
+        redirect_url = f"{frontend_url}/dashboard?facebook_token={encoded_token}&{redirect_param}=true"
+        logger.info(f"Redirecting to: {redirect_url}")
+        
+        return RedirectResponse(url=redirect_url)
         
     except Exception as e:
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
         error_message = str(e).replace(" ", "%20")
-        return RedirectResponse(url=f"{frontend_url}/?error={error_message}")
-
+        logger.error(f"Facebook callback error: {e}")
+        return RedirectResponse(url=f"{frontend_url}/dashboard?error={error_message}")
+    
 # =============================================================================
 # META INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)
 # =============================================================================
