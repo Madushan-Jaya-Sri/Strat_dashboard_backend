@@ -2363,6 +2363,521 @@ class MetaManager:
             logger.error(f"Error fetching page posts timeseries: {e}", exc_info=True)
             return []    
   
+    # Add these methods to your MetaManager class
+
+    def get_page_video_views_breakdown(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get video views breakdown - 3-second views, 1-minute views"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            # Define video view metrics
+            video_metrics = {
+                'page_video_views': 'total_views',
+                'page_video_views_3s': 'three_second_views',
+                'page_video_views_60s': 'one_minute_views'
+            }
+            
+            views_data = {}
+            
+            for metric_key, metric_name in video_metrics.items():
+                try:
+                    logger.info(f"Fetching video metric: {metric_key}")
+                    
+                    data = self._make_request(f"{page_id}/insights/{metric_key}", {
+                        'access_token': page_access_token,
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    })
+                    
+                    if data.get('data') and len(data['data']) > 0:
+                        values = data['data'][0].get('values', [])
+                        total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                        views_data[metric_name] = total
+                except Exception as metric_error:
+                    logger.warning(f"Metric {metric_key} not available: {metric_error}")
+                    views_data[metric_name] = 0
+            
+            return {
+                'total_views': views_data.get('total_views', 0),
+                'three_second_views': views_data.get('three_second_views', 0),
+                'one_minute_views': views_data.get('one_minute_views', 0),
+                'period': period or f"{start_date} to {end_date}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching video views breakdown: {e}", exc_info=True)
+            return {
+                'total_views': 0,
+                'three_second_views': 0,
+                'one_minute_views': 0,
+                'period': period or f"{start_date} to {end_date}"
+            }
+
+
+    def get_page_content_type_breakdown(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get views breakdown by content type (Reels, Photos, Videos, etc.)"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            # Get posts and aggregate by type
+            posts_url = f"{self.BASE_URL}/{page_id}/posts"
+            params = {
+                'access_token': page_access_token,
+                'fields': 'id,created_time,attachments{type},insights.metric(post_video_views,post_impressions)',
+                'limit': 100  # Fetch more posts for better analysis
+            }
+            
+            response = requests.get(posts_url, params=params)
+            
+            if response.status_code != 200:
+                logger.error(f"Error getting posts: {response.text}")
+                return {'breakdown': []}
+            
+            data = response.json()
+            content_stats = {
+                'Reel': {'views': 0, 'count': 0},
+                'Photo': {'views': 0, 'count': 0},
+                'Video': {'views': 0, 'count': 0},
+                'Multi-photo': {'views': 0, 'count': 0},
+                'Other': {'views': 0, 'count': 0}
+            }
+            
+            for post in data.get('data', []):
+                # Filter by date range
+                created_time = post.get('created_time', '')
+                if created_time:
+                    post_date = created_time.split('T')[0]
+                    if since and post_date < since:
+                        continue
+                    if until and post_date > until:
+                        continue
+                
+                attachments = post.get('attachments', {}).get('data', [])
+                content_type = 'Other'
+                
+                if attachments:
+                    attachment_type = attachments[0].get('type', '').lower()
+                    
+                    # Determine content type
+                    if 'video_inline' in attachment_type or 'video_autoplay' in attachment_type:
+                        content_type = 'Reel'
+                    elif 'video' in attachment_type:
+                        content_type = 'Video'
+                    elif 'photo' in attachment_type or 'image' in attachment_type:
+                        content_type = 'Photo'
+                    elif 'album' in attachment_type:
+                        content_type = 'Multi-photo'
+                
+                # Get views/impressions from insights
+                insights = post.get('insights', {}).get('data', [])
+                views = 0
+                
+                for insight in insights:
+                    metric_name = insight.get('name')
+                    values = insight.get('values', [])
+                    
+                    if values:
+                        if metric_name == 'post_video_views':
+                            views = values[0].get('value', 0)
+                        elif metric_name == 'post_impressions' and views == 0:
+                            views = values[0].get('value', 0)
+                
+                content_stats[content_type]['views'] += views
+                content_stats[content_type]['count'] += 1
+            
+            # Calculate totals and percentages
+            total_views = sum(stats['views'] for stats in content_stats.values())
+            
+            breakdown = []
+            for content_type, stats in content_stats.items():
+                if stats['count'] > 0:  # Only include types that have posts
+                    percentage = (stats['views'] / total_views * 100) if total_views > 0 else 0
+                    breakdown.append({
+                        'content_type': content_type,
+                        'views': stats['views'],
+                        'post_count': stats['count'],
+                        'percentage': round(percentage, 1)
+                    })
+            
+            # Sort by views descending
+            breakdown.sort(key=lambda x: x['views'], reverse=True)
+            
+            return {
+                'breakdown': breakdown,
+                'total_views': total_views,
+                'period': period or f"{start_date} to {end_date}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching content type breakdown: {e}", exc_info=True)
+            return {
+                'breakdown': [],
+                'total_views': 0,
+                'period': period or f"{start_date} to {end_date}"
+            }
+
+
+    def get_page_follower_demographics(self, page_id: str) -> Dict:
+        """Get page audience demographics - age, gender, location"""
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            demographics = {
+                'age_gender': [],
+                'countries': [],
+                'cities': []
+            }
+            
+            # Get age and gender breakdown
+            try:
+                data = self._make_request(f"{page_id}/insights/page_fans_gender_age", {
+                    'access_token': page_access_token,
+                    'period': 'lifetime'
+                })
+                
+                if data.get('data'):
+                    values = data['data'][0].get('values', [])
+                    if values:
+                        age_gender_data = values[-1].get('value', {})
+                        
+                        # Parse the data
+                        age_groups = {}
+                        for key, count in age_gender_data.items():
+                            if '.' in key:
+                                gender, age_range = key.split('.')
+                                
+                                if age_range not in age_groups:
+                                    age_groups[age_range] = {
+                                        'age_range': age_range,
+                                        'women': 0,
+                                        'men': 0,
+                                        'total': 0
+                                    }
+                                
+                                if gender == 'F':
+                                    age_groups[age_range]['women'] = count
+                                elif gender == 'M':
+                                    age_groups[age_range]['men'] = count
+                                
+                                age_groups[age_range]['total'] += count
+                        
+                        # Calculate percentages
+                        total_audience = sum(group['total'] for group in age_groups.values())
+                        
+                        for group in age_groups.values():
+                            group['percentage'] = round((group['total'] / total_audience * 100), 1) if total_audience > 0 else 0
+                        
+                        demographics['age_gender'] = sorted(age_groups.values(), key=lambda x: x['percentage'], reverse=True)
+            except Exception as e:
+                logger.warning(f"Could not fetch age/gender data: {e}")
+            
+            # Get country breakdown
+            try:
+                data = self._make_request(f"{page_id}/insights/page_fans_country", {
+                    'access_token': page_access_token,
+                    'period': 'lifetime'
+                })
+                
+                if data.get('data'):
+                    values = data['data'][0].get('values', [])
+                    if values:
+                        country_data = values[-1].get('value', {})
+                        total = sum(country_data.values())
+                        
+                        countries = []
+                        for country_code, count in country_data.items():
+                            percentage = (count / total * 100) if total > 0 else 0
+                            countries.append({
+                                'country': country_code,
+                                'count': count,
+                                'percentage': round(percentage, 1)
+                            })
+                        
+                        demographics['countries'] = sorted(countries, key=lambda x: x['count'], reverse=True)
+            except Exception as e:
+                logger.warning(f"Could not fetch country data: {e}")
+            
+            # Get city breakdown
+            try:
+                data = self._make_request(f"{page_id}/insights/page_fans_city", {
+                    'access_token': page_access_token,
+                    'period': 'lifetime'
+                })
+                
+                if data.get('data'):
+                    values = data['data'][0].get('values', [])
+                    if values:
+                        city_data = values[-1].get('value', {})
+                        total = sum(city_data.values())
+                        
+                        cities = []
+                        for city_name, count in city_data.items():
+                            percentage = (count / total * 100) if total > 0 else 0
+                            cities.append({
+                                'city': city_name,
+                                'count': count,
+                                'percentage': round(percentage, 1)
+                            })
+                        
+                        demographics['cities'] = sorted(cities, key=lambda x: x['count'], reverse=True)[:10]  # Top 10 cities
+            except Exception as e:
+                logger.warning(f"Could not fetch city data: {e}")
+            
+            return demographics
+            
+        except Exception as e:
+            logger.error(f"Error fetching follower demographics: {e}", exc_info=True)
+            return {
+                'age_gender': [],
+                'countries': [],
+                'cities': []
+            }
+
+
+    def get_page_follows_unfollows(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get net follows and unfollows data"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            # Get page fan adds (new follows)
+            fan_adds = 0
+            fan_removes = 0
+            
+            try:
+                data = self._make_request(f"{page_id}/insights/page_fan_adds", {
+                    'access_token': page_access_token,
+                    'since': since,
+                    'until': until,
+                    'period': 'day'
+                })
+                
+                if data.get('data'):
+                    values = data['data'][0].get('values', [])
+                    fan_adds = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+            except Exception as e:
+                logger.warning(f"Could not fetch fan_adds: {e}")
+            
+            # Get page fan removes (unfollows)
+            try:
+                data = self._make_request(f"{page_id}/insights/page_fan_removes", {
+                    'access_token': page_access_token,
+                    'since': since,
+                    'until': until,
+                    'period': 'day'
+                })
+                
+                if data.get('data'):
+                    values = data['data'][0].get('values', [])
+                    fan_removes = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+            except Exception as e:
+                logger.warning(f"Could not fetch fan_removes: {e}")
+            
+            net_follows = fan_adds - fan_removes
+            
+            return {
+                'new_follows': fan_adds,
+                'unfollows': fan_removes,
+                'net_follows': net_follows,
+                'period': period or f"{start_date} to {end_date}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching follows/unfollows: {e}", exc_info=True)
+            return {
+                'new_follows': 0,
+                'unfollows': 0,
+                'net_follows': 0,
+                'period': period or f"{start_date} to {end_date}"
+            }
+
+
+    def get_page_engagement_breakdown(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get engagement breakdown - comments, tags, reactions"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            # Get recent posts to aggregate engagement
+            posts_url = f"{self.BASE_URL}/{page_id}/posts"
+            params = {
+                'access_token': page_access_token,
+                'fields': 'id,created_time,comments.summary(true).limit(0),reactions.summary(true).limit(0),shares',
+                'limit': 100
+            }
+            
+            response = requests.get(posts_url, params=params)
+            
+            if response.status_code != 200:
+                logger.error(f"Error getting posts for engagement: {response.text}")
+                return {'total_engagement': 0, 'recent_comments': 0, 'recent_tags': 0}
+            
+            data = response.json()
+            
+            total_comments = 0
+            total_reactions = 0
+            total_shares = 0
+            recent_comments = 0
+            
+            for post in data.get('data', []):
+                # Filter by date range
+                created_time = post.get('created_time', '')
+                if created_time:
+                    post_date = created_time.split('T')[0]
+                    if since and post_date < since:
+                        continue
+                    if until and post_date > until:
+                        continue
+                
+                comments = post.get('comments', {}).get('summary', {}).get('total_count', 0)
+                reactions = post.get('reactions', {}).get('summary', {}).get('total_count', 0)
+                shares = post.get('shares', {}).get('count', 0)
+                
+                total_comments += comments
+                total_reactions += reactions
+                total_shares += shares
+                
+                # Count as "recent" if within last 7 days
+                from datetime import datetime, timedelta
+                if created_time:
+                    post_datetime = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
+                    if (datetime.now(post_datetime.tzinfo) - post_datetime).days <= 7:
+                        recent_comments += comments
+            
+            # Get tags (mentions)
+            tags_count = 0
+            try:
+                tags_data = self._make_request(f"{page_id}/tagged", {
+                    'access_token': page_access_token,
+                    'limit': 100
+                })
+                
+                # Count tags within date range
+                for tagged_post in tags_data.get('data', []):
+                    created_time = tagged_post.get('created_time', '')
+                    if created_time:
+                        post_date = created_time.split('T')[0]
+                        if since and post_date >= since and until and post_date <= until:
+                            tags_count += 1
+            except Exception as e:
+                logger.warning(f"Could not fetch tags: {e}")
+            
+            return {
+                'total_engagement': total_comments + total_reactions + total_shares,
+                'total_comments': total_comments,
+                'total_reactions': total_reactions,
+                'total_shares': total_shares,
+                'recent_comments': recent_comments,
+                'recent_tags': tags_count,
+                'period': period or f"{start_date} to {end_date}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching engagement breakdown: {e}", exc_info=True)
+            return {
+                'total_engagement': 0,
+                'total_comments': 0,
+                'total_reactions': 0,
+                'total_shares': 0,
+                'recent_comments': 0,
+                'recent_tags': 0,
+                'period': period or f"{start_date} to {end_date}"
+            }
+
+
+    def get_page_organic_vs_paid(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """Get organic vs paid impressions and reach"""
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+        
+        since, until = self._period_to_dates(period, start_date, end_date)
+        
+        try:
+            page_access_token = self._get_page_access_token(page_id)
+            
+            metrics = {
+                'organic_impressions': 0,
+                'paid_impressions': 0,
+                'organic_reach': 0,
+                'paid_reach': 0
+            }
+            
+            metric_mapping = {
+                'page_impressions_organic': 'organic_impressions',
+                'page_impressions_paid': 'paid_impressions',
+                'page_impressions_organic_unique': 'organic_reach',
+                'page_impressions_paid_unique': 'paid_reach'
+            }
+            
+            for api_metric, result_key in metric_mapping.items():
+                try:
+                    data = self._make_request(f"{page_id}/insights/{api_metric}", {
+                        'access_token': page_access_token,
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    })
+                    
+                    if data.get('data'):
+                        values = data['data'][0].get('values', [])
+                        total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                        metrics[result_key] = total
+                except Exception as e:
+                    logger.warning(f"Metric {api_metric} not available: {e}")
+            
+            # Calculate percentages
+            total_impressions = metrics['organic_impressions'] + metrics['paid_impressions']
+            total_reach = metrics['organic_reach'] + metrics['paid_reach']
+            
+            organic_impression_pct = (metrics['organic_impressions'] / total_impressions * 100) if total_impressions > 0 else 0
+            paid_impression_pct = (metrics['paid_impressions'] / total_impressions * 100) if total_impressions > 0 else 0
+            
+            return {
+                'organic': {
+                    'impressions': metrics['organic_impressions'],
+                    'reach': metrics['organic_reach'],
+                    'impression_percentage': round(organic_impression_pct, 1)
+                },
+                'paid': {
+                    'impressions': metrics['paid_impressions'],
+                    'reach': metrics['paid_reach'],
+                    'impression_percentage': round(paid_impression_pct, 1)
+                },
+                'total_impressions': total_impressions,
+                'total_reach': total_reach,
+                'period': period or f"{start_date} to {end_date}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching organic vs paid: {e}", exc_info=True)
+            return {
+                'organic': {'impressions': 0, 'reach': 0, 'impression_percentage': 0},
+                'paid': {'impressions': 0, 'reach': 0, 'impression_percentage': 0},
+                'total_impressions': 0,
+                'total_reach': 0,
+                'period': period or f"{start_date} to {end_date}"
+            }
+
+
   # =========================================================================
     # INSTAGRAM
     # =========================================================================

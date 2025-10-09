@@ -1588,6 +1588,136 @@ async def get_meta_page_posts_timeseries(
         logger.error(f"Error fetching Meta page posts timeseries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Add these routes to your main.py file
+
+@app.get("/api/meta/pages/{page_id}/video-views-breakdown")
+@save_response("meta_video_views_breakdown")
+async def get_meta_video_views_breakdown(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get video views breakdown - 3-second views, 1-minute views"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        breakdown = meta_manager.get_page_video_views_breakdown(page_id, period, start_date, end_date)
+        return breakdown
+    except Exception as e:
+        logger.error(f"Error fetching video views breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/pages/{page_id}/content-type-breakdown")
+@save_response("meta_content_type_breakdown")
+async def get_meta_content_type_breakdown(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get views breakdown by content type (Reels, Photos, Videos, Multi-photo)"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        breakdown = meta_manager.get_page_content_type_breakdown(page_id, period, start_date, end_date)
+        return breakdown
+    except Exception as e:
+        logger.error(f"Error fetching content type breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/pages/{page_id}/demographics")
+@save_response("meta_page_demographics")
+async def get_meta_page_demographics(
+    page_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get page audience demographics - age/gender, countries, cities"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        demographics = meta_manager.get_page_follower_demographics(page_id)
+        return demographics
+    except Exception as e:
+        logger.error(f"Error fetching page demographics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/pages/{page_id}/follows-unfollows")
+@save_response("meta_follows_unfollows")
+async def get_meta_follows_unfollows(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get net follows and unfollows data"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        data = meta_manager.get_page_follows_unfollows(page_id, period, start_date, end_date)
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching follows/unfollows: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/pages/{page_id}/engagement-breakdown")
+@save_response("meta_engagement_breakdown")
+async def get_meta_engagement_breakdown(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get engagement breakdown - comments, tags, reactions"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        breakdown = meta_manager.get_page_engagement_breakdown(page_id, period, start_date, end_date)
+        return breakdown
+    except Exception as e:
+        logger.error(f"Error fetching engagement breakdown: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/pages/{page_id}/organic-vs-paid")
+@save_response("meta_organic_vs_paid")
+async def get_meta_organic_vs_paid(
+    page_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get organic vs paid impressions and reach breakdown"""
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        data = meta_manager.get_page_organic_vs_paid(page_id, period, start_date, end_date)
+        return data
+    except Exception as e:
+        logger.error(f"Error fetching organic vs paid data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# =============================================================================
+# INSTAGRAM INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)
+# =============================================================================
 @app.get("/api/meta/instagram/accounts", response_model=List[InstagramAccountBasic])
 @save_response("meta_instagram_accounts")
 async def get_meta_instagram_accounts(current_user: dict = Depends(get_current_user)):
