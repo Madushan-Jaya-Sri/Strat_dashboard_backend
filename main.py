@@ -1301,8 +1301,105 @@ async def compare_campaigns(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Add this NEW endpoint to your FastAPI app
 
+@app.get("/api/meta/ad-accounts/{account_id}/metrics")
+async def get_account_metrics(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get ONLY account-level metrics (no individual campaigns).
+    This is fast and doesn't hit rate limits.
+    
+    Returns total spend, impressions, clicks, reach for the entire account.
+    """
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Use the existing get_ad_account_insights method
+        metrics = meta_manager.get_ad_account_insights(
+            account_id, 
+            period, 
+            start_date, 
+            end_date
+        )
+        
+        return {
+            'account_id': account_id,
+            'metrics': metrics,
+            'period': period or 'custom',
+            'date_range': {
+                'start_date': start_date,
+                'end_date': end_date
+            }
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error fetching account metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+# Add this NEW endpoint to your FastAPI app
+
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/paginated")
+async def get_campaigns_paginated(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    offset: int = Query(0, ge=0, description="Number of campaigns to skip"),
+    limit: int = Query(5, ge=1, le=20, description="Number of campaigns to fetch"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get campaigns with pagination (lazy loading).
+    
+    Args:
+        account_id: Ad account ID
+        period: Time period filter
+        start_date: Custom start date
+        end_date: Custom end date
+        offset: Number of campaigns to skip (for pagination)
+        limit: Number of campaigns to fetch (max 20)
+    
+    Returns:
+        campaigns: List of campaigns with metrics
+        has_more: Boolean indicating if there are more campaigns
+        total_available: Total number of campaigns in account
+        
+    Example:
+        GET /api/meta/ad-accounts/act_xxx/campaigns/paginated?offset=0&limit=5
+        GET /api/meta/ad-accounts/act_xxx/campaigns/paginated?offset=5&limit=5
+    """
+    try:
+        from social.meta_manager import MetaManager
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Get paginated campaigns
+        result = meta_manager.get_campaigns_paginated(
+            account_id, 
+            period, 
+            start_date, 
+            end_date,
+            offset,
+            limit
+        )
+        
+        return result
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error fetching paginated campaigns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/meta/ad-accounts/campaigns/batch")
 async def batch_get_campaigns(
