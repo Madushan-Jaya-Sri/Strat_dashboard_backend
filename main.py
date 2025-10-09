@@ -1133,46 +1133,39 @@ async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
 #         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/ad-accounts/{account_id}/campaigns")
-async def get_campaigns_with_totals(
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
+async def get_campaigns_list(
     account_id: str,
-    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    max_workers: Optional[int] = Query(2, ge=1, le=2),  # FORCE MAX 2 WORKERS
+    status: Optional[str] = Query(None, description="Comma-separated status values: ACTIVE,PAUSED,ARCHIVED"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get campaigns with SAFE rate limiting (max 2 concurrent workers).
+    Get list of all campaigns for an ad account without insights (very fast).
+    This returns ALL campaigns regardless of activity in any time period.
     
-    This endpoint is optimized for accounts with small campaign counts (4-5 campaigns)
-    and prioritizes avoiding rate limits over speed.
+    Args:
+        account_id: Ad account ID (e.g., act_303894480866908)
+        status: Optional filter by status (e.g., "ACTIVE" or "ACTIVE,PAUSED")
+    
+    Example:
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list?status=ACTIVE
+        GET /api/meta/ad-accounts/act_303894480866908/campaigns/list?status=ACTIVE,PAUSED
     """
     try:
         from social.meta_manager import MetaManager
-        
-        # ALWAYS use max 2 workers, ignore user input
-        safe_max_workers = 2
-        
-        logger.info(f"Fetching campaigns with SAFE MODE: max_workers={safe_max_workers}")
-        
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
-        result = meta_manager.get_campaigns_with_totals(
-            account_id, 
-            period, 
-            start_date, 
-            end_date,
-            safe_max_workers
-        )
+        # Parse status filter
+        include_status = None
+        if status:
+            include_status = [s.strip().upper() for s in status.split(',')]
         
+        result = meta_manager.get_campaigns_list(account_id, include_status)
         return result
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Error fetching campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # Get campaigns with totals (optimized with concurrency)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns", response_model=CampaignsWithTotalsOptimized)
@@ -1731,7 +1724,7 @@ async def get_adsets_simple(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
     
-
+    
 # 7. Get ad set timeseries
 @app.post("/api/meta/adsets/timeseries", response_model=List[AdSetTimeseries])
 async def get_adsets_timeseries(
