@@ -145,9 +145,11 @@ class MetaManager:
         """Convert period to date range"""
         from datetime import datetime, timedelta
         
+        # PRIORITY: If custom dates are provided, use them directly
         if start_date and end_date:
             return start_date, end_date
         
+        # Otherwise, convert period to dates
         end = datetime.now()
         
         if period == '7d':
@@ -156,10 +158,11 @@ class MetaManager:
             start = end - timedelta(days=30)
         elif period == '90d':
             start = end - timedelta(days=90)
-        elif period == '365d':  # Make sure this is included
+        elif period == '365d':
             start = end - timedelta(days=365)
         else:
-            start = end - timedelta(days=30)  # default
+            # Default to 30 days
+            start = end - timedelta(days=30)
         
         return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
 
@@ -1511,11 +1514,23 @@ class MetaManager:
             return []
     
     def get_page_insights_timeseries(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
-        """Get time-series insights for specific Facebook page with improved error handling"""
+        """Get time-series insights for specific Facebook page"""
+        
+        # DEBUG LOGGING - Add this at the very start
+        logger.info(f"=== get_page_insights_timeseries called ===")
+        logger.info(f"page_id: {page_id}")
+        logger.info(f"period: {period}")
+        logger.info(f"start_date: {start_date}")
+        logger.info(f"end_date: {end_date}")
+        
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
+            since, until = start_date, end_date  # Don't call _period_to_dates!
+        else:
+            since, until = self._period_to_dates(period, start_date, end_date)
         
-        since, until = self._period_to_dates(period, start_date, end_date)
+        logger.info(f"Final date range being used: since={since}, until={until}")
+        
         
         try:
             # Get page access token
