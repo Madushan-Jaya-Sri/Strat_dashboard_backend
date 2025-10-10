@@ -559,6 +559,244 @@ class FacebookPostTimeseries(BaseModel):
     # Time-series data
     timeseries: List[PostInsightsDay]
     summary: PostInsightsSummary
+
+# Add these models to your models/meta_response_models.py
+
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+# Video Views Breakdown Models
+class VideoViewsBreakdown(BaseModel):
+    total_views: int = Field(default=0, description="Total video views")
+    three_second_views: int = Field(default=0, description="3-second video views")
+    one_minute_views: int = Field(default=0, description="1-minute video views")
+    period: str = Field(description="Time period for the data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "total_views": 147,
+                "three_second_views": 10,
+                "one_minute_views": 0,
+                "period": "60d"
+            }
+        }
+
+
+# Content Type Breakdown Models
+class ContentTypeItem(BaseModel):
+    content_type: str = Field(description="Type of content (Reel, Photo, Video, Multi-photo, Other)")
+    views: int = Field(description="Total views for this content type")
+    post_count: int = Field(description="Number of posts of this type")
+    percentage: float = Field(description="Percentage of total views")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "content_type": "Multi-photo",
+                "views": 56,
+                "post_count": 5,
+                "percentage": 38.1
+            }
+        }
+
+
+class ContentTypeBreakdown(BaseModel):
+    breakdown: List[ContentTypeItem] = Field(default=[], description="Breakdown by content type")
+    total_views: int = Field(default=0, description="Total views across all content types")
+    period: str = Field(description="Time period for the data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "breakdown": [
+                    {
+                        "content_type": "Multi-photo",
+                        "views": 56,
+                        "post_count": 5,
+                        "percentage": 38.1
+                    },
+                    {
+                        "content_type": "Reel",
+                        "views": 40,
+                        "post_count": 3,
+                        "percentage": 27.2
+                    }
+                ],
+                "total_views": 147,
+                "period": "60d"
+            }
+        }
+
+
+# Demographics Models
+class AgeGenderGroup(BaseModel):
+    age_range: str = Field(description="Age range (e.g., 25-34)")
+    women: int = Field(default=0, description="Number of women in this age group")
+    men: int = Field(default=0, description="Number of men in this age group")
+    total: int = Field(description="Total people in this age group")
+    percentage: float = Field(description="Percentage of total audience")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "age_range": "25-34",
+                "women": 320,
+                "men": 280,
+                "total": 600,
+                "percentage": 52.5
+            }
+        }
+
+
+class CountryData(BaseModel):
+    country: str = Field(description="Country code (e.g., LK, MY)")
+    count: int = Field(description="Number of followers from this country")
+    percentage: float = Field(description="Percentage of total followers")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "country": "LK",
+                "count": 836,
+                "percentage": 73.1
+            }
+        }
+
+
+class CityData(BaseModel):
+    city: str = Field(description="City name with country")
+    count: int = Field(description="Number of followers from this city")
+    percentage: float = Field(description="Percentage of total followers")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "city": "Colombo, Sri Lanka",
+                "count": 509,
+                "percentage": 44.5
+            }
+        }
+
+
+class PageDemographics(BaseModel):
+    age_gender: List[AgeGenderGroup] = Field(default=[], description="Age and gender breakdown")
+    countries: List[CountryData] = Field(default=[], description="Country breakdown")
+    cities: List[CityData] = Field(default=[], description="City breakdown (top 10)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "age_gender": [
+                    {
+                        "age_range": "25-34",
+                        "women": 320,
+                        "men": 280,
+                        "total": 600,
+                        "percentage": 52.5
+                    }
+                ],
+                "countries": [
+                    {
+                        "country": "LK",
+                        "count": 836,
+                        "percentage": 73.1
+                    }
+                ],
+                "cities": [
+                    {
+                        "city": "Colombo, Sri Lanka",
+                        "count": 509,
+                        "percentage": 44.5
+                    }
+                ]
+            }
+        }
+
+
+# Follows/Unfollows Models
+class FollowsUnfollows(BaseModel):
+    new_follows: int = Field(default=0, description="Number of new follows")
+    unfollows: int = Field(default=0, description="Number of unfollows")
+    net_follows: int = Field(description="Net change in follows (new_follows - unfollows)")
+    period: str = Field(description="Time period for the data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "new_follows": 45,
+                "unfollows": 12,
+                "net_follows": 33,
+                "period": "60d"
+            }
+        }
+
+
+# Engagement Breakdown Models
+class EngagementBreakdown(BaseModel):
+    total_engagement: int = Field(default=0, description="Total engagement (comments + reactions + shares)")
+    total_comments: int = Field(default=0, description="Total comments")
+    total_reactions: int = Field(default=0, description="Total reactions")
+    total_shares: int = Field(default=0, description="Total shares")
+    recent_comments: int = Field(default=0, description="Comments in last 7 days")
+    recent_tags: int = Field(default=0, description="Tags/mentions in the period")
+    period: str = Field(description="Time period for the data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "total_engagement": 150,
+                "total_comments": 45,
+                "total_reactions": 89,
+                "total_shares": 16,
+                "recent_comments": 12,
+                "recent_tags": 5,
+                "period": "60d"
+            }
+        }
+
+
+# Organic vs Paid Models
+class OrganicPaidData(BaseModel):
+    impressions: int = Field(default=0, description="Number of impressions")
+    reach: int = Field(default=0, description="Unique reach")
+    impression_percentage: float = Field(default=0.0, description="Percentage of total impressions")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "impressions": 2500,
+                "reach": 1800,
+                "impression_percentage": 100.0
+            }
+        }
+
+
+class OrganicVsPaid(BaseModel):
+    organic: OrganicPaidData = Field(description="Organic metrics")
+    paid: OrganicPaidData = Field(description="Paid metrics")
+    total_impressions: int = Field(default=0, description="Total impressions (organic + paid)")
+    total_reach: int = Field(default=0, description="Total reach (organic + paid)")
+    period: str = Field(description="Time period for the data")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "organic": {
+                    "impressions": 2500,
+                    "reach": 1800,
+                    "impression_percentage": 100.0
+                },
+                "paid": {
+                    "impressions": 0,
+                    "reach": 0,
+                    "impression_percentage": 0.0
+                },
+                "total_impressions": 2500,
+                "total_reach": 1800,
+                "period": "60d"
+            }
+        }
 # =============================================================================
 # INSTAGRAM
 # =============================================================================

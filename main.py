@@ -1589,8 +1589,21 @@ async def get_meta_page_posts_timeseries(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add these routes to your main.py file
+# Add these routes to your main.py file
 
-@app.get("/api/meta/pages/{page_id}/video-views-breakdown")
+# Add these imports at the top of your main.py
+from models.meta_response_models import (
+    VideoViewsBreakdown,
+    ContentTypeBreakdown,
+    PageDemographics,
+    FollowsUnfollows,
+    EngagementBreakdown,
+    OrganicVsPaid
+)
+
+# Then your routes should look like this:
+
+@app.get("/api/meta/pages/{page_id}/video-views-breakdown", response_model=VideoViewsBreakdown)
 @save_response("meta_video_views_breakdown")
 async def get_meta_video_views_breakdown(
     page_id: str,
@@ -1611,7 +1624,7 @@ async def get_meta_video_views_breakdown(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/pages/{page_id}/content-type-breakdown")
+@app.get("/api/meta/pages/{page_id}/content-type-breakdown", response_model=ContentTypeBreakdown)
 @save_response("meta_content_type_breakdown")
 async def get_meta_content_type_breakdown(
     page_id: str,
@@ -1620,7 +1633,7 @@ async def get_meta_content_type_breakdown(
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get views breakdown by content type (Reels, Photos, Videos, Multi-photo)"""
+    """Get views breakdown by content type"""
     try:
         from social.meta_manager import MetaManager
         
@@ -1632,13 +1645,13 @@ async def get_meta_content_type_breakdown(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/pages/{page_id}/demographics")
+@app.get("/api/meta/pages/{page_id}/demographics", response_model=PageDemographics)
 @save_response("meta_page_demographics")
 async def get_meta_page_demographics(
     page_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get page audience demographics - age/gender, countries, cities"""
+    """Get page audience demographics"""
     try:
         from social.meta_manager import MetaManager
         
@@ -1650,7 +1663,7 @@ async def get_meta_page_demographics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/pages/{page_id}/follows-unfollows")
+@app.get("/api/meta/pages/{page_id}/follows-unfollows", response_model=FollowsUnfollows)
 @save_response("meta_follows_unfollows")
 async def get_meta_follows_unfollows(
     page_id: str,
@@ -1671,7 +1684,7 @@ async def get_meta_follows_unfollows(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/pages/{page_id}/engagement-breakdown")
+@app.get("/api/meta/pages/{page_id}/engagement-breakdown", response_model=EngagementBreakdown)
 @save_response("meta_engagement_breakdown")
 async def get_meta_engagement_breakdown(
     page_id: str,
@@ -1680,7 +1693,7 @@ async def get_meta_engagement_breakdown(
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get engagement breakdown - comments, tags, reactions"""
+    """Get engagement breakdown"""
     try:
         from social.meta_manager import MetaManager
         
@@ -1692,7 +1705,7 @@ async def get_meta_engagement_breakdown(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/meta/pages/{page_id}/organic-vs-paid")
+@app.get("/api/meta/pages/{page_id}/organic-vs-paid", response_model=OrganicVsPaid)
 @save_response("meta_organic_vs_paid")
 async def get_meta_organic_vs_paid(
     page_id: str,
@@ -1701,7 +1714,7 @@ async def get_meta_organic_vs_paid(
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get organic vs paid impressions and reach breakdown"""
+    """Get organic vs paid breakdown"""
     try:
         from social.meta_manager import MetaManager
         
@@ -1711,9 +1724,6 @@ async def get_meta_organic_vs_paid(
     except Exception as e:
         logger.error(f"Error fetching organic vs paid data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
 
 # =============================================================================
 # INSTAGRAM INSIGHTS ENDPOINTS (UNIFIED WITH CUSTOM DATE RANGE)

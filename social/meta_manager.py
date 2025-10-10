@@ -2365,6 +2365,7 @@ class MetaManager:
   
     # Add these methods to your MetaManager class
 
+
     def get_page_video_views_breakdown(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get video views breakdown - 3-second views, 1-minute views"""
         if start_date and end_date:
@@ -2388,17 +2389,26 @@ class MetaManager:
                 try:
                     logger.info(f"Fetching video metric: {metric_key}")
                     
-                    data = self._make_request(f"{page_id}/insights/{metric_key}", {
-                        'access_token': page_access_token,
-                        'since': since,
-                        'until': until,
-                        'period': 'day'
-                    })
+                    response = requests.get(
+                        f"{self.BASE_URL}/{page_id}/insights/{metric_key}",
+                        params={
+                            'access_token': page_access_token,
+                            'since': since,
+                            'until': until,
+                            'period': 'day'
+                        }
+                    )
                     
-                    if data.get('data') and len(data['data']) > 0:
-                        values = data['data'][0].get('values', [])
-                        total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
-                        views_data[metric_name] = total
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('data') and len(data['data']) > 0:
+                            values = data['data'][0].get('values', [])
+                            total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                            views_data[metric_name] = total
+                    else:
+                        logger.warning(f"Metric {metric_key} failed: {response.text}")
+                        views_data[metric_name] = 0
+                        
                 except Exception as metric_error:
                     logger.warning(f"Metric {metric_key} not available: {metric_error}")
                     views_data[metric_name] = 0
@@ -2431,18 +2441,24 @@ class MetaManager:
             page_access_token = self._get_page_access_token(page_id)
             
             # Get posts and aggregate by type
-            posts_url = f"{self.BASE_URL}/{page_id}/posts"
-            params = {
-                'access_token': page_access_token,
-                'fields': 'id,created_time,attachments{type},insights.metric(post_video_views,post_impressions)',
-                'limit': 100  # Fetch more posts for better analysis
-            }
-            
-            response = requests.get(posts_url, params=params)
+            response = requests.get(
+                f"{self.BASE_URL}/{page_id}/posts",
+                params={
+                    'access_token': page_access_token,
+                    'fields': 'id,created_time,attachments{type},insights.metric(post_video_views,post_impressions)',
+                    'limit': 100,
+                    'since': since,
+                    'until': until
+                }
+            )
             
             if response.status_code != 200:
                 logger.error(f"Error getting posts: {response.text}")
-                return {'breakdown': []}
+                return {
+                    'breakdown': [],
+                    'total_views': 0,
+                    'period': period or f"{start_date} to {end_date}"
+                }
             
             data = response.json()
             content_stats = {
@@ -2454,15 +2470,6 @@ class MetaManager:
             }
             
             for post in data.get('data', []):
-                # Filter by date range
-                created_time = post.get('created_time', '')
-                if created_time:
-                    post_date = created_time.split('T')[0]
-                    if since and post_date < since:
-                        continue
-                    if until and post_date > until:
-                        continue
-                
                 attachments = post.get('attachments', {}).get('data', [])
                 content_type = 'Other'
                 
@@ -2541,98 +2548,90 @@ class MetaManager:
             
             # Get age and gender breakdown
             try:
-                data = self._make_request(f"{page_id}/insights/page_fans_gender_age", {
-                    'access_token': page_access_token,
-                    'period': 'lifetime'
-                })
+                logger.info(f"Fetching age/gender demographics for page {page_id}")
                 
-                if data.get('data'):
-                    values = data['data'][0].get('values', [])
-                    if values:
-                        age_gender_data = values[-1].get('value', {})
-                        
-                        # Parse the data
-                        age_groups = {}
-                        for key, count in age_gender_data.items():
-                            if '.' in key:
-                                gender, age_range = key.split('.')
-                                
-                                if age_range not in age_groups:
-                                    age_groups[age_range] = {
-                                        'age_range': age_range,
-                                        'women': 0,
-                                        'men': 0,
-                                        'total': 0
-                                    }
-                                
-                                if gender == 'F':
-                                    age_groups[age_range]['women'] = count
-                                elif gender == 'M':
-                                    age_groups[age_range]['men'] = count
-                                
-                                age_groups[age_range]['total'] += count
-                        
-                        # Calculate percentages
-                        total_audience = sum(group['total'] for group in age_groups.values())
-                        
-                        for group in age_groups.values():
-                            group['percentage'] = round((group['total'] / total_audience * 100), 1) if total_audience > 0 else 0
-                        
-                        demographics['age_gender'] = sorted(age_groups.values(), key=lambda x: x['percentage'], reverse=True)
+                response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/insights/page_fans_gender_age",
+                    params={
+                        'access_token': page_access_token,
+                        'period': 'lifetime'
+                    }
+                )
+                
+                logger.info(f"Age/Gender API Response Status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if data.get('data') and len(data['data']) > 0:
+                        values = data['data'][0].get('values', [])
+                        if values:
+                            age_gender_data = values[-1].get('value', {})
+                            demographics['age_gender'] = self._parse_age_gender(age_gender_data)
+                            logger.info(f"Processed {len(demographics['age_gender'])} age/gender groups")
+                else:
+                    logger.error(f"Failed to fetch age/gender: {response.text}")
+                    
             except Exception as e:
-                logger.warning(f"Could not fetch age/gender data: {e}")
+                logger.error(f"Could not fetch age/gender data: {e}", exc_info=True)
             
             # Get country breakdown
             try:
-                data = self._make_request(f"{page_id}/insights/page_fans_country", {
-                    'access_token': page_access_token,
-                    'period': 'lifetime'
-                })
+                logger.info(f"Fetching country demographics for page {page_id}")
                 
-                if data.get('data'):
-                    values = data['data'][0].get('values', [])
-                    if values:
-                        country_data = values[-1].get('value', {})
-                        total = sum(country_data.values())
-                        
-                        countries = []
-                        for country_code, count in country_data.items():
-                            percentage = (count / total * 100) if total > 0 else 0
-                            countries.append({
-                                'country': country_code,
-                                'count': count,
-                                'percentage': round(percentage, 1)
-                            })
-                        
-                        demographics['countries'] = sorted(countries, key=lambda x: x['count'], reverse=True)
+                response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/insights/page_fans_country",
+                    params={
+                        'access_token': page_access_token,
+                        'period': 'lifetime'
+                    }
+                )
+                
+                logger.info(f"Country API Response Status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if data.get('data') and len(data['data']) > 0:
+                        values = data['data'][0].get('values', [])
+                        if values:
+                            country_data = values[-1].get('value', {})
+                            demographics['countries'] = self._parse_countries(country_data)
+                            logger.info(f"Processed {len(demographics['countries'])} countries")
+                else:
+                    logger.error(f"Failed to fetch countries: {response.text}")
+                    
             except Exception as e:
-                logger.warning(f"Could not fetch country data: {e}")
+                logger.error(f"Could not fetch country data: {e}", exc_info=True)
             
             # Get city breakdown
             try:
-                data = self._make_request(f"{page_id}/insights/page_fans_city", {
-                    'access_token': page_access_token,
-                    'period': 'lifetime'
-                })
+                logger.info(f"Fetching city demographics for page {page_id}")
                 
-                if data.get('data'):
-                    values = data['data'][0].get('values', [])
-                    if values:
-                        city_data = values[-1].get('value', {})
-                        total = sum(city_data.values())
-                        
-                        cities = []
-                        for city_name, count in city_data.items():
-                            percentage = (count / total * 100) if total > 0 else 0
-                            cities.append({
-                                'city': city_name,
-                                'count': count,
-                                'percentage': round(percentage, 1)
-                            })
-                        
-                        demographics['cities'] = sorted(cities, key=lambda x: x['count'], reverse=True)[:10]  # Top 10 cities
+                response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/insights/page_fans_city",
+                    params={
+                        'access_token': page_access_token,
+                        'period': 'lifetime'
+                    }
+                )
+                
+                logger.info(f"City API Response Status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if data.get('data') and len(data['data']) > 0:
+                        values = data['data'][0].get('values', [])
+                        if values:
+                            city_data = values[-1].get('value', {})
+                            demographics['cities'] = self._parse_cities(city_data)
+                            logger.info(f"Processed {len(demographics['cities'])} cities")
+                else:
+                    logger.error(f"Failed to fetch cities: {response.text}")
+                    
             except Exception as e:
-                logger.warning(f"Could not fetch city data: {e}")
+                logger.error(f"Could not fetch city data: {e}", exc_info=True)
             
             return demographics
             
@@ -2643,6 +2642,72 @@ class MetaManager:
                 'countries': [],
                 'cities': []
             }
+
+
+    def _parse_age_gender(self, age_gender_data: dict) -> list:
+        """Parse age and gender data"""
+        age_groups = {}
+        
+        for key, count in age_gender_data.items():
+            if '.' in key:
+                gender, age_range = key.split('.')
+                
+                if age_range not in age_groups:
+                    age_groups[age_range] = {
+                        'age_range': age_range,
+                        'women': 0,
+                        'men': 0,
+                        'total': 0
+                    }
+                
+                if gender == 'F':
+                    age_groups[age_range]['women'] = count
+                elif gender == 'M':
+                    age_groups[age_range]['men'] = count
+                elif gender == 'U':  # Unknown gender
+                    pass  # Optionally add 'unknown' field
+                
+                age_groups[age_range]['total'] += count
+        
+        # Calculate percentages
+        total_audience = sum(group['total'] for group in age_groups.values())
+        
+        for group in age_groups.values():
+            group['percentage'] = round((group['total'] / total_audience * 100), 1) if total_audience > 0 else 0
+        
+        return sorted(age_groups.values(), key=lambda x: x['percentage'], reverse=True)
+
+
+    def _parse_countries(self, country_data: dict) -> list:
+        """Parse country data"""
+        total = sum(country_data.values())
+        
+        countries = []
+        for country_code, count in country_data.items():
+            percentage = (count / total * 100) if total > 0 else 0
+            countries.append({
+                'country': country_code,
+                'count': count,
+                'percentage': round(percentage, 1)
+            })
+        
+        return sorted(countries, key=lambda x: x['count'], reverse=True)
+
+
+    def _parse_cities(self, city_data: dict) -> list:
+        """Parse city data"""
+        total = sum(city_data.values())
+        
+        cities = []
+        for city_name, count in city_data.items():
+            percentage = (count / total * 100) if total > 0 else 0
+            cities.append({
+                'city': city_name,
+                'count': count,
+                'percentage': round(percentage, 1)
+            })
+        
+        return sorted(cities, key=lambda x: x['count'], reverse=True)[:10]  # Top 10 cities
 
 
     def get_page_follows_unfollows(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
@@ -2660,31 +2725,47 @@ class MetaManager:
             fan_removes = 0
             
             try:
-                data = self._make_request(f"{page_id}/insights/page_fan_adds", {
-                    'access_token': page_access_token,
-                    'since': since,
-                    'until': until,
-                    'period': 'day'
-                })
+                response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/insights/page_fan_adds",
+                    params={
+                        'access_token': page_access_token,
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    }
+                )
                 
-                if data.get('data'):
-                    values = data['data'][0].get('values', [])
-                    fan_adds = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('data'):
+                        values = data['data'][0].get('values', [])
+                        fan_adds = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                else:
+                    logger.warning(f"Could not fetch fan_adds: {response.text}")
+                    
             except Exception as e:
                 logger.warning(f"Could not fetch fan_adds: {e}")
             
             # Get page fan removes (unfollows)
             try:
-                data = self._make_request(f"{page_id}/insights/page_fan_removes", {
-                    'access_token': page_access_token,
-                    'since': since,
-                    'until': until,
-                    'period': 'day'
-                })
+                response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/insights/page_fan_removes",
+                    params={
+                        'access_token': page_access_token,
+                        'since': since,
+                        'until': until,
+                        'period': 'day'
+                    }
+                )
                 
-                if data.get('data'):
-                    values = data['data'][0].get('values', [])
-                    fan_removes = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('data'):
+                        values = data['data'][0].get('values', [])
+                        fan_removes = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                else:
+                    logger.warning(f"Could not fetch fan_removes: {response.text}")
+                    
             except Exception as e:
                 logger.warning(f"Could not fetch fan_removes: {e}")
             
@@ -2718,18 +2799,28 @@ class MetaManager:
             page_access_token = self._get_page_access_token(page_id)
             
             # Get recent posts to aggregate engagement
-            posts_url = f"{self.BASE_URL}/{page_id}/posts"
-            params = {
-                'access_token': page_access_token,
-                'fields': 'id,created_time,comments.summary(true).limit(0),reactions.summary(true).limit(0),shares',
-                'limit': 100
-            }
-            
-            response = requests.get(posts_url, params=params)
+            response = requests.get(
+                f"{self.BASE_URL}/{page_id}/posts",
+                params={
+                    'access_token': page_access_token,
+                    'fields': 'id,created_time,comments.summary(true).limit(0),reactions.summary(true).limit(0),shares',
+                    'limit': 100,
+                    'since': since,
+                    'until': until
+                }
+            )
             
             if response.status_code != 200:
                 logger.error(f"Error getting posts for engagement: {response.text}")
-                return {'total_engagement': 0, 'recent_comments': 0, 'recent_tags': 0}
+                return {
+                    'total_engagement': 0,
+                    'total_comments': 0,
+                    'total_reactions': 0,
+                    'total_shares': 0,
+                    'recent_comments': 0,
+                    'recent_tags': 0,
+                    'period': period or f"{start_date} to {end_date}"
+                }
             
             data = response.json()
             
@@ -2738,16 +2829,10 @@ class MetaManager:
             total_shares = 0
             recent_comments = 0
             
+            from datetime import datetime, timedelta, timezone
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            
             for post in data.get('data', []):
-                # Filter by date range
-                created_time = post.get('created_time', '')
-                if created_time:
-                    post_date = created_time.split('T')[0]
-                    if since and post_date < since:
-                        continue
-                    if until and post_date > until:
-                        continue
-                
                 comments = post.get('comments', {}).get('summary', {}).get('total_count', 0)
                 reactions = post.get('reactions', {}).get('summary', {}).get('total_count', 0)
                 shares = post.get('shares', {}).get('count', 0)
@@ -2757,27 +2842,31 @@ class MetaManager:
                 total_shares += shares
                 
                 # Count as "recent" if within last 7 days
-                from datetime import datetime, timedelta
+                created_time = post.get('created_time', '')
                 if created_time:
-                    post_datetime = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
-                    if (datetime.now(post_datetime.tzinfo) - post_datetime).days <= 7:
-                        recent_comments += comments
+                    try:
+                        post_datetime = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
+                        if post_datetime >= seven_days_ago:
+                            recent_comments += comments
+                    except:
+                        pass
             
             # Get tags (mentions)
             tags_count = 0
             try:
-                tags_data = self._make_request(f"{page_id}/tagged", {
-                    'access_token': page_access_token,
-                    'limit': 100
-                })
+                tags_response = requests.get(
+                    f"{self.BASE_URL}/{page_id}/tagged",
+                    params={
+                        'access_token': page_access_token,
+                        'limit': 100,
+                        'since': since,
+                        'until': until
+                    }
+                )
                 
-                # Count tags within date range
-                for tagged_post in tags_data.get('data', []):
-                    created_time = tagged_post.get('created_time', '')
-                    if created_time:
-                        post_date = created_time.split('T')[0]
-                        if since and post_date >= since and until and post_date <= until:
-                            tags_count += 1
+                if tags_response.status_code == 200:
+                    tags_data = tags_response.json()
+                    tags_count = len(tags_data.get('data', []))
             except Exception as e:
                 logger.warning(f"Could not fetch tags: {e}")
             
@@ -2830,17 +2919,25 @@ class MetaManager:
             
             for api_metric, result_key in metric_mapping.items():
                 try:
-                    data = self._make_request(f"{page_id}/insights/{api_metric}", {
-                        'access_token': page_access_token,
-                        'since': since,
-                        'until': until,
-                        'period': 'day'
-                    })
+                    response = requests.get(
+                        f"{self.BASE_URL}/{page_id}/insights/{api_metric}",
+                        params={
+                            'access_token': page_access_token,
+                            'since': since,
+                            'until': until,
+                            'period': 'day'
+                        }
+                    )
                     
-                    if data.get('data'):
-                        values = data['data'][0].get('values', [])
-                        total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
-                        metrics[result_key] = total
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('data'):
+                            values = data['data'][0].get('values', [])
+                            total = sum(v.get('value', 0) for v in values if v.get('value') is not None)
+                            metrics[result_key] = total
+                    else:
+                        logger.warning(f"Metric {api_metric} failed: {response.text}")
+                        
                 except Exception as e:
                     logger.warning(f"Metric {api_metric} not available: {e}")
             
@@ -2876,7 +2973,6 @@ class MetaManager:
                 'total_reach': 0,
                 'period': period or f"{start_date} to {end_date}"
             }
-
 
   # =========================================================================
     # INSTAGRAM
