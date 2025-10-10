@@ -142,44 +142,26 @@ class MetaManager:
     #     return response.json()
     
     def _period_to_dates(self, period: str = None, start_date: str = None, end_date: str = None) -> tuple:
-        """
-        Convert period string OR custom date range to since/until dates
+        """Convert period to date range"""
+        from datetime import datetime, timedelta
         
-        Args:
-            period: Predefined period like '7d', '30d', etc.
-            start_date: Custom start date in YYYY-MM-DD format
-            end_date: Custom end date in YYYY-MM-DD format
-        
-        Returns:
-            Tuple of (since, until) in YYYY-MM-DD format
-        """
-        # If custom dates provided, use them
         if start_date and end_date:
-            # Validate date format
-            try:
-                datetime.strptime(start_date, '%Y-%m-%d')
-                datetime.strptime(end_date, '%Y-%m-%d')
-                return start_date, end_date
-            except ValueError:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid date format. Use YYYY-MM-DD"
-                )
+            return start_date, end_date
         
-        # Otherwise use predefined period
-        if period:
-            days_map = {'7d': 7, '30d': 30, '90d': 90, '365d': 365}
-            days = days_map.get(period, 30)
-            
-            until = datetime.now()
-            since = until - timedelta(days=days)
-            
-            return since.strftime('%Y-%m-%d'), until.strftime('%Y-%m-%d')
+        end = datetime.now()
         
-        # Default to last 30 days
-        until = datetime.now()
-        since = until - timedelta(days=30)
-        return since.strftime('%Y-%m-%d'), until.strftime('%Y-%m-%d')
+        if period == '7d':
+            start = end - timedelta(days=7)
+        elif period == '30d':
+            start = end - timedelta(days=30)
+        elif period == '90d':
+            start = end - timedelta(days=90)
+        elif period == '365d':  # Make sure this is included
+            start = end - timedelta(days=365)
+        else:
+            start = end - timedelta(days=30)  # default
+        
+        return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
 
     def _validate_date_range(self, start_date: str, end_date: str):
         """Validate date range"""

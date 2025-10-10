@@ -1525,11 +1525,13 @@ async def get_meta_page_insights(
         logger.error(f"Error fetching Meta page insights: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# In your main.py, update the endpoint:
+
 @app.get("/api/meta/pages/{page_id}/insights/timeseries")
 @save_response("meta_page_insights_timeseries")
 async def get_meta_page_insights_timeseries(
     page_id: str,
-    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),  # Make sure 365d is here
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     current_user: dict = Depends(get_current_user)
