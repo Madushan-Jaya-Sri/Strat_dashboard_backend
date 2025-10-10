@@ -1700,6 +1700,8 @@ class MetaManager:
                     }
                 }
 
+    # In your existing meta_manager.py file, find get_page_insights and update:
+
     def get_page_insights(self, page_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get insights for specific Facebook page using Page Access Token with improved error handling"""
         if start_date and end_date:
@@ -1719,7 +1721,6 @@ class MetaManager:
                 })
             except Exception as e:
                 logger.warning(f"Error fetching detailed page info: {e}")
-                # Try simpler fields
                 try:
                     page_info = self._make_request(page_id, {
                         'access_token': page_access_token,
@@ -1731,12 +1732,12 @@ class MetaManager:
             # Try to get insights using page token
             insights_data = {}
             
-            # Try metrics individually to identify which ones fail
+            # UPDATED: Changed page_consumptions to page_engaged_users
             metrics_to_try = [
                 'page_impressions',
                 'page_impressions_unique', 
                 'page_post_engagements',
-                'page_consumptions',
+                'page_engaged_users',  # CHANGED from page_consumptions
                 'page_views_total'
             ]
             
@@ -1757,7 +1758,6 @@ class MetaManager:
                             val = v.get('value', 0)
                             if val is not None:
                                 if isinstance(val, dict):
-                                    # Sum dict values for metrics that return objects
                                     total += sum(x for x in val.values() if isinstance(x, (int, float)))
                                 else:
                                     total += val
@@ -1769,7 +1769,7 @@ class MetaManager:
             return {
                 'impressions': insights_data.get('page_impressions', 0),
                 'unique_impressions': insights_data.get('page_impressions_unique', 0),
-                'engaged_users': insights_data.get('page_consumptions', 0),
+                'engaged_users': insights_data.get('page_engaged_users', 0),  # CHANGED
                 'post_engagements': insights_data.get('page_post_engagements', 0),
                 'fans': page_info.get('fan_count', 0),
                 'followers': page_info.get('followers_count', 0),
@@ -1778,10 +1778,9 @@ class MetaManager:
                 'talking_about_count': page_info.get('talking_about_count', 0),
                 'checkins': page_info.get('checkins', 0)
             }
-            
         except Exception as e:
             logger.error(f"Error fetching page insights: {e}", exc_info=True)
-            # Fallback: return basic info only
+            # Fallback: return basic info with zeros
             try:
                 page_info = self._make_request(page_id, {
                     'fields': 'followers_count,fan_count'
@@ -1811,7 +1810,7 @@ class MetaManager:
                     'talking_about_count': 0,
                     'checkins': 0
                 }
-
+    
     def _get_page_access_token(self, page_id: str) -> str:
         """Get page access token for a specific page with better error handling"""
         try:
@@ -2551,9 +2550,10 @@ class MetaManager:
                 logger.info(f"Fetching age/gender demographics for page {page_id}")
                 
                 response = requests.get(
-                    f"{self.BASE_URL}/{page_id}/insights/page_fans_gender_age",
+                    f"{self.BASE_URL}/{page_id}/insights",  # Changed endpoint
                     params={
                         'access_token': page_access_token,
+                        'metric': 'page_fans_gender_age',  # Use metric parameter
                         'period': 'lifetime'
                     }
                 )
@@ -2580,9 +2580,10 @@ class MetaManager:
                 logger.info(f"Fetching country demographics for page {page_id}")
                 
                 response = requests.get(
-                    f"{self.BASE_URL}/{page_id}/insights/page_fans_country",
+                    f"{self.BASE_URL}/{page_id}/insights",  # Changed endpoint
                     params={
                         'access_token': page_access_token,
+                        'metric': 'page_fans_country',  # Use metric parameter
                         'period': 'lifetime'
                     }
                 )
@@ -2609,9 +2610,10 @@ class MetaManager:
                 logger.info(f"Fetching city demographics for page {page_id}")
                 
                 response = requests.get(
-                    f"{self.BASE_URL}/{page_id}/insights/page_fans_city",
+                    f"{self.BASE_URL}/{page_id}/insights",  # Changed endpoint
                     params={
                         'access_token': page_access_token,
+                        'metric': 'page_fans_city',  # Use metric parameter
                         'period': 'lifetime'
                     }
                 )
@@ -2911,10 +2913,10 @@ class MetaManager:
             }
             
             metric_mapping = {
-                'page_impressions_organic': 'organic_impressions',
-                'page_impressions_paid': 'paid_impressions',
-                'page_impressions_organic_unique': 'organic_reach',
-                'page_impressions_paid_unique': 'paid_reach'
+                'page_impressions_organic_v2': 'organic_impressions',  # Changed to v2
+                'page_impressions_paid_v2': 'paid_impressions',  # Changed to v2
+                'page_impressions_organic_unique_v2': 'organic_reach',  # Changed to v2
+                'page_impressions_paid_unique_v2': 'paid_reach'  # Changed to v2
             }
             
             for api_metric, result_key in metric_mapping.items():
@@ -2973,8 +2975,8 @@ class MetaManager:
                 'total_reach': 0,
                 'period': period or f"{start_date} to {end_date}"
             }
-
-  # =========================================================================
+    
+    # =========================================================================
     # INSTAGRAM
     # =========================================================================
     
