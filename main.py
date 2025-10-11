@@ -447,13 +447,18 @@ async def get_ga_properties(current_user: dict = Depends(get_current_user)):
 @save_response("ga_metrics")
 async def get_ga_metrics(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 metrics for a property"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        metrics = ga4_manager.get_metrics(property_id, period)
+        metrics = ga4_manager.get_metrics(property_id, period, start_date, end_date)
         return GAMetrics(**metrics)
     except Exception as e:
         logger.error(f"Error fetching GA metrics: {e}")
@@ -495,13 +500,18 @@ async def get_ga_top_pages(
 @save_response("ga_conversions", cache_minutes=15)
 async def get_ga_conversions(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 conversion data"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        conversions = ga4_manager.get_conversions(property_id, period)
+        conversions = ga4_manager.get_conversions(property_id, period, start_date, end_date)
         return [GAConversionData(**conv) for conv in conversions]
     except Exception as e:
         logger.error(f"Error fetching conversions: {e}")
@@ -538,13 +548,18 @@ async def generate_engagement_funnel_with_llm(
 @save_response("ga_channel_performance")
 async def get_ga_channel_performance(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 channel performance"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        channels = ga4_manager.get_channel_performance(property_id, period)
+        channels = ga4_manager.get_channel_performance(property_id, period, start_date, end_date)
         return [GAChannelPerformance(**channel) for channel in channels]
     except Exception as e:
         logger.error(f"Error fetching channel performance: {e}")
@@ -555,13 +570,18 @@ async def get_ga_channel_performance(
 async def get_ga_audience_insights(
     property_id: str,
     dimension: str = Query("city", pattern="^(city|userAgeBracket|userGender|deviceCategory|browser)$"),
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d|12m)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 audience insights"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        insights = ga4_manager.get_audience_insights(property_id, dimension, period)
+        insights = ga4_manager.get_audience_insights(property_id, period, start_date, end_date)
         return [GAAudienceInsight(**insight) for insight in insights]
     except Exception as e:
         logger.error(f"Error fetching audience insights: {e}")
@@ -572,13 +592,18 @@ async def get_ga_audience_insights(
 async def get_ga_time_series(
     property_id: str,
     metric: str = Query("totalUsers", pattern="^(totalUsers|sessions|conversions|totalRevenue)$"),
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 time series data"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_time_series(property_id, metric, period)
+        time_series = ga4_manager.get_time_series(property_id, period, start_date, end_date)
         return [GATimeSeriesData(**ts) for ts in time_series]
     except Exception as e:
         logger.error(f"Error fetching time series: {e}")
@@ -659,11 +684,16 @@ async def get_combined_overview(
 async def get_enhanced_combined_roas_roi_metrics(
     ga_property_id: str = Query(..., description="GA4 Property ID"),
     ads_customer_ids: str = Query(..., description="Comma-separated Google Ads Customer IDs"),
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get enhanced combined ROAS and ROI metrics from GA4 and multiple Google Ads accounts with proper currency handling"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         # Parse comma-separated customer IDs
         customer_ids_list = [cid.strip() for cid in ads_customer_ids.split(",") if cid.strip()]
         
@@ -674,11 +704,7 @@ async def get_enhanced_combined_roas_roi_metrics(
             raise HTTPException(status_code=400, detail="Maximum 10 Google Ads customer IDs allowed")
         
         ga4_manager = GA4Manager(current_user["email"])
-        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(
-            ga_property_id, 
-            customer_ids_list, 
-            period
-        )
+        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(ga_property_id, period, start_date, end_date)
         return GAEnhancedCombinedROASROIMetrics(**metrics)
         
     except Exception as e:
@@ -709,13 +735,18 @@ async def get_combined_roas_roi_metrics_legacy(
 @save_response("ga_revenue_breakdown_by_channel")
 async def get_revenue_breakdown_by_channel(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by channel"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_channel(property_id, period)
+        breakdown = ga4_manager.get_revenue_breakdown_by_channel(property_id, period, start_date, end_date)
         return ChannelRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching channel revenue breakdown: {e}")
@@ -725,14 +756,19 @@ async def get_revenue_breakdown_by_channel(
 @save_response("ga_revenue_breakdown_by_source")
 async def get_revenue_breakdown_by_source(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     limit: int = Query(20, ge=5, le=50),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by source/medium"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id, period, limit)
+        breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id, period, start_date, end_date)
         return SourceRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching source revenue breakdown: {e}")
@@ -742,13 +778,18 @@ async def get_revenue_breakdown_by_source(
 @save_response("ga_revenue_breakdown_by_device")
 async def get_revenue_breakdown_by_device(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by device category"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_device(property_id, period)
+        breakdown = ga4_manager.get_revenue_breakdown_by_device(property_id, period, start_date, end_date)
         return DeviceRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching device revenue breakdown: {e}")
@@ -758,14 +799,19 @@ async def get_revenue_breakdown_by_device(
 @save_response("ga_revenue_breakdown_by_location")
 async def get_revenue_breakdown_by_location(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     limit: int = Query(15, ge=5, le=30),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by geographic location"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, period, limit)
+        breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, period, start_date, end_date)
         return LocationRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching location revenue breakdown: {e}")
@@ -775,14 +821,19 @@ async def get_revenue_breakdown_by_location(
 @save_response("ga_revenue_breakdown_by_page")
 async def get_revenue_breakdown_by_page(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     limit: int = Query(20, ge=5, le=50),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by landing page"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+       
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id, period, limit)
+        breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id, period, start_date, end_date)
         return PageRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching page revenue breakdown: {e}")
@@ -792,13 +843,18 @@ async def get_revenue_breakdown_by_page(
 @save_response("ga_revenue_breakdown_by_comprehensive")
 async def get_comprehensive_revenue_breakdown(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get comprehensive revenue breakdown across all dimensions"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_comprehensive_revenue_breakdown(property_id, period)
+        breakdown = ga4_manager.get_comprehensive_revenue_breakdown(property_id, period, start_date, end_date)
         return ComprehensiveRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching comprehensive revenue breakdown: {e}")
@@ -840,13 +896,18 @@ async def get_revenue_breakdown_raw(
 @save_response("ga_channel_revenue_time_series")
 async def get_channel_revenue_time_series(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by channel as time series data for the given period"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_channel_revenue_time_series(property_id, period)
+        time_series = ga4_manager.get_channel_revenue_time_series(property_id, period, start_date, end_date)
         
         if 'error' in time_series:
             raise HTTPException(status_code=500, detail=time_series['error'])
@@ -955,14 +1016,19 @@ async def get_channel_revenue_time_series_raw(
 @save_response("ga_revenue_time_series")
 async def get_revenue_time_series(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
     breakdown_by: str = Query("channel", pattern="^(channel|device|location|source)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get revenue breakdown by specified dimension (channel, device, location, source) as time series data for the given period"""
     try:
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+      
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_revenue_time_series(property_id, period, breakdown_by)
+        time_series = ga4_manager.get_revenue_time_series(property_id, period, start_date, end_date)
         
         if 'error' in time_series:
             raise HTTPException(status_code=500, detail=time_series['error'])

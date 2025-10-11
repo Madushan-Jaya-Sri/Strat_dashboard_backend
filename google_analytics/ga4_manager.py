@@ -51,20 +51,31 @@ class GA4Manager:
         
         return self._client
     
-    def get_date_range(self, period: str):
-        """Get date range based on period"""
-        end_date = datetime.now()
+    def get_date_range(self, period: str, start_date: str = None, end_date: str = None):
+        """Get date range based on period or custom dates"""
+        # Handle custom date range
+        if period == "custom" and start_date and end_date:
+            # Validate date format
+            try:
+                datetime.strptime(start_date, '%Y-%m-%d')
+                datetime.strptime(end_date, '%Y-%m-%d')
+                return start_date, end_date
+            except ValueError:
+                raise ValueError("Dates must be in YYYY-MM-DD format")
+        
+        # Handle predefined periods
+        end_date_obj = datetime.now()
         
         if period == "7d":
-            start_date = end_date - timedelta(days=7)
+            start_date_obj = end_date_obj - timedelta(days=7)
         elif period == "90d":
-            start_date = end_date - timedelta(days=90)
-        elif period in ["365d", "12m"]:  # Support both formats
-            start_date = end_date - timedelta(days=365)
+            start_date_obj = end_date_obj - timedelta(days=90)
+        elif period in ["365d", "12m"]:
+            start_date_obj = end_date_obj - timedelta(days=365)
         else:  # default 30d
-            start_date = end_date - timedelta(days=30)
+            start_date_obj = end_date_obj - timedelta(days=30)
         
-        return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+        return start_date_obj.strftime("%Y-%m-%d"), end_date_obj.strftime("%Y-%m-%d")
     
     def safe_float(self, value, default=0.0):
         """Safely convert to float"""
@@ -145,14 +156,14 @@ class GA4Manager:
             logger.error(f"Error fetching properties: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch properties: {str(e)}")
     
-    def get_metrics(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+    def get_metrics(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Get GA4 metrics for a specific property with dashboard insights"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 metrics=[
                     Metric(name="totalUsers"),
                     Metric(name="sessions"),
@@ -350,14 +361,14 @@ class GA4Manager:
         return f"{final_score}/100"
 
 
-    def get_traffic_sources(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
+    def get_traffic_sources(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get traffic source data for a specific property"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
                 metrics=[
                     Metric(name="sessions"),
@@ -434,14 +445,14 @@ class GA4Manager:
             logger.error(f"Error fetching top pages for property {property_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch top pages: {str(e)}")
     
-    def get_conversions(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
+    def get_conversions(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get conversion data for a specific property"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="eventName")],
                 metrics=[
                     Metric(name="eventCount"),
@@ -1314,14 +1325,15 @@ class GA4Manager:
             return "Poor"
 
 
-    def get_channel_performance(self, property_id: str, period: str = "30d") -> List[Dict[str, Any]]:
+    def get_channel_performance(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get detailed channel performance data"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
+            
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
                 metrics=[
                     Metric(name="totalUsers"),
@@ -1401,11 +1413,11 @@ class GA4Manager:
         except Exception as e:
             logger.warning(f"Geocoding failed for {city}, {country}: {e}")
             return 0.0, 0.0
-        
-    def get_audience_insights(self, property_id: str, dimension: str = "city", period: str = "30d") -> List[Dict[str, Any]]:
+    
+    def get_audience_insights(self, property_id: str, dimension: str = "city", period: str = "30d", start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get audience insights for a specific dimension"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             # For geographic dimensions, get both city and country
             if dimension in ["city", "country"]:
@@ -1418,7 +1430,7 @@ class GA4Manager:
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=dimensions,
                 metrics=[
                     Metric(name="totalUsers"),
@@ -1475,14 +1487,14 @@ class GA4Manager:
             logger.error(f"Error fetching audience insights for property {property_id}: {e}")
             return []
     
-    def get_time_series(self, property_id: str, metric: str = "totalUsers", period: str = "30d") -> List[Dict[str, Any]]:
+    def get_time_series(self, property_id: str, metric: str = "totalUsers", period: str = "30d", start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get time series data for strategic analysis"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="date")],
                 metrics=[Metric(name=metric)],
                 order_bys=[OrderBy(dimension=OrderBy.DimensionOrderBy(dimension_name="date"))]
@@ -1560,15 +1572,14 @@ class GA4Manager:
         
 
     # Add these methods to your GA4Manager class
-
-    def get_revenue_breakdown_by_channel(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+    def get_revenue_breakdown_by_channel(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Get detailed revenue breakdown by channel"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
                 metrics=[
                     Metric(name="totalRevenue"),
@@ -1626,14 +1637,15 @@ class GA4Manager:
             logger.error(f"Error getting revenue breakdown by channel: {e}")
             return {'channels': [], 'totalRevenue': 0, 'totalChannels': 0}
 
-    def get_revenue_breakdown_by_source_medium(self, property_id: str, period: str = "30d", limit: int = 20) -> Dict[str, Any]:
-        """Get revenue breakdown by source/medium"""
+
+    def get_revenue_breakdown_by_source_medium(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None,limit: int = 20) -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[
                     Dimension(name="sessionSource"),
                     Dimension(name="sessionMedium")
@@ -1687,14 +1699,16 @@ class GA4Manager:
             logger.error(f"Error getting revenue breakdown by source/medium: {e}")
             return {'sources': [], 'totalRevenue': 0, 'totalSources': 0}
 
-    def get_revenue_breakdown_by_device(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
-        """Get revenue breakdown by device category"""
+
+
+    def get_revenue_breakdown_by_device(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[Dimension(name="deviceCategory")],
                 metrics=[
                     Metric(name="totalRevenue"),
@@ -1744,14 +1758,15 @@ class GA4Manager:
             logger.error(f"Error getting revenue breakdown by device: {e}")
             return {'devices': [], 'totalRevenue': 0, 'totalDevices': 0}
 
-    def get_revenue_breakdown_by_location(self, property_id: str, period: str = "30d", limit: int = 15) -> Dict[str, Any]:
-        """Get revenue breakdown by geographic location"""
+
+    def get_revenue_breakdown_by_location(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None,limit: int = 15) -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[
                     Dimension(name="country"),
                     Dimension(name="city")
@@ -1805,14 +1820,15 @@ class GA4Manager:
             logger.error(f"Error getting revenue breakdown by location: {e}")
             return {'locations': [], 'totalRevenue': 0, 'totalLocations': 0}
 
-    def get_revenue_breakdown_by_page(self, property_id: str, period: str = "30d", limit: int = 20) -> Dict[str, Any]:
-        """Get revenue breakdown by landing page"""
+
+    def get_revenue_breakdown_by_page(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None,limit: int = 20) -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[
                     Dimension(name="landingPage"),
                     Dimension(name="pageTitle")
@@ -1865,8 +1881,10 @@ class GA4Manager:
             logger.error(f"Error getting revenue breakdown by page: {e}")
             return {'pages': [], 'totalRevenue': 0, 'totalPages': 0}
 
-    def get_comprehensive_revenue_breakdown(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
-        """Get comprehensive revenue breakdown across all dimensions"""
+
+    def get_comprehensive_revenue_breakdown(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Get detailed revenue breakdown by channel"""
+
         try:
             property_currency = self.get_property_currency_enhanced(property_id)
             currency_rates = self.get_currency_rates()
@@ -1933,14 +1951,15 @@ class GA4Manager:
 
     # Add these methods to your GA4Manager class
 
-    def get_channel_revenue_time_series(self, property_id: str, period: str = "30d") -> Dict[str, Any]:
+    def get_channel_revenue_time_series(self, property_id: str, period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Get revenue breakdown by channel over time"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
+        
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[
                     Dimension(name="date"),
                     Dimension(name="sessionDefaultChannelGrouping")
