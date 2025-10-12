@@ -806,7 +806,7 @@ class GA4Manager:
             logger.warning(f"Could not get currency for customer {customer_id}: {e}")
             return "USD"
 
-    def get_multi_customer_ad_spend(self, ads_customer_ids: List[str], period: str) -> Dict[str, Any]:
+    def get_multi_customer_ad_spend(self, ads_customer_ids: List[str], period: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Get total ad spend from multiple Google Ads customers"""
         try:
             from google_ads.ads_manager import GoogleAdsManager
@@ -820,7 +820,12 @@ class GA4Manager:
                 try:
                     # Get ad spend for this customer
                     ads_period = self.convert_ga_period_to_ads_period(period)
-                    customer_cost = ads_manager.get_total_cost_for_period(customer_id, ads_period)
+                    # Pass dates to Google Ads if custom period
+                    if period == "custom" and start_date and end_date:
+                        # You'll need to add a method in GoogleAdsManager to handle custom dates
+                        customer_cost = ads_manager.get_total_cost_for_custom_period(customer_id, start_date, end_date)
+                    else:
+                        customer_cost = ads_manager.get_total_cost_for_period(customer_id, ads_period)
                     
                     # Get customer currency
                     customer_currency = self.get_ads_customer_currency(customer_id)
@@ -872,10 +877,18 @@ class GA4Manager:
                 'error': str(e)
             }
         
-    def get_enhanced_combined_roas_roi_metrics(self, property_id: str, ads_customer_ids: List[str], period: str = "30d") -> Dict[str, Any]:
+    def get_enhanced_combined_roas_roi_metrics(
+        self, 
+        property_id: str, 
+        ads_customer_ids: List[str], 
+        period: str = "30d", 
+        start_date: str = None, 
+        end_date: str = None
+    ) -> Dict[str, Any]:
         """Get ROAS and ROI metrics with proper currency handling and multiple ads accounts"""
         try:
-            start_date, end_date = self.get_date_range(period)
+            # Update this line to use the new parameters
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             currency_rates = self.get_currency_rates()
             
             # Get property currency using enhanced method
@@ -887,7 +900,7 @@ class GA4Manager:
             # Get GA4 data
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 metrics=[
                     Metric(name="totalRevenue"),
                     Metric(name="purchaseRevenue"),
@@ -906,7 +919,7 @@ class GA4Manager:
             # Get PAID SEARCH revenue specifically
             paid_search_request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],  # Use _str variables
                 dimensions=[Dimension(name="sessionDefaultChannelGrouping")],
                 metrics=[
                     Metric(name="totalRevenue"),
@@ -929,7 +942,7 @@ class GA4Manager:
             # Get first-time purchasers data
             first_time_request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],  # Use _str variables
                 dimensions=[Dimension(name="newVsReturning")],
                 metrics=[
                     Metric(name="totalPurchasers"),
@@ -940,7 +953,7 @@ class GA4Manager:
             first_time_response = self.client.run_report(first_time_request)
             
             # Get multi-customer ad spend in USD
-            ad_spend_data = self.get_multi_customer_ad_spend(ads_customer_ids, period)
+            ad_spend_data = self.get_multi_customer_ad_spend(ads_customer_ids, period, start_date, end_date)
             actual_ad_cost_usd = ad_spend_data['total_cost_usd']
             
             if response.rows:

@@ -716,12 +716,18 @@ async def get_enhanced_combined_roas_roi_metrics(
         
         if not customer_ids_list:
             raise HTTPException(status_code=400, detail="At least one Google Ads customer ID is required")
-        
+
         if len(customer_ids_list) > 10:  # Reasonable limit
             raise HTTPException(status_code=400, detail="Maximum 10 Google Ads customer IDs allowed")
-        
+
         ga4_manager = GA4Manager(current_user["email"])
-        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(ga_property_id, ads_customer_ids, period, start_date, end_date)
+        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(
+            ga_property_id, 
+            customer_ids_list,  # ✅ Pass the list, not the string
+            period, 
+            start_date, 
+            end_date
+        )
         return GAEnhancedCombinedROASROIMetrics(**metrics)
         
     except Exception as e:
