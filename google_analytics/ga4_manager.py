@@ -506,7 +506,6 @@ class GA4Manager:
     def call_openai_api(self, prompt: str) -> str:
         """Call OpenAI API"""
         try:
-            os
             client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             
             response = client.chat.completions.create(
@@ -514,7 +513,7 @@ class GA4Manager:
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are a Google Analytics expert. Always respond with valid JSON only, no additional text."
+                        "content": "You are a Google Analytics expert. You MUST respond with ONLY valid JSON, with no markdown formatting, no code blocks, no backticks, and no additional text before or after the JSON."
                     },
                     {
                         "role": "user", 
@@ -522,15 +521,30 @@ class GA4Manager:
                     }
                 ],
                 temperature=0.1,
-                max_tokens=500
+                max_tokens=1000  # Increased from 500 to handle more events
             )
             
-            return response.choices[0].message.content
+            content = response.choices[0].message.content.strip()
+            
+            # ✅ Remove markdown code blocks if present
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            elif content.startswith('```'):
+                content = content[3:]  # Remove ```
+            
+            if content.endswith('```'):
+                content = content[:-3]  # Remove closing ```
+            
+            content = content.strip()
+            
+            logger.info(f"OpenAI raw response: {content[:200]}...")  # Log first 200 chars
+            
+            return content
             
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
             raise Exception(f"Failed to get LLM analysis: {str(e)}")
-    
+        
     def generate_engagement_funnel_with_llm(
         self, 
         property_id: str, 
@@ -556,56 +570,90 @@ class GA4Manager:
                     'funnel_stages': []
                 }
             
-            # Prepare LLM prompt
+            # ✅ Limit events if too many (to avoid token limits)
+            if len(selected_events_data) > 10:
+                logger.warning(f"Too many events selected ({len(selected_events_data)}), limiting to top 10 by event count")
+                selected_events_data = sorted(selected_events_data, key=lambda x: x.get('eventCount', 0), reverse=True)[:10]
+                selected_event_names = [e['eventName'] for e in selected_events_data]
+            
+            # Prepare LLM prompt with clearer instructions
             llm_prompt = f"""
-            You are a Google Analytics expert creating a user engagement funnel from GA4 event data.
+    You are a Google Analytics expert. Create a user engagement funnel from the provided GA4 event data.
 
-            Selected Events: {selected_event_names}
+    CRITICAL: You MUST respond with ONLY valid JSON. Do not include any markdown formatting, code blocks, or explanatory text.
 
-            Raw GA4 Conversion Data:
-            {json.dumps(selected_events_data, indent=2)}
+    Selected Events: {selected_event_names}
 
-            Task: Create a logical user engagement funnel by:
-            1. Order these events from top of funnel (earliest user interaction) to bottom (final conversion) so that the eventCount values form a perfect funnel: each stage's count must be less than or equal to the previous stage (no negative drop-off percentages).
-            2. Calculate funnel metrics for each stage.
+    Raw GA4 Data:
+    {json.dumps(selected_events_data, indent=2)}
 
-            Consider typical user journey patterns:
-            - Entry events usually come first (session_start, page_view, first_visit)
-            - Engagement events in middle (scroll, user_engagement, view_item)
-            - Action/conversion events at bottom (form_submit, purchase, sign_up, click)
-            - If eventCount values do not follow a decreasing order, reorder the events so that the funnel is perfectly decreasing (no stage should have a higher count than the previous).
-            - If needed, drop events that break the funnel shape.
+    Task:
+    1. Order events from highest eventCount to lowest to create a valid funnel (each stage must have count ≤ previous stage)
+    2. Calculate metrics for each stage
+    3. Skip any events that would break the funnel order
 
-            Return ONLY a JSON response in this exact format:
+    Response Format (JSON ONLY):
+    {{
+        "funnel_stages": [
             {{
-                "funnel_stages": [
-                    {{
-                        "stage_name": "event_name_here",
-                        "count": event_count_from_data,
-                        "percentage_of_total": percentage_relative_to_first_stage,
-                        "drop_off_percentage": percentage_dropped_from_previous_stage,
-                        "conversions": conversions_from_data,
-                        "conversion_rate": conversion_rate_from_data,
-                        "revenue": revenue_from_data
-                    }}
-                ],
-                "ordered_events": ["event1", "event2", "event3"]
+                "stage_name": "event_name",
+                "count": event_count_from_data,
+                "percentage_of_total": (count / first_stage_count) * 100,
+                "drop_off_percentage": ((prev_count - count) / prev_count) * 100,
+                "conversions": conversions_from_data,
+                "conversion_rate": conversion_rate_from_data,
+                "revenue": revenue_from_data
             }}
+        ],
+        "ordered_events": ["event1", "event2", "event3"]
+    }}
 
-            Notes:
-            - First stage should have percentage_of_total: 100.0 and drop_off_percentage: 0.0
-            - Use actual eventCount values from the data for 'count'
-            - Calculate drop_off_percentage as: ((previous_count - current_count) / previous_count) * 100
-            - Calculate percentage_of_total as: (current_count / first_stage_count) * 100
-            - Order events so that eventCount values strictly decrease from stage to stage (no negative drop-off).
-            - If any event breaks the funnel shape, exclude it from the funnel.
-            """
+    Rules:
+    - First stage: percentage_of_total=100.0, drop_off_percentage=0.0
+    - Each stage count must be ≤ previous stage count
+    - Use actual values from the data
+    - Return ONLY the JSON object, no other text
+    """
             
             # Call OpenAI API
+            logger.info(f"Calling OpenAI API for funnel generation with {len(selected_events_data)} events")
             openai_response = self.call_openai_api(llm_prompt)
             
-            # Parse LLM response
-            llm_data = json.loads(openai_response.strip())
+            # ✅ Validate and parse JSON with better error handling
+            try:
+                llm_data = json.loads(openai_response)
+                logger.info("Successfully parsed OpenAI response")
+            except json.JSONDecodeError as json_error:
+                logger.error(f"Failed to parse OpenAI response as JSON: {json_error}")
+                logger.error(f"OpenAI response was: {openai_response[:500]}")
+                
+                # ✅ Fallback: Create a simple funnel manually
+                logger.info("Creating fallback funnel by sorting events by count")
+                sorted_events = sorted(selected_events_data, key=lambda x: x.get('eventCount', 0), reverse=True)
+                
+                funnel_stages = []
+                for i, event in enumerate(sorted_events):
+                    count = event.get('eventCount', 0)
+                    conversions = event.get('conversions', 0)
+                    revenue = event.get('conversionValue', 0)
+                    
+                    # Only add if count is less than or equal to previous stage
+                    if i == 0 or count <= funnel_stages[-1]['count']:
+                        stage = {
+                            'stage_name': event['eventName'],
+                            'count': count,
+                            'percentage_of_total': (count / sorted_events[0].get('eventCount', 1)) * 100 if sorted_events[0].get('eventCount', 0) > 0 else 0,
+                            'drop_off_percentage': 0.0 if i == 0 else ((funnel_stages[-1]['count'] - count) / funnel_stages[-1]['count']) * 100 if funnel_stages[-1]['count'] > 0 else 0,
+                            'conversions': conversions,
+                            'conversion_rate': event.get('conversionRate', 0),
+                            'revenue': revenue
+                        }
+                        funnel_stages.append(stage)
+                
+                llm_data = {
+                    'funnel_stages': funnel_stages,
+                    'ordered_events': [stage['stage_name'] for stage in funnel_stages]
+                }
             
             funnel_stages = llm_data.get('funnel_stages', [])
             ordered_events = llm_data.get('ordered_events', [])
@@ -645,8 +693,6 @@ class GA4Manager:
                 'error': str(e),
                 'funnel_stages': []
             }
-
-
 
 
 
