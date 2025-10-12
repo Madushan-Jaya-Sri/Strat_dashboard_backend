@@ -468,18 +468,23 @@ async def get_ga_metrics(
 @save_response("ga_traffic_sources", cache_minutes=10)
 async def get_ga_traffic_sources(
     property_id: str,
-    period: str = Query("30d", pattern="^(7d|30d|90d|365d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d|365d|custom)$"),  # Add custom
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),  # Add this
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),  # Add this
     current_user: dict = Depends(get_current_user)
 ):
     """Get GA4 traffic sources"""
     try:
+        if period == "custom" and (not start_date or not end_date):  # Add validation
+            raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
+        
         ga4_manager = GA4Manager(current_user["email"])
-        sources = ga4_manager.get_traffic_sources(property_id, period)
+        sources = ga4_manager.get_traffic_sources(property_id, period, start_date, end_date)  # Pass dates
         return [GATrafficSource(**source) for source in sources]
     except Exception as e:
         logger.error(f"Error fetching traffic sources: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/api/analytics/top-pages/{property_id}", response_model=List[GAPageData])
 @save_response("ga_top_pages")
 async def get_ga_top_pages(
