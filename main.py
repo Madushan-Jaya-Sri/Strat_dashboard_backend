@@ -526,18 +526,29 @@ async def get_ga_conversions(
 async def generate_engagement_funnel_with_llm(
     property_id: str,
     request: FunnelRequest,
-    period: str = Query("30d", description="Time period"),
+    period: str = Query("30d", description="Time period", pattern="^(7d|30d|90d|365d|custom)$"),
+    start_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
+    end_date: Optional[str] = Query(None, pattern="^\d{4}-\d{2}-\d{2}$"),
     current_user: dict = Depends(get_current_user)
 ):
     """Generate engagement funnel from selected event names"""
     try:
+        # Validate custom period
+        if period == "custom" and (not start_date or not end_date):
+            raise HTTPException(
+                status_code=400, 
+                detail="start_date and end_date are required for custom period"
+            )
+        
         ga4_manager = GA4Manager(current_user['email'])
         
         funnel_data = ga4_manager.generate_engagement_funnel_with_llm(
             property_id=property_id,
             selected_event_names=request.selected_events,
-            conversions_raw_data=request.conversions_data,  # Fixed parameter name
-            period=period
+            conversions_raw_data=request.conversions_data,
+            period=period,
+            start_date=start_date,
+            end_date=end_date
         )
         
         return {
@@ -548,7 +559,8 @@ async def generate_engagement_funnel_with_llm(
     except Exception as e:
         logger.error(f"Error in funnel generation endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+    
 @app.get("/api/analytics/channel-performance/{property_id}", response_model=List[GAChannelPerformance])
 @save_response("ga_channel_performance")
 async def get_ga_channel_performance(

@@ -531,8 +531,15 @@ class GA4Manager:
             logger.error(f"OpenAI API call failed: {e}")
             raise Exception(f"Failed to get LLM analysis: {str(e)}")
 
-
-    def generate_engagement_funnel_with_llm(self, property_id: str, selected_event_names: List[str], conversions_raw_data: List[Dict[str, Any]], period: str = "30d") -> Dict[str, Any]:
+    def generate_engagement_funnel_with_llm(
+        self, 
+        property_id: str, 
+        selected_event_names: List[str], 
+        conversions_raw_data: List[Dict[str, Any]], 
+        period: str = "30d",
+        start_date: str = None,
+        end_date: str = None
+    ) -> Dict[str, Any]:
         """Generate engagement funnel using OpenAI LLM with selected events and raw conversion data"""
         try:
             # Filter raw data for selected events only
@@ -638,8 +645,6 @@ class GA4Manager:
                 'error': str(e),
                 'funnel_stages': []
             }
-
-
 
 
 
