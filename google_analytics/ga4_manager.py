@@ -468,7 +468,7 @@ class GA4Manager:
             # Get total sessions for rate calculation
             total_sessions_request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 metrics=[Metric(name="sessions")]
             )
             
@@ -530,7 +530,7 @@ class GA4Manager:
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
             raise Exception(f"Failed to get LLM analysis: {str(e)}")
-
+    
     def generate_engagement_funnel_with_llm(
         self, 
         property_id: str, 
@@ -645,8 +645,6 @@ class GA4Manager:
                 'error': str(e),
                 'funnel_stages': []
             }
-
-
 
 
 
