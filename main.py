@@ -586,7 +586,7 @@ async def get_ga_audience_insights(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
         
         ga4_manager = GA4Manager(current_user["email"])
-        insights = ga4_manager.get_audience_insights(property_id, period, start_date, end_date)
+        insights = ga4_manager.get_audience_insights(property_id,dimension, period, start_date, end_date)
         return [GAAudienceInsight(**insight) for insight in insights]
     except Exception as e:
         logger.error(f"Error fetching audience insights: {e}")
@@ -608,7 +608,7 @@ async def get_ga_time_series(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
         
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_time_series(property_id, period, start_date, end_date)
+        time_series = ga4_manager.get_time_series(property_id, metric, period, start_date, end_date)
         return [GATimeSeriesData(**ts) for ts in time_series]
     except Exception as e:
         logger.error(f"Error fetching time series: {e}")
@@ -709,7 +709,7 @@ async def get_enhanced_combined_roas_roi_metrics(
             raise HTTPException(status_code=400, detail="Maximum 10 Google Ads customer IDs allowed")
         
         ga4_manager = GA4Manager(current_user["email"])
-        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(ga_property_id, period, start_date, end_date)
+        metrics = ga4_manager.get_enhanced_combined_roas_roi_metrics(ga_property_id, ads_customer_ids, period, start_date, end_date)
         return GAEnhancedCombinedROASROIMetrics(**metrics)
         
     except Exception as e:
@@ -773,7 +773,7 @@ async def get_revenue_breakdown_by_source(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
         
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id, period, start_date, end_date)
+        breakdown = ga4_manager.get_revenue_breakdown_by_source_medium(property_id,limit, period, start_date, end_date)
         return SourceRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching source revenue breakdown: {e}")
@@ -816,7 +816,7 @@ async def get_revenue_breakdown_by_location(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
         
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, period, start_date, end_date)
+        breakdown = ga4_manager.get_revenue_breakdown_by_location(property_id, limit,period, start_date, end_date)
         return LocationRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching location revenue breakdown: {e}")
@@ -838,7 +838,7 @@ async def get_revenue_breakdown_by_page(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
        
         ga4_manager = GA4Manager(current_user["email"])
-        breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id, period, start_date, end_date)
+        breakdown = ga4_manager.get_revenue_breakdown_by_page(property_id,limit, period, start_date, end_date)
         return PageRevenueBreakdown(**breakdown)
     except Exception as e:
         logger.error(f"Error fetching page revenue breakdown: {e}")
@@ -1033,7 +1033,7 @@ async def get_revenue_time_series(
             raise HTTPException(status_code=400, detail="start_date and end_date are required for custom period")
       
         ga4_manager = GA4Manager(current_user["email"])
-        time_series = ga4_manager.get_revenue_time_series(property_id, period, start_date, end_date)
+        time_series = ga4_manager.get_revenue_time_series(property_id, breakdown_by, period, start_date, end_date)
         
         if 'error' in time_series:
             raise HTTPException(status_code=500, detail=time_series['error'])
