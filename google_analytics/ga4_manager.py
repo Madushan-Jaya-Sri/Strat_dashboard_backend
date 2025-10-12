@@ -2123,8 +2123,8 @@ class GA4Manager:
                 'channel_summary': sorted_channels,
                 'channels_found': list(all_channels),
                 'date_range': {
-                    'start_date': start_date,
-                    'end_date': end_date,
+                    'start_date': start_date_str,
+                    'end_date': end_date_str,
                     'total_days': len(time_series_list)
                 },
                 'totals': {
@@ -2138,13 +2138,24 @@ class GA4Manager:
             
         except Exception as e:
             logger.error(f"Error getting channel revenue time series: {e}")
+            # Get the date strings even in error case
+            try:
+                start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
+            except:
+                start_date_str, end_date_str = "", ""
+            
             return {
                 'propertyId': property_id,
                 'period': period,
                 'error': str(e),
                 'time_series': [],
                 'channel_summary': [],
-                'channels_found': []
+                'channels_found': [],
+                'date_range': {
+                    'start_date': start_date_str,  # ✅ Provide empty strings instead of None
+                    'end_date': end_date_str,
+                    'total_days': 0
+                }
             }
 
     def get_specific_channels_time_series(self, property_id: str, channels: List[str], period: str = "30d") -> Dict[str, Any]:
@@ -2211,8 +2222,8 @@ class GA4Manager:
                 'error': str(e),
                 'channels_requested': channels
             }
-        
-    def get_revenue_time_series(self, property_id: str, period: str = "30d", breakdown_by: str = "channel") -> Dict[str, Any]:
+            
+    def get_revenue_time_series(self, property_id: str, breakdown_by: str = "channel", period: str = "30d", start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Get revenue breakdown by specified dimension over time (e.g., channel, source, device, location)"""
         try:
             # Map breakdown_by to GA4 dimension name
@@ -2227,11 +2238,11 @@ class GA4Manager:
             
             group_dimension = dimension_map[breakdown_by]
             
-            start_date, end_date = self.get_date_range(period)
+            start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
             
             request = RunReportRequest(
                 property=f"properties/{property_id}",
-                date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
+                date_ranges=[DateRange(start_date=start_date_str, end_date=end_date_str)],
                 dimensions=[
                     Dimension(name="date"),
                     Dimension(name=group_dimension)
@@ -2380,8 +2391,8 @@ class GA4Manager:
                 'group_summary': sorted_groups,
                 'groups_found': list(all_groups),
                 'date_range': {
-                    'start_date': start_date,
-                    'end_date': end_date,
+                    'start_date': start_date_str,  # ✅ Fixed: Use _str version
+                    'end_date': end_date_str,      # ✅ Fixed: Use _str version
                     'total_days': len(time_series_list)
                 },
                 'totals': {
@@ -2395,6 +2406,13 @@ class GA4Manager:
             
         except Exception as e:
             logger.error(f"Error getting revenue time series by {breakdown_by}: {e}")
+            
+            # Get the date strings even in error case
+            try:
+                start_date_str, end_date_str = self.get_date_range(period, start_date, end_date)
+            except:
+                start_date_str, end_date_str = "", ""
+            
             return {
                 'propertyId': property_id,
                 'period': period,
@@ -2402,5 +2420,10 @@ class GA4Manager:
                 'error': str(e),
                 'time_series': [],
                 'group_summary': [],
-                'groups_found': []
+                'groups_found': [],
+                'date_range': {
+                    'start_date': start_date_str,  # ✅ Fixed: Provide strings instead of None
+                    'end_date': end_date_str,
+                    'total_days': 0
+                }
             }
