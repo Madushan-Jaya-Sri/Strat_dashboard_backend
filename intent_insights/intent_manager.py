@@ -63,12 +63,28 @@ class IntentManager:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     
     def _calculate_date_range(self, timeframe: str, start_date: str = None, end_date: str = None) -> Tuple[str, str]:
-        """Calculate date range based on timeframe"""
+        """Calculate date range based on timeframe - Google Ads requires month boundaries"""
         today = datetime.now().date()
         
         if timeframe == "custom" and start_date and end_date:
             self._validate_date_range(start_date, end_date)
-            return start_date, end_date
+            
+            # ✅ Google Ads historical metrics requires dates at month start
+            start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            
+            # Adjust to month boundaries
+            start_month_boundary = start_obj.replace(day=1)
+            
+            # End date: last day of the month
+            if end_obj.month == 12:
+                end_month_boundary = end_obj.replace(day=31)
+            else:
+                # Get last day of current month
+                next_month = end_obj.replace(day=28) + timedelta(days=4)
+                end_month_boundary = next_month - timedelta(days=next_month.day)
+            
+            return start_month_boundary.strftime("%Y-%m-%d"), end_month_boundary.strftime("%Y-%m-%d")
         
         elif timeframe == "1_month":
             end_date = (today.replace(day=1) - timedelta(days=1))
@@ -76,19 +92,19 @@ class IntentManager:
             
         elif timeframe == "3_months":
             end_date = (today.replace(day=1) - timedelta(days=1))
-            start_date = (end_date.replace(day=1) - timedelta(days=90)).replace(day=1)
+            start_date = (end_date - timedelta(days=90)).replace(day=1)
             
         elif timeframe == "12_months":
             end_date = (today.replace(day=1) - timedelta(days=1))
-            start_date = (end_date.replace(day=1) - timedelta(days=365)).replace(day=1)
+            start_date = (end_date - timedelta(days=365)).replace(day=1)
         
         else:
             # Default to 12 months
             end_date = (today.replace(day=1) - timedelta(days=1))
-            start_date = (end_date.replace(day=1) - timedelta(days=365)).replace(day=1)
+            start_date = (end_date - timedelta(days=365)).replace(day=1)
         
         return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
-    
+
     def _convert_competition_to_text(self, competition_value):
         """Convert competition enum to readable text"""
         try:
@@ -197,7 +213,7 @@ class IntentManager:
             return {"error": str(e), "results": []}
     
     def _get_historical_metrics_raw(self, customer_id: str, keywords: List[str], 
-                                   location_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
+                                location_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """Get raw historical metrics response from API"""
         try:
             keyword_plan_idea_service = self.client.get_service("KeywordPlanIdeaService")
@@ -215,16 +231,29 @@ class IntentManager:
             request.keyword_plan_network = self.client.enums.KeywordPlanNetworkEnum.GOOGLE_SEARCH
             request.include_adult_keywords = False
             
+            # ✅ Add validation logging
+            logger.info(f"Requesting historical metrics with dates: {start_date} to {end_date}")
+            
             # Set date range
             start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
             end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            
+            # ✅ Validate date range
+            if start_obj > end_obj:
+                raise ValueError("Start date must be before end date")
+            
+            if start_obj > datetime.now().date():
+                raise ValueError("Start date cannot be in the future")
             
             request.historical_metrics_options.year_month_range.start.year = start_obj.year
             request.historical_metrics_options.year_month_range.start.month = start_obj.month
             request.historical_metrics_options.year_month_range.end.year = end_obj.year
             request.historical_metrics_options.year_month_range.end.month = end_obj.month
             
+            logger.info(f"Date range set: {start_obj.year}-{start_obj.month} to {end_obj.year}-{end_obj.month}")
+            
             response = keyword_plan_idea_service.generate_keyword_historical_metrics(request=request)
+        
             
             # Convert response to dict format
             raw_data = {
@@ -271,4 +300,5 @@ class IntentManager:
             
         except Exception as e:
             logger.error(f"Error getting historical metrics: {e}")
+            logger.error(f"Start date: {start_date}, End date: {end_date}")
             return {"error": str(e), "results": []}
