@@ -133,6 +133,23 @@ class MongoManager:
             'ga_time_series': 'google_analytics_time_series',
             'ga_trends': 'google_analytics_trends',
             'ga_roas_roi_time_series': 'google_analytics_roas_roi_time_series',
+            'ga_funnel_data': 'ga_funnel_data',
+
+            # New mappings for Meta endpoints
+            'meta_account_insights_summary': 'meta_account_insights_summary',
+            'meta_campaigns_paginated': 'meta_campaigns_paginated',
+            'meta_campaigns_list': 'meta_campaigns_list',
+            'meta_campaigns_timeseries': 'meta_campaigns_timeseries',
+            'meta_campaigns_demographics': 'meta_campaigns_demographics',
+            'meta_campaigns_placements': 'meta_campaigns_placements',
+            'meta_adsets': 'meta_adsets',
+            'meta_adsets_timeseries': 'meta_adsets_timeseries',
+            'meta_adsets_demographics': 'meta_adsets_demographics',
+            'meta_adsets_placements': 'meta_adsets_placements',
+            'meta_ads': 'meta_ads',
+            'meta_ads_timeseries': 'meta_ads_timeseries',
+            'meta_ads_demographics': 'meta_ads_demographics',
+            'meta_ads_placements': 'meta_ads_placements',
             
             # Combined endpoints
             'combined_overview': 'ads_ga_combined_overview_metrics',
@@ -164,8 +181,11 @@ class MongoManager:
             'meta_time_series': 'meta_time_series',
 
             # Facebook Pages endpoints
-            'facebook_pages': 'facebook_pages',
-            'facebook_page_insights': 'facebook_page_insights',
+            'meta_pages': 'facebook_pages',
+            'meta_page_insights': 'facebook_page_insights',
+
+            # 'facebook_pages': 'facebook_pages',
+            # 'facebook_page_insights': 'facebook_page_insights',
             'facebook_page_posts': 'facebook_page_posts',
             'facebook_post_insights': 'facebook_post_insights',
             'facebook_audience_insights': 'facebook_audience_insights',

@@ -523,6 +523,7 @@ async def get_ga_conversions(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analytics/funnel/{property_id}")
+@save_response("ga_funnel_data")
 async def generate_engagement_funnel_with_llm(
     property_id: str,
     request: FunnelRequest,
@@ -1268,6 +1269,7 @@ async def get_meta_ad_accounts(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/meta/ad-accounts/{account_id}/insights/summary", response_model=AccountInsightsSummary)
+@save_response("meta_account_insights_summary")
 async def get_account_insights_summary(
     account_id: str,
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1294,6 +1296,7 @@ async def get_account_insights_summary(
 
 
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/paginated", response_model=PaginatedCampaignsResponse)
+@save_response("meta_campaigns_paginated")
 async def get_campaigns_paginated(
     account_id: str,
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1326,6 +1329,7 @@ async def get_campaigns_paginated(
 
 # 2. Get campaigns list (no insights, very fast)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
+@save_response("meta_campaigns_list")
 async def get_campaigns_list(
     account_id: str,
     status: Optional[str] = Query(None, description="Comma-separated status values: ACTIVE,PAUSED,ARCHIVED"),
@@ -1360,6 +1364,7 @@ async def get_campaigns_list(
 
 # 3. Get campaign timeseries
 @app.post("/api/meta/campaigns/timeseries", response_model=List[CampaignTimeseries])
+@save_response("meta_campaigns_timeseries")
 async def get_campaigns_timeseries(
     campaign_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1377,6 +1382,7 @@ async def get_campaigns_timeseries(
 
 # 4. Get campaign demographics
 @app.post("/api/meta/campaigns/demographics", response_model=List[CampaignDemographics])
+@save_response("meta_campaigns_demographics")
 async def get_campaigns_demographics(
     campaign_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1394,6 +1400,7 @@ async def get_campaigns_demographics(
 
 # 5. Get campaign placements
 @app.post("/api/meta/campaigns/placements", response_model=List[CampaignPlacements])
+@save_response("meta_campaigns_placements")
 async def get_campaigns_placements(
     campaign_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1412,6 +1419,7 @@ async def get_campaigns_placements(
 
 # 6. Get ad sets by campaigns
 @app.post("/api/meta/campaigns/adsets", response_model=List[AdSetInfo])
+@save_response("meta_adsets")
 async def get_adsets_by_campaigns(
     campaign_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1454,6 +1462,7 @@ async def get_adsets_by_campaigns(
 
 # 7. Get ad set timeseries
 @app.post("/api/meta/adsets/timeseries", response_model=List[AdSetTimeseries])
+@save_response("meta_adsets_timeseries")
 async def get_adsets_timeseries(
     adset_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1472,6 +1481,7 @@ async def get_adsets_timeseries(
 
 # 8. Get ad set demographics
 @app.post("/api/meta/adsets/demographics", response_model=List[AdSetDemographics])
+@save_response("meta_adsets_demographics")
 async def get_adsets_demographics(
     adset_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1490,6 +1500,7 @@ async def get_adsets_demographics(
 
 # 9. Get ad set placements
 @app.post("/api/meta/adsets/placements", response_model=List[AdSetPlacements])
+@save_response("meta_adsets_placements")
 async def get_adsets_placements(
     adset_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1508,6 +1519,7 @@ async def get_adsets_placements(
 
 # 10. Get ads by ad sets
 @app.post("/api/meta/adsets/ads", response_model=List[AdInfo])
+@save_response("meta_ads")
 async def get_ads_by_adsets(
     adset_ids: List[str],
     current_user: dict = Depends(get_current_user)
@@ -1523,6 +1535,7 @@ async def get_ads_by_adsets(
 
 # 11. Get ad timeseries
 @app.post("/api/meta/ads/timeseries", response_model=List[AdTimeseries])
+@save_response("meta_ads_timeseries")
 async def get_ads_timeseries(
     ad_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1541,6 +1554,7 @@ async def get_ads_timeseries(
 
 # 12. Get ad demographics
 @app.post("/api/meta/ads/demographics", response_model=List[AdDemographics])
+@save_response("meta_ads_demographics")
 async def get_ads_demographics(
     ad_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
@@ -1559,6 +1573,7 @@ async def get_ads_demographics(
 
 # 13. Get ad placements
 @app.post("/api/meta/ads/placements", response_model=List[AdPlacements])
+@save_response("meta_ads_placements")
 async def get_ads_placements(
     ad_ids: List[str],
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
