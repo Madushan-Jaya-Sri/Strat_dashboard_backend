@@ -183,18 +183,26 @@ class MongoManager:
             # Facebook Pages endpoints
             'meta_pages': 'facebook_pages',
             'meta_page_insights': 'facebook_page_insights',
-
-            # 'facebook_pages': 'facebook_pages',
-            # 'facebook_page_insights': 'facebook_page_insights',
-            'facebook_page_posts': 'facebook_page_posts',
+            'meta_page_insights_timeseries': 'facebook_page_insights_timeseries',
+            'meta_page_posts': 'facebook_page_posts',
+            'meta_page_posts_timeseries': 'facebook_page_posts_timeseries',
+            'meta_video_views_breakdown': 'facebook_video_views_breakdown',
+            'meta_content_type_breakdown': 'facebook_content_type_breakdown',
+            'meta_page_demographics': 'facebook_page_demographics',
+            'meta_follows_unfollows': 'facebook_follows_unfollows',
+            'meta_engagement_breakdown': 'facebook_engagement_breakdown',
+            'meta_organic_vs_paid': 'facebook_organic_vs_paid',
             'facebook_post_insights': 'facebook_post_insights',
             'facebook_audience_insights': 'facebook_audience_insights',
             'facebook_performance_summary': 'facebook_performance_summary',
 
             # Instagram endpoints
-            'instagram_accounts': 'instagram_accounts',
-            'instagram_account_insights': 'instagram_account_insights',
-            'instagram_account_media': 'instagram_account_media',
+            
+            'meta_instagram_accounts': 'instagram_accounts',
+            'meta_instagram_insights': 'instagram_account_insights',
+            'meta_instagram_insights_timeseries': 'instagram_insights_timeseries',
+            'meta_instagram_media': 'instagram_account_media',
+            'meta_instagram_media_timeseries': 'instagram_media_timeseries',
             'instagram_stories': 'instagram_stories',
             'instagram_audience_demographics': 'instagram_audience_demographics',
             'instagram_hashtag_performance': 'instagram_hashtag_performance',
