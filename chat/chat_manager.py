@@ -52,6 +52,36 @@ class ChatManager:
             'intent_insights': [
                 'intent_keyword_insights'
             ],
+                'meta_ads': [
+                'meta_ad_accounts',
+                'meta_account_insights_summary',
+                'meta_campaigns_paginated',
+                'meta_campaigns_list',
+                'meta_campaigns_timeseries',
+                'meta_campaigns_demographics',
+                'meta_campaigns_placements',
+                'meta_adsets',
+                'meta_adsets_timeseries',
+                'meta_adsets_demographics',
+                'meta_adsets_placements',
+                'meta_ads',
+                'meta_ads_timeseries',
+                'meta_ads_demographics',
+                'meta_ads_placements'
+            ],
+            'facebook_analytics': [
+                'facebook_pages',
+                'facebook_page_insights',
+                'facebook_page_insights_timeseries',
+                'facebook_page_posts',
+                'facebook_page_posts_timeseries',
+                'facebook_video_views_breakdown',
+                'facebook_content_type_breakdown',
+                'facebook_page_demographics',
+                'facebook_follows_unfollows',
+                'facebook_engagement_breakdown',
+                'facebook_organic_vs_paid'
+            ],
             'revenue_analysis': [
                 'ga_revenue_breakdown_by_channel',
                 'ga_revenue_breakdown_by_source',
@@ -156,6 +186,11 @@ class ChatManager:
             available_collections.extend(self.collection_mapping['channel_timeseries'])
         elif module_type == ModuleType.INTENT_INSIGHTS:
             available_collections.extend(self.collection_mapping['intent_insights'])
+        elif module_type == ModuleType.META_ADS:  # Add this
+            available_collections.extend(self.collection_mapping['meta_ads'])
+        elif module_type == ModuleType.FACEBOOK_ANALYTICS:  # Add this
+            available_collections.extend(self.collection_mapping['facebook_analytics'])
+    
         
         # Cross-module collections
         if "keyword" in user_message.lower() or "search" in user_message.lower():
@@ -278,6 +313,37 @@ class ChatManager:
             'ga_combined_roas_roi_metrics': 'Combined ROAS/ROI metrics from GA4 and Google Ads',
             'ga_combined_roas_roi_metrics_legacy': 'Legacy combined ROAS/ROI metrics',
             
+
+            # Meta Ads collections
+            'meta_ad_accounts': 'Meta Ads account information and status',
+            'meta_account_insights_summary': 'Account-level performance summary for Meta Ads',
+            'meta_campaigns_paginated': 'Paginated Meta campaign data with insights',
+            'meta_campaigns_list': 'List of all Meta campaigns',
+            'meta_campaigns_timeseries': 'Time-series performance data for Meta campaigns',
+            'meta_campaigns_demographics': 'Demographic breakdown for Meta campaigns',
+            'meta_campaigns_placements': 'Placement performance data for Meta campaigns',
+            'meta_adsets': 'Ad set information and performance for Meta',
+            'meta_adsets_timeseries': 'Time-series performance data for Meta ad sets',
+            'meta_adsets_demographics': 'Demographic breakdown for Meta ad sets',
+            'meta_adsets_placements': 'Placement performance data for Meta ad sets',
+            'meta_ads': 'Individual ad performance data for Meta',
+            'meta_ads_timeseries': 'Time-series performance data for Meta ads',
+            'meta_ads_demographics': 'Demographic breakdown for Meta ads',
+            'meta_ads_placements': 'Placement performance data for Meta ads',
+            
+            # Facebook Analytics collections
+            'facebook_pages': 'Facebook page information and basic stats',
+            'facebook_page_insights': 'Page-level insights and engagement metrics',
+            'facebook_page_insights_timeseries': 'Time-series data for Facebook page metrics',
+            'facebook_page_posts': 'Facebook posts and their performance',
+            'facebook_page_posts_timeseries': 'Time-series performance data for Facebook posts',
+            'facebook_video_views_breakdown': 'Video views and engagement breakdown',
+            'facebook_content_type_breakdown': 'Performance by content type',
+            'facebook_page_demographics': 'Audience demographics for Facebook page',
+            'facebook_follows_unfollows': 'Follower growth and attrition data',
+            'facebook_engagement_breakdown': 'Engagement metrics breakdown',
+            'facebook_organic_vs_paid': 'Organic vs paid reach and engagement',
+
             # Intent insights
             'intent_keyword_insights': 'Search volume trends and keyword opportunity analysis'
         }
@@ -436,6 +502,8 @@ class ChatManager:
         session_id: Optional[str] = None,
         customer_id: Optional[str] = None,
         property_id: Optional[str] = None,
+        account_id: Optional[str] = None,  # Add this
+        page_id: Optional[str] = None,  # Add this
         period: str = "LAST_7_DAYS"
     ) -> str:
         """Create new session or get existing one - simple format"""
@@ -466,6 +534,8 @@ class ChatManager:
             "module_type": module_type.value,
             "customer_id": customer_id,
             "property_id": property_id,
+            "account_id": account_id,  # Add this
+            "page_id": page_id,  # Add this
             "created_at": datetime.utcnow(),
             "last_activity": datetime.utcnow(),
             "is_active": True,
@@ -475,7 +545,7 @@ class ChatManager:
         await collection.insert_one(session_doc)
         logger.info(f"Created new chat session: {new_session_id}")
         return new_session_id
-    
+
     async def add_message_to_simple_session(
         self,
         session_id: str,
@@ -569,12 +639,18 @@ class ChatManager:
                 {"$set": {"last_activity": datetime.utcnow()}}
             )
         else:
+            # Extract account_id and page_id from context for session creation
+            account_id = chat_request.context.get('account_id') if chat_request.context else None
+            page_id = chat_request.context.get('page_id') if chat_request.context else None
+            
             session_id = await self.create_or_get_simple_session(
                 user_email=user_email,
                 module_type=chat_request.module_type,
                 session_id=None,
                 customer_id=chat_request.customer_id,
                 property_id=chat_request.property_id,
+                account_id=account_id,  # Add this
+                page_id=page_id,  # Add this
                 period=chat_request.period or "LAST_7_DAYS"
             )
         
@@ -602,6 +678,8 @@ class ChatManager:
             "user_email": user_email,
             "customer_id": chat_request.customer_id,
             "property_id": chat_request.property_id,
+            "account_id": chat_request.context.get('account_id') if chat_request.context else None,  # Add this
+            "page_id": chat_request.context.get('page_id') if chat_request.context else None,  # Add this
             "period": chat_request.period or "LAST_7_DAYS",
             "selected_collections": selected_collections
         }
@@ -686,6 +764,8 @@ class ChatManager:
         - Analyze Google Ads performance data (campaigns, keywords, costs, conversions)
         - Interpret Google Analytics data (traffic, user behavior, conversions, revenue)
         - Provide keyword insights and search volume analysis
+        - Analyze Meta Ads campaigns (Facebook & Instagram advertising)
+        - Interpret Facebook Page performance (engagement, reach, demographics)
         - Give actionable recommendations based on data trends
         
         Guidelines:
@@ -703,7 +783,9 @@ class ChatManager:
         module_context = {
             ModuleType.GOOGLE_ADS: "Focus on ad spend efficiency, campaign performance, keyword opportunities, and conversion optimization.",
             ModuleType.GOOGLE_ANALYTICS: "Focus on traffic patterns, user engagement, conversion funnels, and revenue attribution.",
-            ModuleType.INTENT_INSIGHTS: "Focus on search trends, market demand, keyword opportunities, and competitive analysis."
+            ModuleType.INTENT_INSIGHTS: "Focus on search trends, market demand, keyword opportunities, and competitive analysis.",
+            ModuleType.META_ADS: "Focus on Meta advertising performance (Facebook & Instagram), ROAS, audience targeting, creative performance, and ad placement optimization.",
+            ModuleType.FACEBOOK_ANALYTICS: "Focus on Facebook page growth, post engagement, audience demographics, content performance, and organic vs paid reach."
         }
         
         # Extract the full nested data
@@ -815,10 +897,15 @@ class ChatManager:
                 # Build search query with intelligent filtering
                 query = {"user_email": search_criteria['user_email']}
                 
+                # Add appropriate ID filters based on collection type
                 if search_criteria.get('customer_id'):
                     query["customer_id"] = search_criteria['customer_id']
                 if search_criteria.get('property_id'): 
                     query["property_id"] = search_criteria['property_id']
+                if search_criteria.get('account_id'):  # Add this
+                    query["account_id"] = search_criteria['account_id']
+                if search_criteria.get('page_id'):  # Add this
+                    query["page_id"] = search_criteria['page_id']
                 
                 # Search for documents with normalized period
                 normalized_period = self._normalize_period(search_criteria['period'])
@@ -858,7 +945,7 @@ class ChatManager:
                 }
         
         return results
-
+    
     async def trigger_missing_endpoints(
         self,
         user_email: str,

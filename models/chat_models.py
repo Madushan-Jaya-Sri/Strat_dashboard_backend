@@ -8,7 +8,8 @@ class ModuleType(str, Enum):
     GOOGLE_ADS = "google_ads"
     GOOGLE_ANALYTICS = "google_analytics" 
     INTENT_INSIGHTS = "intent_insights"
-    META = "meta"
+    META_ADS = "meta_ads"  # Add this
+    FACEBOOK_ANALYTICS = "facebook_analytics"  # Add this
     COMBINED = "combined"
 
 class MessageRole(str, Enum):

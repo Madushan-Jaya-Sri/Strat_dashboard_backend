@@ -49,7 +49,9 @@ class MongoManager:
         request_params: Dict[str, Any], 
         response_data: Any,
         customer_id: Optional[str] = None,
-        property_id: Optional[str] = None
+        property_id: Optional[str] = None,
+        account_id: Optional[str] = None,  # Add this
+        page_id: Optional[str] = None  # Add this
     ):
         """Save or update endpoint response in MongoDB based on key attributes"""
         try:
@@ -66,6 +68,8 @@ class MongoManager:
                 "user_email": user_email,
                 "customer_id": customer_id,
                 "property_id": property_id,
+                "account_id": account_id,  # Add this
+                "page_id": page_id,  # Add this
                 "request_params": serialized_request_params
             }
             
@@ -92,6 +96,8 @@ class MongoManager:
                     "user_email": user_email,
                     "customer_id": customer_id,
                     "property_id": property_id,
+                    "account_id": account_id,  # Add this
+                    "page_id": page_id,  # Add this
                     "request_params": serialized_request_params,
                     "response_data": serialized_data,
                     "data_count": self._get_data_count(serialized_data),
@@ -108,7 +114,7 @@ class MongoManager:
         except Exception as e:
             logger.error(f"Error saving/updating MongoDB document: {e}")
             return None
-
+    
     def _get_collection_name(self, endpoint: str, request_params: Dict[str, Any] = None) -> str:
         """Get meaningful collection name based on endpoint and optional request parameters"""
         collection_mapping = {
