@@ -1096,11 +1096,56 @@ class ChatManager:
         """Process chat message with intelligent agentic workflow"""
         
         logger.info(f"🚀 Processing chat message for user: {user_email}")
+        logger.info(f"💬 Message: '{chat_request.message}'")
+        logger.info(f"📱 Module: {chat_request.module_type.value}")
+        
+        # Validate module is supported
+        supported_modules = [
+            ModuleType.GOOGLE_ADS,
+            ModuleType.GOOGLE_ANALYTICS,
+            ModuleType.META_ADS,
+            ModuleType.FACEBOOK_ANALYTICS,
+            ModuleType.INTENT_INSIGHTS
+        ]
+        
+        if chat_request.module_type not in supported_modules:
+            error_message = f"The {chat_request.module_type.value} module is currently under development. Please use one of: Google Ads, Google Analytics, Meta Ads, or Facebook Analytics."
+            
+            if chat_request.session_id:
+                session_id = chat_request.session_id
+            else:
+                session_id = await self.create_or_get_simple_session(
+                    user_email=user_email,
+                    module_type=chat_request.module_type,
+                    session_id=None
+                )
+            
+            user_message = ChatMessage(
+                role=MessageRole.USER,
+                content=chat_request.message,
+                timestamp=datetime.utcnow()
+            )
+            await self.add_message_to_simple_session(session_id, user_message)
+            
+            ai_message = ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=error_message,
+                timestamp=datetime.utcnow()
+            )
+            await self.add_message_to_simple_session(session_id, ai_message)
+            
+            return ChatResponse(
+                response=error_message,
+                session_id=session_id,
+                triggered_endpoint=None,
+                endpoint_data=None,
+                module_type=chat_request.module_type
+            )
         
         # Status 1: Message received
         await self.send_status_update("Message received", "Processing your question...")
         
-        # Handle session
+        # Handle session continuation properly
         if chat_request.session_id:
             session_id = chat_request.session_id
             await self.db.chat_sessions.update_one(
@@ -1132,165 +1177,175 @@ class ChatManager:
         
         # === START: NEW AGENTIC WORKFLOW ===
         
-        # Agent 1: Classify query
-        await self.send_status_update("Analyzing query", "Understanding your question...")
-        classification = await self.agent_classify_query(chat_request.message)
+        # ✅ INITIALIZE endpoint_data EARLY
+        endpoint_data = {}
+        ai_response = ""
         
-        if classification['category'] == 'GENERAL':
-            # Handle general chat without API calls
-            ai_response = await self._generate_enhanced_ai_response_simple(
-                message=chat_request.message,
-                context={},
-                module_type=chat_request.module_type,
-                session_id=session_id
-            )
-        else:
-            # Agent 2: Extract time period
-            await self.send_status_update("Extracting time period", "Determining time range...")
-            time_period = await self.agent_extract_time_period(
-                chat_request.message,
-                {
-                    'period': chat_request.period,
-                    'custom_dates': chat_request.context.get('custom_dates') if chat_request.context else None
-                }
-            )
+        try:
+            # Agent 1: Classify query
+            await self.send_status_update("Analyzing query", "Understanding your question...")
+            classification = await self.agent_classify_query(chat_request.message)
             
-            if time_period.get('needs_clarification'):
-                ai_response = time_period['clarification_message']
+            if classification['category'] == 'GENERAL':
+                # Handle general chat without API calls
+                ai_response = await self._generate_enhanced_ai_response_simple(
+                    message=chat_request.message,
+                    context={"endpoint_data": {}},
+                    module_type=chat_request.module_type,
+                    session_id=session_id
+                )
             else:
-                # Agent 3: Identify account
-                await self.send_status_update("Identifying account", "Finding relevant account...")
-                account_info = await self.agent_identify_account(
+                # Agent 2: Extract time period
+                await self.send_status_update("Extracting time period", "Determining time range...")
+                time_period = await self.agent_extract_time_period(
                     chat_request.message,
-                    chat_request.module_type,
                     {
-                        'customer_id': chat_request.customer_id,
-                        'property_id': chat_request.property_id,
-                        'account_id': account_id,
-                        'page_id': page_id
-                    },
-                    chat_request.context.get('token', '') if chat_request.context else '',
-                    user_email
+                        'period': chat_request.period,
+                        'custom_dates': chat_request.context.get('custom_dates') if chat_request.context else None
+                    }
                 )
                 
-                if account_info.get('needs_account_list'):
-                    # Return account list to user
-                    accounts = await self._fetch_account_list(
+                if time_period.get('needs_clarification'):
+                    ai_response = time_period['clarification_message']
+                else:
+                    # Agent 3: Identify account
+                    await self.send_status_update("Identifying account", "Finding relevant account...")
+                    
+                    # ✅ EXTRACT account_id and page_id FROM CONTEXT EARLY
+                    context_account_id = chat_request.context.get('account_id') if chat_request.context else None
+                    context_page_id = chat_request.context.get('page_id') if chat_request.context else None
+                    
+                    account_info = await self.agent_identify_account(
+                        chat_request.message,
                         chat_request.module_type,
+                        {
+                            'customer_id': chat_request.customer_id,
+                            'property_id': chat_request.property_id,
+                            'account_id': context_account_id,
+                            'page_id': context_page_id
+                        },
                         chat_request.context.get('token', '') if chat_request.context else '',
                         user_email
                     )
-                    ai_response = f"{account_info.get('clarification_message', 'Please select an account:')}\n\nAvailable accounts:\n"
-                    for acc in accounts:
-                        ai_response += f"- {acc['name']} (ID: {acc['id']})\n"
-                else:
-                    # Agent 4: Select endpoints
-                    await self.send_status_update("Selecting endpoints", "Determining data sources...")
-                    logger.info("\n" + "="*80)
-                    logger.info("🎯 AGENT 4: ENDPOINT SELECTOR - STARTING")
-                    logger.info(f"Account info received: {json.dumps(account_info, default=str, indent=2)}")
-
-                    selected_endpoints = await self.agent_select_endpoints(
-                        chat_request.message,
-                        chat_request.module_type,
-                        account_info
-                    )
-
-                    logger.info(f"Selected endpoints: {[e['name'] for e in selected_endpoints]}")
-
-                    if not selected_endpoints:
-                        ai_response = "I couldn't determine which data sources to use for your question. Please try rephrasing your question."
+                    
+                    if account_info.get('needs_account_list'):
+                        # Return account list to user
+                        accounts = await self._fetch_account_list(
+                            chat_request.module_type,
+                            chat_request.context.get('token', '') if chat_request.context else '',
+                            user_email
+                        )
+                        ai_response = f"{account_info.get('clarification_message', 'Please select an account:')}\n\nAvailable accounts:\n"
+                        for acc in accounts:
+                            ai_response += f"- {acc['name']} (ID: {acc['id']})\n"
                     else:
-                        # Agent 5: Execute endpoints
-                        await self.send_status_update("Fetching data", f"Calling {len(selected_endpoints)} APIs...")
+                        # Agent 4: Select endpoints
+                        await self.send_status_update("Selecting endpoints", "Determining data sources...")
+                        selected_endpoints = await self.agent_select_endpoints(
+                            chat_request.message,
+                            chat_request.module_type,
+                            account_info
+                        )
                         
-                        # FIX: Build endpoint_params correctly based on module type
-                        logger.info("\n" + "="*80)
-                        logger.info("🔧 BUILDING ENDPOINT PARAMETERS")
-                        logger.info(f"Module type: {chat_request.module_type.value}")
-                        logger.info(f"Account info account_id: {account_info.get('account_id')}")
-                        logger.info(f"Context customer_id: {chat_request.customer_id}")
-                        logger.info(f"Context property_id: {chat_request.property_id}")
-                        
-                        endpoint_params = {
-                            'token': chat_request.context.get('token', '') if chat_request.context else '',
-                            'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
-                            'start_date': time_period.get('start_date'),
-                            'end_date': time_period.get('end_date'),
-                        }
-                        
-                        # Map account_id to the correct parameter based on module type
-                        resolved_account_id = account_info.get('account_id')
-                        
-                        if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                            endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
-                            logger.info(f"✅ Set customer_id: {endpoint_params['customer_id']}")
-                            
-                        elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                            endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
-                            logger.info(f"✅ Set property_id: {endpoint_params['property_id']}")
-                            
-                        elif chat_request.module_type == ModuleType.META_ADS:
-                            endpoint_params['account_id'] = resolved_account_id or (chat_request.context.get('account_id') if chat_request.context else None)
-                            logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
-                            
-                        elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                            endpoint_params['page_id'] = resolved_account_id or (chat_request.context.get('page_id') if chat_request.context else None)
-                            logger.info(f"✅ Set page_id: {endpoint_params['page_id']}")
-                            
-                        elif chat_request.module_type == ModuleType.INSTAGRAM_ANALYTICS:
-                            endpoint_params['account_id'] = resolved_account_id or (chat_request.context.get('account_id') if chat_request.context else None)
-                            logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
-                        
-                        logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
-                        logger.info("="*80 + "\n")
-                        
-                        # Validate critical parameters before calling
-                        critical_param = None
-                        if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                            critical_param = endpoint_params.get('customer_id')
-                            param_name = 'customer_id'
-                        elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                            critical_param = endpoint_params.get('property_id')
-                            param_name = 'property_id'
-                        elif chat_request.module_type in [ModuleType.META_ADS, ModuleType.INSTAGRAM_ANALYTICS]:
-                            critical_param = endpoint_params.get('account_id')
-                            param_name = 'account_id'
-                        elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                            critical_param = endpoint_params.get('page_id')
-                            param_name = 'page_id'
-                        
-                        if not critical_param:
-                            logger.error(f"❌ Critical parameter '{param_name}' is None!")
-                            logger.error(f"Chat request: customer_id={chat_request.customer_id}, property_id={chat_request.property_id}")
-                            logger.error(f"Account info: {account_info}")
-                            ai_response = f"I couldn't identify which {chat_request.module_type.value} account to analyze. Please specify the account name or ID."
+                        if not selected_endpoints:
+                            ai_response = "I couldn't determine which data sources to use for your question. Please try rephrasing your question."
                         else:
-                            endpoint_data = await self.agent_execute_endpoints(
-                                selected_endpoints,
-                                endpoint_params,
-                                user_email
-                            )
+                            # Agent 5: Execute endpoints
+                            await self.send_status_update("Fetching data", f"Calling {len(selected_endpoints)} APIs...")
                             
-                            # Rest of the analysis...
-                    
-                    # Agent 6: Analyze data
-                    await self.send_status_update("Analyzing data", "Generating insights...")
-                    analysis = await self.agent_analyze_data(
-                        chat_request.message,
-                        endpoint_data,
-                        chat_request.module_type
-                    )
-                    
-                    # Agent 7: Format response
-                    await self.send_status_update("Formatting response", "Finalizing answer...")
-                    formatted_response = await self.agent_format_response(
-                        analysis,
-                        endpoint_data,
-                        needs_visualization=True
-                    )
-                    
-                    ai_response = formatted_response['text']
+                            logger.info("\n" + "="*80)
+                            logger.info("🔧 BUILDING ENDPOINT PARAMETERS")
+                            logger.info(f"Module type: {chat_request.module_type.value}")
+                            logger.info(f"Account info account_id: {account_info.get('account_id')}")
+                            logger.info(f"Context customer_id: {chat_request.customer_id}")
+                            logger.info(f"Context property_id: {chat_request.property_id}")
+                            
+                            endpoint_params = {
+                                'token': chat_request.context.get('token', '') if chat_request.context else '',
+                                'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
+                                'start_date': time_period.get('start_date'),
+                                'end_date': time_period.get('end_date'),
+                            }
+                            
+                            # Map account_id to the correct parameter based on module type
+                            resolved_account_id = account_info.get('account_id')
+                            
+                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
+                                endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
+                                logger.info(f"✅ Set customer_id: {endpoint_params['customer_id']}")
+                                
+                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
+                                endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
+                                logger.info(f"✅ Set property_id: {endpoint_params['property_id']}")
+                                
+                            elif chat_request.module_type == ModuleType.META_ADS:
+                                endpoint_params['account_id'] = resolved_account_id or context_account_id
+                                logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
+                                
+                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
+                                endpoint_params['page_id'] = resolved_account_id or context_page_id
+                                logger.info(f"✅ Set page_id: {endpoint_params['page_id']}")
+                                
+                            elif chat_request.module_type == ModuleType.INSTAGRAM_ANALYTICS:
+                                endpoint_params['account_id'] = resolved_account_id or context_account_id
+                                logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
+                            
+                            logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
+                            logger.info("="*80 + "\n")
+                            
+                            # Validate critical parameters before calling
+                            critical_param = None
+                            param_name = None
+                            
+                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
+                                critical_param = endpoint_params.get('customer_id')
+                                param_name = 'customer_id'
+                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
+                                critical_param = endpoint_params.get('property_id')
+                                param_name = 'property_id'
+                            elif chat_request.module_type in [ModuleType.META_ADS, ModuleType.INSTAGRAM_ANALYTICS]:
+                                critical_param = endpoint_params.get('account_id')
+                                param_name = 'account_id'
+                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
+                                critical_param = endpoint_params.get('page_id')
+                                param_name = 'page_id'
+                            
+                            if not critical_param:
+                                logger.error(f"❌ Critical parameter '{param_name}' is None!")
+                                logger.error(f"Chat request: customer_id={chat_request.customer_id}, property_id={chat_request.property_id}")
+                                logger.error(f"Account info: {account_info}")
+                                ai_response = f"I couldn't identify which {chat_request.module_type.value} account to analyze. Please specify the account name or ID."
+                            else:
+                                # ✅ EXECUTE ENDPOINTS
+                                endpoint_data = await self.agent_execute_endpoints(
+                                    selected_endpoints,
+                                    endpoint_params,
+                                    user_email
+                                )
+                                
+                                # Agent 6: Analyze data
+                                await self.send_status_update("Analyzing data", "Generating insights...")
+                                analysis = await self.agent_analyze_data(
+                                    chat_request.message,
+                                    endpoint_data,
+                                    chat_request.module_type
+                                )
+                                
+                                # Agent 7: Format response
+                                await self.send_status_update("Formatting response", "Finalizing answer...")
+                                formatted_response = await self.agent_format_response(
+                                    analysis,
+                                    endpoint_data,
+                                    needs_visualization=True
+                                )
+                                
+                                ai_response = formatted_response['text']
+            
+        except Exception as e:
+            logger.error(f"❌ ERROR in process_chat_message: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            ai_response = f"I apologize, but I encountered an error: {str(e)}. Please try rephrasing your question or contact support if the issue persists."
         
         # === END: NEW AGENTIC WORKFLOW ===
         
@@ -1308,7 +1363,7 @@ class ChatManager:
             response=ai_response,
             session_id=session_id,
             triggered_endpoint=None,
-            endpoint_data=None,
+            endpoint_data=endpoint_data,  # ✅ Now always defined
             module_type=chat_request.module_type
         )
 
