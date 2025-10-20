@@ -149,6 +149,29 @@ class ChatManager:
         await collection.insert_one(session_doc)
         logger.info(f"Created new chat session: {new_session_id}")
         return new_session_id
+    
+    async def add_message_to_simple_session(
+        self,
+        session_id: str,
+        message: ChatMessage
+    ):
+        """Add message to simple session format"""
+        collection = self.db.chat_sessions
+        
+        message_dict = {
+            "role": message.role.value,
+            "content": message.content,
+            "timestamp": message.timestamp
+        }
+        
+        await collection.update_one(
+            {"session_id": session_id},
+            {
+                "$push": {"messages": message_dict},
+                "$set": {"last_activity": datetime.utcnow()}
+            }
+        )
+
     # =================
     # AGENT 1: General Query Classifier
     # =================
