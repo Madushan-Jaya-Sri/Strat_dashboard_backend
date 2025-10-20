@@ -9,7 +9,8 @@ class ModuleType(str, Enum):
     GOOGLE_ANALYTICS = "google_analytics" 
     INTENT_INSIGHTS = "intent_insights"
     META_ADS = "meta_ads"  # Add this
-    FACEBOOK_ANALYTICS = "facebook_analytics"  # Add this
+    FACEBOOK_ANALYTICS = "facebook_analytics"
+    INSTAGRAM_ANALYTICS = "instagram_analytics"
     COMBINED = "combined"
 
 class MessageRole(str, Enum):
