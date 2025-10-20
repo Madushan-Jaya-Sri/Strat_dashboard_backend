@@ -20,89 +20,6 @@ class ChatManager:
         self.openai_client = openai.AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.db = mongo_manager.db
         
-
-                # Complete collection mappings to match your actual MongoDB structure
-        self.collection_mapping = {
-            'google_ads': [
-                'google_ads_customers_accounts',
-                'google_ads_key_stats',
-                'google_ads_campaigns', 
-                'google_ads_keywords_related_to_campaign',
-                'google_ads_performance',
-                'google_ads_geographic_performance',
-                'google_ads_device_performance',
-                'google_ads_time_performance',
-                'google_ads_keyword_ideas'
-            ],
-            'google_analytics': [
-                'google_analytics_properties',
-                'google_analytics_metrics',
-                'google_analytics_conversions',
-                'google_analytics_traffic_sources',
-                'google_analytics_top_pages',
-                'google_analytics_channel_performance',
-                'ga_audience_insights_city',
-                'ga_audience_insights_userAgeBracket', 
-                'ga_audience_insights_userGender',
-                'ga_audience_insights_deviceCategory',
-                'ga_audience_insights_browser',
-                'google_analytics_time_series',
-                'google_analytics_trends',
-                'google_analytics_roas_roi_time_series'
-            ],
-            'intent_insights': [
-                'intent_keyword_insights'
-            ],
-                'meta_ads': [
-                'meta_ad_accounts',
-                'meta_account_insights_summary',
-                'meta_campaigns_paginated',
-                'meta_campaigns_list',
-                'meta_campaigns_timeseries',
-                'meta_campaigns_demographics',
-                'meta_campaigns_placements',
-                'meta_adsets',
-                'meta_adsets_timeseries',
-                'meta_adsets_demographics',
-                'meta_adsets_placements',
-                'meta_ads',
-                'meta_ads_timeseries',
-                'meta_ads_demographics',
-                'meta_ads_placements'
-            ],
-            'facebook_analytics': [
-                'facebook_pages',
-                'facebook_page_insights',
-                'facebook_page_insights_timeseries',
-                'facebook_page_posts',
-                'facebook_page_posts_timeseries',
-                'facebook_video_views_breakdown',
-                'facebook_content_type_breakdown',
-                'facebook_page_demographics',
-                'facebook_follows_unfollows',
-                'facebook_engagement_breakdown',
-                'facebook_organic_vs_paid'
-            ],
-            'revenue_analysis': [
-                'ga_revenue_breakdown_by_channel',
-                'ga_revenue_breakdown_by_source',
-                'ga_revenue_breakdown_by_device',
-                'ga_revenue_breakdown_by_location',
-                'ga_revenue_breakdown_by_page',
-                'ga_revenue_breakdown_by_comprehensive',
-                'ga_combined_roas_roi_metrics',
-            ],
-            'combined_metrics': [
-                'ads_ga_combined_overview_metrics',
-                'ga_combined_roas_roi_metrics_legacy'
-            ],
-            'channel_timeseries': [
-                'ga_channel_revenue_time_series',
-                'ga_specific_channels_time_series',
-                'ga_available_channels'
-            ]
-        }
-
         # Endpoint mappings extracted from main.py
         self.endpoint_registry = {
             'google_ads': [
@@ -257,97 +174,6 @@ class ChatManager:
             }
         )
 
-    async def select_relevant_collections(
-        self,
-        user_message: str,
-        module_type: ModuleType
-    ) -> List[str]:
-        """Use AI agent to select relevant collections based on user query with detailed logging"""
-        
-        logger.info(f"COLLECTION SELECTION - Query: '{user_message[:100]}...' Module: {module_type.value}")
-        
-        available_collections = []
-        if module_type == ModuleType.GOOGLE_ADS:
-            available_collections.extend(self.collection_mapping['google_ads'])
-        elif module_type == ModuleType.GOOGLE_ANALYTICS:
-            available_collections.extend(self.collection_mapping['google_analytics'])
-            available_collections.extend(self.collection_mapping['revenue_analysis'])
-            available_collections.extend(self.collection_mapping['channel_timeseries'])
-        elif module_type == ModuleType.INTENT_INSIGHTS:
-            available_collections.extend(self.collection_mapping['intent_insights'])
-        elif module_type == ModuleType.META_ADS:  # Add this
-            available_collections.extend(self.collection_mapping['meta_ads'])
-        elif module_type == ModuleType.FACEBOOK_ANALYTICS:  # Add this
-            available_collections.extend(self.collection_mapping['facebook_analytics'])
-    
-        
-        # Cross-module collections
-        if "keyword" in user_message.lower() or "search" in user_message.lower():
-            available_collections.extend(self.collection_mapping['intent_insights'])
-        
-        if "revenue" in user_message.lower() or "roas" in user_message.lower() or "roi" in user_message.lower():
-            available_collections.extend(self.collection_mapping['revenue_analysis'])
-            available_collections.extend(self.collection_mapping['combined_metrics'])
-
-        logger.info(f"AVAILABLE COLLECTIONS TO LLM: {available_collections}")
-
-        selection_prompt = f"""
-        Analyze this user query and select the most relevant data collections to answer their question.
-
-        User Query: "{user_message}"
-        Module Type: {module_type.value}
-
-        Available Collections:
-        {chr(10).join([f"- {col}: {self._get_collection_description(col)}" for col in available_collections])}
-
-        Instructions:
-        1. Select 2-4 most relevant collections that would help answer the user's question
-        2. Prioritize collections that directly relate to the user's specific query
-        3. Include supporting collections that provide context
-        4. Return ONLY a JSON list of collection names, nothing else
-
-        Example response: ["google_ads_campaigns", "google_ads_key_stats"]
-        """
-
-        logger.info(f"PROMPT SENT TO LLM FOR COLLECTION SELECTION:\n{selection_prompt}")
-
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": selection_prompt}],
-                temperature=0.1,
-                max_tokens=200
-            )
-            
-            content = response.choices[0].message.content.strip()
-            logger.info(f"LLM COLLECTION SELECTION RESPONSE: {content}")
-            
-            selected_collections = json.loads(content)
-            
-            # Validate selections
-            valid_collections = [col for col in selected_collections if col in available_collections]
-            invalid_collections = [col for col in selected_collections if col not in available_collections]
-            
-            if invalid_collections:
-                logger.warning(f"INVALID COLLECTIONS SELECTED BY LLM: {invalid_collections}")
-            
-            logger.info(f"FINAL VALID COLLECTIONS SELECTED: {valid_collections}")
-            return valid_collections
-            
-        except Exception as e:
-            logger.error(f"ERROR IN COLLECTION SELECTION: {e}")
-            fallback_collections = []
-            if module_type == ModuleType.GOOGLE_ADS:
-                fallback_collections = ['google_ads_key_stats', 'google_ads_campaigns']
-            elif module_type == ModuleType.GOOGLE_ANALYTICS:
-                fallback_collections = ['google_analytics_metrics', 'google_analytics_conversions']
-            else:
-                fallback_collections = ['intent_keyword_insights']
-            
-            logger.info(f"USING FALLBACK COLLECTIONS: {fallback_collections}")
-            return fallback_collections
-
-
     async def _generate_enhanced_ai_response_simple(
         self,
         message: str,
@@ -399,102 +225,102 @@ class ChatManager:
         
 
 
-    def _get_collection_description(self, collection_name: str) -> str:
-        """Return a human-readable description of the specified collection."""
+    # def _get_collection_description(self, collection_name: str) -> str:
+    #     """Return a human-readable description of the specified collection."""
 
-        collection_descriptions = {
-            # ---------------- GOOGLE ADS ----------------
-            'google_ads_customers': 'List of linked Google Ads customer accounts.',
-            'google_ads_key_stats': 'Key performance indicators for Google Ads accounts, including impressions, clicks, CTR, and cost metrics.',
-            'google_ads_campaigns': 'Detailed data for Google Ads campaigns, including campaign names, objectives, and performance results.',
-            'google_ads_keywords': 'Performance data of individual keywords in Google Ads, including impressions, clicks, and cost.',
-            'google_ads_performance': 'Overall performance data for Google Ads, combining clicks, conversions, spend, and ROI metrics.',
-            'google_ads_geographic': 'Geographic distribution of Google Ads performance, showing results by region or location.',
-            'google_ads_device_performance': 'Performance metrics for Google Ads across devices such as mobile, desktop, and tablet.',
-            'google_ads_time_performance': 'Time-based Google Ads performance metrics showing trends by day, week, or month.',
-            'google_ads_keyword_ideas': 'Suggested keyword ideas for Google Ads campaigns, based on seed keywords and location targeting.',
+    #     collection_descriptions = {
+    #         # ---------------- GOOGLE ADS ----------------
+    #         'google_ads_customers': 'List of linked Google Ads customer accounts.',
+    #         'google_ads_key_stats': 'Key performance indicators for Google Ads accounts, including impressions, clicks, CTR, and cost metrics.',
+    #         'google_ads_campaigns': 'Detailed data for Google Ads campaigns, including campaign names, objectives, and performance results.',
+    #         'google_ads_keywords': 'Performance data of individual keywords in Google Ads, including impressions, clicks, and cost.',
+    #         'google_ads_performance': 'Overall performance data for Google Ads, combining clicks, conversions, spend, and ROI metrics.',
+    #         'google_ads_geographic': 'Geographic distribution of Google Ads performance, showing results by region or location.',
+    #         'google_ads_device_performance': 'Performance metrics for Google Ads across devices such as mobile, desktop, and tablet.',
+    #         'google_ads_time_performance': 'Time-based Google Ads performance metrics showing trends by day, week, or month.',
+    #         'google_ads_keyword_ideas': 'Suggested keyword ideas for Google Ads campaigns, based on seed keywords and location targeting.',
 
-            # ---------------- GOOGLE ANALYTICS ----------------
-            'google_analytics_properties': 'List of connected Google Analytics properties and configuration details.',
-            'google_analytics_metrics': 'Core Google Analytics data, including sessions, users, bounce rates, and engagement metrics.',
-            'google_analytics_traffic_sources': 'Breakdown of website traffic sources, including organic, paid, referral, and direct channels.',
-            'google_analytics_conversions': 'Goal and conversion metrics tracked in Google Analytics, including conversion rate and value.',
-            'google_analytics_channel_performance': 'Performance comparison between marketing channels such as organic search, paid ads, and social.',
-            'google_analytics_audience_insights': 'Audience demographics and behavioral insights from Google Analytics.',
-            'google_analytics_time_series': 'Time-series data from Google Analytics showing trends in traffic and engagement.',
-            'google_analytics_revenue_breakdown_channel': 'Revenue breakdown by marketing channel in Google Analytics.',
-            'google_analytics_revenue_breakdown_source': 'Revenue breakdown by traffic source in Google Analytics.',
-            'google_analytics_revenue_breakdown_device': 'Revenue analysis segmented by user device (mobile, desktop, tablet).',
-            'google_analytics_revenue_breakdown_location': 'Revenue distribution by user location or region.',
-            'google_analytics_revenue_breakdown_page': 'Revenue performance by top-performing pages on the website.',
-            'google_analytics_comprehensive_revenue_breakdown': 'A comprehensive revenue analysis combining multiple dimensions.',
-            'google_analytics_revenue_breakdown_raw': 'Raw-level revenue breakdown data from Google Analytics.',
-            'google_analytics_channel_revenue_timeseries': 'Time-series view of revenue by marketing channel.',
-            'google_analytics_specific_channels_timeseries': 'Performance over time for selected Google Analytics channels.',
-            'google_analytics_available_channels': 'List of available channels for Google Analytics revenue reporting.',
-            'google_analytics_channel_revenue_timeseries_raw': 'Raw time-series data of channel-level revenue metrics.',
-            'google_analytics_revenue_time_series': 'Revenue trends over time, segmented by selected dimensions.',
-            'google_analytics_top_pages': 'Top pages on the website ranked by traffic, engagement, or conversions.',
-            'google_analytics_trends': 'Identified performance trends from Google Analytics data.',
-            'google_analytics_roas_roi_time_series': 'ROAS (Return on Ad Spend) and ROI trends over time.',
-            'google_analytics_combined_overview': 'High-level overview combining Google Ads and Analytics data.',
-            'google_analytics_enhanced_combined_roas_roi_metrics': 'Enhanced cross-platform ROI and ROAS calculations.',
-            'google_analytics_combined_roas_roi_metrics_legacy': 'Legacy combined metrics for ROAS and ROI calculations.',
-            'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
+    #         # ---------------- GOOGLE ANALYTICS ----------------
+    #         'google_analytics_properties': 'List of connected Google Analytics properties and configuration details.',
+    #         'google_analytics_metrics': 'Core Google Analytics data, including sessions, users, bounce rates, and engagement metrics.',
+    #         'google_analytics_traffic_sources': 'Breakdown of website traffic sources, including organic, paid, referral, and direct channels.',
+    #         'google_analytics_conversions': 'Goal and conversion metrics tracked in Google Analytics, including conversion rate and value.',
+    #         'google_analytics_channel_performance': 'Performance comparison between marketing channels such as organic search, paid ads, and social.',
+    #         'google_analytics_audience_insights': 'Audience demographics and behavioral insights from Google Analytics.',
+    #         'google_analytics_time_series': 'Time-series data from Google Analytics showing trends in traffic and engagement.',
+    #         'google_analytics_revenue_breakdown_channel': 'Revenue breakdown by marketing channel in Google Analytics.',
+    #         'google_analytics_revenue_breakdown_source': 'Revenue breakdown by traffic source in Google Analytics.',
+    #         'google_analytics_revenue_breakdown_device': 'Revenue analysis segmented by user device (mobile, desktop, tablet).',
+    #         'google_analytics_revenue_breakdown_location': 'Revenue distribution by user location or region.',
+    #         'google_analytics_revenue_breakdown_page': 'Revenue performance by top-performing pages on the website.',
+    #         'google_analytics_comprehensive_revenue_breakdown': 'A comprehensive revenue analysis combining multiple dimensions.',
+    #         'google_analytics_revenue_breakdown_raw': 'Raw-level revenue breakdown data from Google Analytics.',
+    #         'google_analytics_channel_revenue_timeseries': 'Time-series view of revenue by marketing channel.',
+    #         'google_analytics_specific_channels_timeseries': 'Performance over time for selected Google Analytics channels.',
+    #         'google_analytics_available_channels': 'List of available channels for Google Analytics revenue reporting.',
+    #         'google_analytics_channel_revenue_timeseries_raw': 'Raw time-series data of channel-level revenue metrics.',
+    #         'google_analytics_revenue_time_series': 'Revenue trends over time, segmented by selected dimensions.',
+    #         'google_analytics_top_pages': 'Top pages on the website ranked by traffic, engagement, or conversions.',
+    #         'google_analytics_trends': 'Identified performance trends from Google Analytics data.',
+    #         'google_analytics_roas_roi_time_series': 'ROAS (Return on Ad Spend) and ROI trends over time.',
+    #         'google_analytics_combined_overview': 'High-level overview combining Google Ads and Analytics data.',
+    #         'google_analytics_enhanced_combined_roas_roi_metrics': 'Enhanced cross-platform ROI and ROAS calculations.',
+    #         'google_analytics_combined_roas_roi_metrics_legacy': 'Legacy combined metrics for ROAS and ROI calculations.',
+    #         'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
 
-            # ---------------- META ADS ----------------
-            'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
-            'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
-            'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
-            'meta_campaigns_list': 'List view of Meta Ad Campaigns filtered by status.',
-            'meta_campaigns_timeseries': 'Time-series data for Meta Ad Campaigns showing daily or weekly performance.',
-            'meta_campaigns_demographics': 'Demographic breakdown of Meta Ad Campaign performance.',
-            'meta_campaigns_placements': 'Placement performance data for Meta Ads across different surfaces (Feed, Reels, Stories, etc.).',
-            'meta_adsets_timeseries': 'Time-based performance data for Meta AdSets.',
-            'meta_adsets_demographics': 'Demographic performance analysis of Meta AdSets.',
-            'meta_adsets_placements': 'Ad placement effectiveness at the AdSet level.',
-            'meta_ads_by_adsets': 'List of ads under each AdSet with corresponding performance data.',
-            'meta_ads_timeseries': 'Time-series trends for individual Meta Ads.',
-            'meta_ads_demographics': 'Demographic performance data for specific Meta Ads.',
-            'meta_ads_placements': 'Performance insights for Meta Ads across placements such as Feed, Stories, or Audience Network.',
-            'meta_overview': 'Overall summary of Meta Ads performance and account activity.',
-            'meta_debug_permissions': 'Debugging information for Meta Ads API permissions and access validation.',
+    #         # ---------------- META ADS ----------------
+    #         'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
+    #         'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
+    #         'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
+    #         'meta_campaigns_list': 'List view of Meta Ad Campaigns filtered by status.',
+    #         'meta_campaigns_timeseries': 'Time-series data for Meta Ad Campaigns showing daily or weekly performance.',
+    #         'meta_campaigns_demographics': 'Demographic breakdown of Meta Ad Campaign performance.',
+    #         'meta_campaigns_placements': 'Placement performance data for Meta Ads across different surfaces (Feed, Reels, Stories, etc.).',
+    #         'meta_adsets_timeseries': 'Time-based performance data for Meta AdSets.',
+    #         'meta_adsets_demographics': 'Demographic performance analysis of Meta AdSets.',
+    #         'meta_adsets_placements': 'Ad placement effectiveness at the AdSet level.',
+    #         'meta_ads_by_adsets': 'List of ads under each AdSet with corresponding performance data.',
+    #         'meta_ads_timeseries': 'Time-series trends for individual Meta Ads.',
+    #         'meta_ads_demographics': 'Demographic performance data for specific Meta Ads.',
+    #         'meta_ads_placements': 'Performance insights for Meta Ads across placements such as Feed, Stories, or Audience Network.',
+    #         'meta_overview': 'Overall summary of Meta Ads performance and account activity.',
+    #         'meta_debug_permissions': 'Debugging information for Meta Ads API permissions and access validation.',
 
-            # ---------------- FACEBOOK ANALYTICS ----------------
-            'facebook_pages': 'List of Facebook pages connected to the account.',
-            'facebook_page_insights': 'Analytics for Facebook Pages including engagement, reach, and page interactions.',
-            'facebook_page_posts': 'Performance of Facebook Page posts including likes, shares, and comments.',
-            'facebook_page_demographics': 'Audience demographic breakdown for Facebook Pages.',
-            'facebook_page_engagement': 'Detailed engagement metrics for Facebook Pages.',
-            'facebook_page_insights_timeseries': 'Time-based performance trends for Facebook Page insights.',
-            'facebook_page_posts_timeseries': 'Time-series data for Facebook Page posts.',
-            'facebook_video_views_breakdown': 'Breakdown of Facebook video views by type or duration.',
-            'facebook_content_type_breakdown': 'Engagement analysis by content type (video, image, text, etc.) on Facebook.',
-            'facebook_follows_unfollows': 'Daily trends in Facebook Page follows and unfollows.',
-            'facebook_organic_vs_paid': 'Comparison of organic and paid reach for Facebook Pages.',
+    #         # ---------------- FACEBOOK ANALYTICS ----------------
+    #         'facebook_pages': 'List of Facebook pages connected to the account.',
+    #         'facebook_page_insights': 'Analytics for Facebook Pages including engagement, reach, and page interactions.',
+    #         'facebook_page_posts': 'Performance of Facebook Page posts including likes, shares, and comments.',
+    #         'facebook_page_demographics': 'Audience demographic breakdown for Facebook Pages.',
+    #         'facebook_page_engagement': 'Detailed engagement metrics for Facebook Pages.',
+    #         'facebook_page_insights_timeseries': 'Time-based performance trends for Facebook Page insights.',
+    #         'facebook_page_posts_timeseries': 'Time-series data for Facebook Page posts.',
+    #         'facebook_video_views_breakdown': 'Breakdown of Facebook video views by type or duration.',
+    #         'facebook_content_type_breakdown': 'Engagement analysis by content type (video, image, text, etc.) on Facebook.',
+    #         'facebook_follows_unfollows': 'Daily trends in Facebook Page follows and unfollows.',
+    #         'facebook_organic_vs_paid': 'Comparison of organic and paid reach for Facebook Pages.',
 
-            # ---------------- INSTAGRAM ANALYTICS ----------------
-            'instagram_accounts': 'List of connected Instagram business accounts.',
-            'instagram_insights': 'Overall Instagram account insights including reach, impressions, and engagement.',
-            'instagram_insights_timeseries': 'Time-series view of Instagram account performance metrics.',
-            'instagram_media': 'Details of Instagram posts including engagement and caption data.',
-            'instagram_media_timeseries': 'Time-based trends of Instagram media performance.',
+    #         # ---------------- INSTAGRAM ANALYTICS ----------------
+    #         'instagram_accounts': 'List of connected Instagram business accounts.',
+    #         'instagram_insights': 'Overall Instagram account insights including reach, impressions, and engagement.',
+    #         'instagram_insights_timeseries': 'Time-series view of Instagram account performance metrics.',
+    #         'instagram_media': 'Details of Instagram posts including engagement and caption data.',
+    #         'instagram_media_timeseries': 'Time-based trends of Instagram media performance.',
 
-            # ---------------- INTENT INSIGHTS ----------------
-            'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, and competition trends across markets.',
+    #         # ---------------- INTENT INSIGHTS ----------------
+    #         'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, and competition trends across markets.',
 
-            # ---------------- CHAT & MISC ----------------
-            'chat_sessions': 'Stored chat sessions and conversations for AI-driven analytics or support.',
-            'chat_history': 'Historical chat messages across sessions.',
-            'chat_debug_sessions': 'Debug data for chatbot session management.',
-            'combined_metrics': 'Combined data metrics integrating multiple ad and analytics platforms.',
-            'revenue_analysis': 'Comprehensive revenue analysis across campaigns, channels, and platforms.',
-        }
+    #         # ---------------- CHAT & MISC ----------------
+    #         'chat_sessions': 'Stored chat sessions and conversations for AI-driven analytics or support.',
+    #         'chat_history': 'Historical chat messages across sessions.',
+    #         'chat_debug_sessions': 'Debug data for chatbot session management.',
+    #         'combined_metrics': 'Combined data metrics integrating multiple ad and analytics platforms.',
+    #         'revenue_analysis': 'Comprehensive revenue analysis across campaigns, channels, and platforms.',
+    #     }
 
-        return collection_descriptions.get(
-            collection_name,
-            f'Data collection for {collection_name.replace("_", " ")}.'
-        )
+    #     return collection_descriptions.get(
+    #         collection_name,
+    #         f'Data collection for {collection_name.replace("_", " ")}.'
+    #     )
 
     async def _fetch_account_list(self, module_type: ModuleType, token: str, user_email: str) -> List[Dict[str, Any]]:
         """Fetch a list of available accounts for the specified module type."""
@@ -1203,6 +1029,7 @@ class ChatManager:
     # =================
     # Main Orchestrator
     # =================
+
     async def process_chat_message(
         self,
         chat_request: ChatRequest,
@@ -1211,13 +1038,11 @@ class ChatManager:
         """Process chat message with intelligent agentic workflow"""
         
         logger.info(f"🚀 Processing chat message for user: {user_email}")
-        logger.info(f"💬 Message: '{chat_request.message}'")
-        logger.info(f"📱 Module: {chat_request.module_type.value}")
         
         # Status 1: Message received
         await self.send_status_update("Message received", "Processing your question...")
         
-        # Handle session continuation properly
+        # Handle session
         if chat_request.session_id:
             session_id = chat_request.session_id
             await self.db.chat_sessions.update_one(
@@ -1225,7 +1050,6 @@ class ChatManager:
                 {"$set": {"last_activity": datetime.utcnow()}}
             )
         else:
-            # Extract account_id and page_id from context for session creation
             account_id = chat_request.context.get('account_id') if chat_request.context else None
             page_id = chat_request.context.get('page_id') if chat_request.context else None
             
@@ -1235,8 +1059,8 @@ class ChatManager:
                 session_id=None,
                 customer_id=chat_request.customer_id,
                 property_id=chat_request.property_id,
-                account_id=account_id,  # Add this
-                page_id=page_id,  # Add this
+                account_id=account_id,
+                page_id=page_id,
                 period=chat_request.period or "LAST_7_DAYS"
             )
         
@@ -1248,51 +1072,106 @@ class ChatManager:
         )
         await self.add_message_to_simple_session(session_id, user_message)
         
-        # Status 2: Agent working
-        await self.send_status_update("Agent analyzing", "AI agent is examining your question...")
+        # === START: NEW AGENTIC WORKFLOW ===
         
-        # Intelligent collection selection
-        selected_collections = await self.select_relevant_collections(
-            user_message=chat_request.message,
-            module_type=chat_request.module_type
-        )
+        # Agent 1: Classify query
+        await self.send_status_update("Analyzing query", "Understanding your question...")
+        classification = await self.agent_classify_query(chat_request.message)
         
-        await self.send_status_update("Collections identified", f"Found {len(selected_collections)} relevant data sources")
+        if classification['category'] == 'GENERAL':
+            # Handle general chat without API calls
+            ai_response = await self._generate_enhanced_ai_response_simple(
+                message=chat_request.message,
+                context={},
+                module_type=chat_request.module_type,
+                session_id=session_id
+            )
+        else:
+            # Agent 2: Extract time period
+            await self.send_status_update("Extracting time period", "Determining time range...")
+            time_period = await self.agent_extract_time_period(
+                chat_request.message,
+                {
+                    'period': chat_request.period,
+                    'custom_dates': chat_request.context.get('custom_dates') if chat_request.context else None
+                }
+            )
+            
+            if time_period.get('needs_clarification'):
+                ai_response = time_period['clarification_message']
+            else:
+                # Agent 3: Identify account
+                await self.send_status_update("Identifying account", "Finding relevant account...")
+                account_info = await self.agent_identify_account(
+                    chat_request.message,
+                    chat_request.module_type,
+                    {
+                        'customer_id': chat_request.customer_id,
+                        'property_id': chat_request.property_id,
+                        'account_id': account_id,
+                        'page_id': page_id
+                    },
+                    chat_request.context.get('token', '') if chat_request.context else '',
+                    user_email
+                )
+                
+                if account_info.get('needs_account_list'):
+                    # Return account list to user
+                    accounts = await self._fetch_account_list(
+                        chat_request.module_type,
+                        chat_request.context.get('token', '') if chat_request.context else '',
+                        user_email
+                    )
+                    ai_response = f"{account_info.get('clarification_message', 'Please select an account:')}\n\nAvailable accounts:\n"
+                    for acc in accounts:
+                        ai_response += f"- {acc['name']} (ID: {acc['id']})\n"
+                else:
+                    # Agent 4: Select endpoints
+                    await self.send_status_update("Selecting endpoints", "Determining data sources...")
+                    selected_endpoints = await self.agent_select_endpoints(
+                        chat_request.message,
+                        chat_request.module_type,
+                        account_info
+                    )
+                    
+                    # Agent 5: Execute endpoints
+                    await self.send_status_update("Fetching data", f"Calling {len(selected_endpoints)} APIs...")
+                    endpoint_params = {
+                        'customer_id': account_info.get('account_id') if chat_request.module_type == ModuleType.GOOGLE_ADS else None,
+                        'property_id': account_info.get('account_id') if chat_request.module_type == ModuleType.GOOGLE_ANALYTICS else None,
+                        'account_id': account_info.get('account_id') if chat_request.module_type in [ModuleType.META_ADS, ModuleType.INSTAGRAM_ANALYTICS] else None,
+                        'page_id': account_info.get('account_id') if chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS else None,
+                        'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
+                        'start_date': time_period.get('start_date'),
+                        'end_date': time_period.get('end_date'),
+                        'token': chat_request.context.get('token', '') if chat_request.context else ''
+                    }
+                    
+                    endpoint_data = await self.agent_execute_endpoints(
+                        selected_endpoints,
+                        endpoint_params,
+                        user_email
+                    )
+                    
+                    # Agent 6: Analyze data
+                    await self.send_status_update("Analyzing data", "Generating insights...")
+                    analysis = await self.agent_analyze_data(
+                        chat_request.message,
+                        endpoint_data,
+                        chat_request.module_type
+                    )
+                    
+                    # Agent 7: Format response
+                    await self.send_status_update("Formatting response", "Finalizing answer...")
+                    formatted_response = await self.agent_format_response(
+                        analysis,
+                        endpoint_data,
+                        needs_visualization=True
+                    )
+                    
+                    ai_response = formatted_response['text']
         
-        # Build search criteria with intelligent filtering
-        search_criteria = {
-            "user_email": user_email,
-            "customer_id": chat_request.customer_id,
-            "property_id": chat_request.property_id,
-            "account_id": chat_request.context.get('account_id') if chat_request.context else None,  # Add this
-            "page_id": chat_request.context.get('page_id') if chat_request.context else None,  # Add this
-            "period": chat_request.period or "LAST_7_DAYS",
-            "selected_collections": selected_collections
-        }
-        
-        await self.send_status_update("Searching data", "Looking for existing data in your account...")
-        search_results = await self.search_documents_in_collections(search_criteria)
-        
-        # Handle missing data and trigger endpoints intelligently
-        missing_collections = [col for col, result in search_results.items() if not result.get("found", False)]
-        if missing_collections:
-            await self.send_status_update("Triggering endpoints", f"Fetching fresh data from {len(missing_collections)} APIs...")
-            await self.trigger_missing_endpoints(user_email, missing_collections, search_criteria)
-            await asyncio.sleep(2)
-            search_results = await self.search_documents_in_collections(search_criteria)
-        
-        await self.send_status_update("Analyzing data", "Processing and analyzing your marketing data...")
-        context = await self.build_context_from_search_results(search_results, selected_collections)
-        
-        await self.send_status_update("Finalizing response", "AI is preparing your insights...")
-        
-        # Generate AI response with comprehensive context
-        ai_response = await self._generate_enhanced_ai_response_simple(
-            message=chat_request.message,
-            context=context,
-            module_type=chat_request.module_type,
-            session_id=session_id
-        )
+        # === END: NEW AGENTIC WORKFLOW ===
         
         # Add AI response to session
         ai_message = ChatMessage(
@@ -1311,35 +1190,6 @@ class ChatManager:
             endpoint_data=None,
             module_type=chat_request.module_type
         )
-
-    async def build_context_from_search_results(
-        self,
-        search_results: Dict[str, Any],
-        selected_collections: List[str]
-    ) -> Dict[str, Any]:
-        """Build context from search results"""
-        context = {
-            "selected_collections": selected_collections,
-            "data_summary": {},
-            "full_data": {}
-        }
-        
-        for collection_name, result in search_results.items():
-            if result.get("found", False):
-                context["full_data"][collection_name] = [{
-                    "timestamp": result.get("last_updated"),
-                    "request_params": result.get("request_params", {}),
-                    "response_data": result.get("data", {})
-                }]
-                
-                context["data_summary"][collection_name] = {
-                    "total_documents": 1,
-                    "data_entries": 1,
-                    "latest_update": result.get("last_updated"),
-                    "description": self._get_collection_description(collection_name)
-                }
-        
-        return context
 
     def _get_enhanced_system_prompt_v2(self, module_type: ModuleType, context: Dict[str, Any]) -> str:
         """Enhanced system prompt with complete data extraction and intelligent analysis"""
@@ -1374,340 +1224,40 @@ class ChatManager:
             ModuleType.FACEBOOK_ANALYTICS: "Focus on Facebook page growth, post engagement, audience demographics, content performance, and organic vs paid reach."
         }
         
-        # Extract the full nested data
-        full_data = context.get("full_data", {})
+        # Use endpoint data directly instead of MongoDB collections
+        endpoint_data = context.get("endpoint_data", {})
         
-        if full_data:
-            data_prompt = f"\n\nYOUR ACTUAL MARKETING DATA:\n"
-            
-            for collection_name, collection_entries in full_data.items():
-                data_prompt += f"\n=== {collection_name.upper().replace('_', ' ')} ===\n"
-                data_prompt += f"Description: {self._get_collection_description(collection_name)}\n"
-                
-                for i, entry in enumerate(collection_entries):
-                    response_data = entry.get('response_data', {})
-                    timestamp = entry.get('timestamp', 'Unknown')
-                    
-                    data_prompt += f"\nData Entry {i+1} (Updated: {timestamp}):\n"
-                    
-                    # Extract all the nested data properly
-                    if isinstance(response_data, dict):
-                        # Handle key stats format (nested dicts with value/formatted keys)
-                        for key, value in response_data.items():
-                            if isinstance(value, dict):
-                                if 'value' in value and 'formatted' in value:
-                                    # This is a metric with formatted display
-                                    data_prompt += f"  {key}: {value['formatted']} (raw: {value['value']})\n"
-                                elif 'label' in value:
-                                    # This is a labeled metric
-                                    data_prompt += f"  {value.get('label', key)}: {value.get('formatted', value.get('value', 'N/A'))}\n"
-                                else:
-                                    # Regular dict - show key contents
-                                    data_prompt += f"  {key}: {value}\n"
-                            elif isinstance(value, (int, float)):
-                                data_prompt += f"  {key}: {value:,}\n"
-                            elif isinstance(value, str):
-                                data_prompt += f"  {key}: {value}\n"
-                            elif isinstance(value, list):
-                                data_prompt += f"  {key}: List with {len(value)} items\n"
-                                # Show sample items if they're simple
-                                for j, item in enumerate(value[:3]):
-                                    if isinstance(item, dict):
-                                        data_prompt += f"    Item {j+1}: {item}\n"
-                                    else:
-                                        data_prompt += f"    Item {j+1}: {item}\n"
-                    
-                    elif isinstance(response_data, list):
-                        data_prompt += f"  Contains {len(response_data)} data points:\n"
-                        # Show all items for time series data
-                        for j, item in enumerate(response_data):
-                            if isinstance(item, dict):
-                                item_desc = ", ".join([f"{k}: {v}" for k, v in item.items()])
-                                data_prompt += f"    {j+1}. {item_desc}\n"
-                            else:
-                                data_prompt += f"    {j+1}. {item}\n"
-                    
-                    data_prompt += "\n"
+        if endpoint_data:
+            data_prompt = "\n\nYOUR REAL-TIME API DATA:\n"
+            for endpoint_name, data in endpoint_data.items():
+                data_prompt += f"\n=== {endpoint_name.upper().replace('_', ' ')} ===\n"
+                data_prompt += f"{json.dumps(data, indent=2)[:5000]}\n"  # Limit size
         else:
-            data_prompt = f"\n\nNO MARKETING DATA FOUND for the specified criteria.\n"
-            data_prompt += f"Available collections checked: {context.get('selected_collections', [])}\n"
+            data_prompt = "\n\nNo API data available yet.\n"
         
-        context_prompt = f"""
-    Current Module: {module_type.value}
-    Focus: {module_context.get(module_type, "General marketing analysis")}
+        return base_prompt + f"\nCurrent Module: {module_type.value}\n" + data_prompt
 
-    {data_prompt}
+    # def _normalize_period(self, period: str) -> str:
+    #     """Normalize different period formats to a standard format"""
+    #     period_mapping = {
+    #         # Frontend formats
+    #         'LAST_7_DAYS': '7d',
+    #         'LAST_30_DAYS': '30d', 
+    #         'LAST_90_DAYS': '90d',
+    #         'LAST_365_DAYS': '365d',
+    #         'LAST_3_MONTHS': '90d',
+    #         'LAST_1_YEAR': '365d',
 
-    Based on the above data, provide specific insights and actionable recommendations. Use the actual numbers and trends you can see in the data.
-    """
-        
-        final_prompt = base_prompt + context_prompt
-        
-        # Log more details about what's being sent
-        logger.info(f"SYSTEM PROMPT LENGTH: {len(final_prompt)} characters")
-        logger.info(f"DATA COLLECTIONS IN PROMPT: {list(full_data.keys())}")
-        
-        return final_prompt
+    #         # Analytics formats
+    #         '7d': '7d',
+    #         '30d': '30d',
+    #         '90d': '90d', 
+    #         '365d': '365d',
+    #         '12m': '365d'
+    #     }
+    #     return period_mapping.get(period, period)
 
-    def _normalize_period(self, period: str) -> str:
-        """Normalize different period formats to a standard format"""
-        period_mapping = {
-            # Frontend formats
-            'LAST_7_DAYS': '7d',
-            'LAST_30_DAYS': '30d', 
-            'LAST_90_DAYS': '90d',
-            'LAST_365_DAYS': '365d',
-            'LAST_3_MONTHS': '90d',
-            'LAST_1_YEAR': '365d',
-
-            # Analytics formats
-            '7d': '7d',
-            '30d': '30d',
-            '90d': '90d', 
-            '365d': '365d',
-            '12m': '365d'
-        }
-        return period_mapping.get(period, period)
-
-    async def search_documents_in_collections(
-        self,
-        search_criteria: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Search for documents across selected collections with intelligent filtering"""
-        results = {}
-        
-        for collection_name in search_criteria['selected_collections']:
-            try:
-                collection = self.db[collection_name]
-                
-                # Build search query with intelligent filtering
-                query = {"user_email": search_criteria['user_email']}
-                
-                # Add appropriate ID filters based on collection type
-                if search_criteria.get('customer_id'):
-                    query["customer_id"] = search_criteria['customer_id']
-                if search_criteria.get('property_id'): 
-                    query["property_id"] = search_criteria['property_id']
-                if search_criteria.get('account_id'):  # Add this
-                    query["account_id"] = search_criteria['account_id']
-                if search_criteria.get('page_id'):  # Add this
-                    query["page_id"] = search_criteria['page_id']
-                
-                # Search for documents with normalized period
-                normalized_period = self._normalize_period(search_criteria['period'])
-                
-                # Try multiple period formats in request_params
-                period_queries = [
-                    {**query, "request_params.period": search_criteria['period']},
-                    {**query, "request_params.period": normalized_period},
-                ]
-                
-                document = None
-                for period_query in period_queries:
-                    document = await collection.find_one(period_query)
-                    if document:
-                        break
-                
-                if document:
-                    results[collection_name] = {
-                        "found": True,
-                        "data": document.get("response_data", {}),
-                        "last_updated": document.get("last_updated"),
-                        "request_params": document.get("request_params", {})
-                    }
-                    logger.info(f"Found data in {collection_name}")
-                else:
-                    results[collection_name] = {
-                        "found": False,
-                        "needs_api_call": True
-                    }
-                    logger.info(f"No data found in {collection_name}, will need API call")
-                    
-            except Exception as e:
-                logger.error(f"Error searching in {collection_name}: {e}")
-                results[collection_name] = {
-                    "found": False,
-                    "error": str(e)
-                }
-        
-        return results
-    
-    async def trigger_missing_endpoints(
-        self,
-        user_email: str,
-        missing_collections: List[str],
-        search_criteria: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Trigger API endpoints for missing data with intelligent endpoint mapping"""
-        
-        # Collection to endpoint mapping
-        endpoint_mapping = {
-            # Google Ads endpoints
-            'google_ads_key_stats': {
-                'endpoint': 'ads_key_stats',
-                'method': 'GET',
-                'url_template': '/api/ads/key-stats/{customer_id}',
-                'requires': ['customer_id']
-            },
-            'google_ads_campaigns': {
-                'endpoint': 'ads_campaigns', 
-                'method': 'GET',
-                'url_template': '/api/ads/campaigns/{customer_id}',
-                'requires': ['customer_id']
-            },
-            'google_ads_keywords_related_to_campaign': {
-                'endpoint': 'ads_keywords',
-                'method': 'GET', 
-                'url_template': '/api/ads/keywords/{customer_id}',
-                'requires': ['customer_id']
-            },
-            'google_ads_performance': {
-                'endpoint': 'ads_performance',
-                'method': 'GET',
-                'url_template': '/api/ads/performance/{customer_id}',
-                'requires': ['customer_id']
-            },
-            'google_ads_geographic_performance': {
-                'endpoint': 'ads_geographic_performance',
-                'method': 'GET',
-                'url_template': '/api/ads/geographic/{customer_id}', 
-                'requires': ['customer_id']
-            },
-            'google_ads_device_performance': {
-                'endpoint': 'ads_device_performance',
-                'method': 'GET',
-                'url_template': '/api/ads/device-performance/{customer_id}',
-                'requires': ['customer_id']
-            },
-            'google_ads_time_performance': {
-                'endpoint': 'ads_time_performance', 
-                'method': 'GET',
-                'url_template': '/api/ads/time-performance/{customer_id}',
-                'requires': ['customer_id']
-            },
-            
-            # Google Analytics endpoints
-            'google_analytics_metrics': {
-                'endpoint': 'ga_metrics',
-                'method': 'GET',
-                'url_template': '/api/analytics/metrics/{property_id}',
-                'requires': ['property_id']
-            },
-            'google_analytics_conversions': {
-                'endpoint': 'ga_conversions',
-                'method': 'GET', 
-                'url_template': '/api/analytics/conversions/{property_id}',
-                'requires': ['property_id']
-            },
-            'google_analytics_traffic_sources': {
-                'endpoint': 'ga_traffic_sources',
-                'method': 'GET',
-                'url_template': '/api/analytics/traffic-sources/{property_id}',
-                'requires': ['property_id']
-            },
-            'google_analytics_top_pages': {
-                'endpoint': 'ga_top_pages',
-                'method': 'GET',
-                'url_template': '/api/analytics/top-pages/{property_id}',
-                'requires': ['property_id']
-            },
-            'google_analytics_channel_performance': {
-                'endpoint': 'ga_channel_performance',
-                'method': 'GET',
-                'url_template': '/api/analytics/channel-performance/{property_id}',
-                'requires': ['property_id']
-            },
-            'ga_revenue_breakdown_by_channel': {
-                'endpoint': 'ga_revenue_breakdown_by_channel',
-                'method': 'GET',
-                'url_template': '/api/analytics/revenue-breakdown/channel/{property_id}',
-                'requires': ['property_id']
-            },
-            'ga_revenue_breakdown_by_source': {
-                'endpoint': 'ga_revenue_breakdown_by_source', 
-                'method': 'GET',
-                'url_template': '/api/analytics/revenue-breakdown/source/{property_id}',
-                'requires': ['property_id']
-            }
-        }
-        
-        triggered_results = {}
-        
-        for collection_name in missing_collections:
-            if collection_name not in endpoint_mapping:
-                logger.warning(f"No endpoint mapping found for collection: {collection_name}")
-                continue
-                
-            endpoint_config = endpoint_mapping[collection_name]
-            
-            # Check if we have required parameters
-            missing_params = []
-            for required_param in endpoint_config['requires']:
-                if not search_criteria.get(required_param):
-                    missing_params.append(required_param)
-                    
-            if missing_params:
-                logger.warning(f"Missing required parameters {missing_params} for {collection_name}")
-                triggered_results[collection_name] = {
-                    "triggered": False,
-                    "error": f"Missing required parameters: {missing_params}"
-                }
-                continue
-            
-            try:
-                # Import the required managers based on endpoint type
-                if 'ads' in collection_name:
-                    from google_ads.ads_manager import GoogleAdsManager
-                    auth_manager_instance = AuthManager()
-                    ads_manager = GoogleAdsManager(user_email, auth_manager_instance)
-                
-                    # Call the appropriate method based on endpoint
-                    if endpoint_config['endpoint'] == 'ads_key_stats':
-                        result = ads_manager.get_overall_key_stats(
-                            search_criteria['customer_id'], 
-                            search_criteria['period']
-                        )
-                    elif endpoint_config['endpoint'] == 'ads_campaigns':
-                        result = ads_manager.get_campaigns_with_period(
-                            search_criteria['customer_id'],
-                            search_criteria['period'] 
-                        )
-                    # Add more endpoint calls as needed...
-                    
-                elif 'analytics' in collection_name or 'ga_' in collection_name:
-                    from google_analytics.ga4_manager import GA4Manager
-                    ga4_manager = GA4Manager(user_email)
-                    
-                    # Convert period format for analytics
-                    analytics_period = self._normalize_period(search_criteria['period'])
-                    
-                    if endpoint_config['endpoint'] == 'ga_metrics':
-                        result = ga4_manager.get_metrics(
-                            search_criteria['property_id'],
-                            analytics_period
-                        )
-                    elif endpoint_config['endpoint'] == 'ga_conversions':
-                        result = ga4_manager.get_conversions(
-                            search_criteria['property_id'],
-                            analytics_period
-                        )
-                    # Add more endpoint calls as needed...
-                
-                triggered_results[collection_name] = {
-                    "triggered": True,
-                    "data": result
-                }
-                logger.info(f"Successfully triggered endpoint for {collection_name}")
-                
-            except Exception as e:
-                logger.error(f"Error triggering endpoint for {collection_name}: {e}")
-                triggered_results[collection_name] = {
-                    "triggered": False,
-                    "error": str(e)
-                }
-        
-        return triggered_results
-
+   
     async def get_chat_history(self, user_email: str, module_type: ModuleType, limit: int = 20) -> ChatHistoryResponse:
         """Get chat history from sessions"""
         collection = self.db.chat_sessions
