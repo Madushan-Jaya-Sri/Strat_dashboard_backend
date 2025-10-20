@@ -561,7 +561,6 @@ async def generate_engagement_funnel_with_llm(
         logger.error(f"Error in funnel generation endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
        
-
 @app.get("/api/analytics/channel-performance/{property_id}", response_model=List[GAChannelPerformance])
 @save_response("ga_channel_performance")
 async def get_ga_channel_performance(

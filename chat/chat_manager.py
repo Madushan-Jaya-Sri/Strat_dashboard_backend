@@ -116,6 +116,54 @@ class ChatManager:
         }
 
     # =================
+    # Helper Method: Fetch Account List
+    # =================
+    async def _fetch_account_list(self, module_type: ModuleType, token: str, user_email: str) -> List[Dict[str, Any]]:
+        """Fetch the list of accounts for the given module type"""
+        endpoint_name = {
+            ModuleType.GOOGLE_ADS: 'get_ads_customers',
+            ModuleType.GOOGLE_ANALYTICS: 'get_ga_properties',
+            ModuleType.META_ADS: 'get_meta_ad_accounts',
+            ModuleType.FACEBOOK_ANALYTICS: 'get_facebook_pages',
+            ModuleType.INSTAGRAM_ANALYTICS: 'get_meta_instagram_accounts'
+        }.get(module_type)
+        
+        if not endpoint_name:
+            return []
+
+        endpoint = next((e for e in self.endpoint_registry.get(module_type.value, []) if e['name'] == endpoint_name), None)
+        if not endpoint:
+            return []
+
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                headers = {'Authorization': f'Bearer {token}'}
+                full_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{endpoint['path']}"
+                
+                async with session.get(full_url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Save response to MongoDB
+                        await self._save_endpoint_response(
+                            endpoint_name=endpoint['name'],
+                            endpoint_path=endpoint['path'],
+                            params={},
+                            response_data=data,
+                            user_email=user_email
+                        )
+                        return data.get('customers', []) if module_type == ModuleType.GOOGLE_ADS else \
+                               data.get('properties', []) if module_type == ModuleType.GOOGLE_ANALYTICS else \
+                               data.get('accounts', []) if module_type in [ModuleType.META_ADS, ModuleType.INSTAGRAM_ANALYTICS] else \
+                               data.get('pages', []) if module_type == ModuleType.FACEBOOK_ANALYTICS else []
+                    else:
+                        logger.error(f"Failed to fetch account list for {module_type.value}: {response.status}")
+                        return []
+        except Exception as e:
+            logger.error(f"Error fetching account list for {module_type.value}: {e}")
+            return []
+
+    # =================
     # AGENT 1: General Query Classifier
     # =================
     async def agent_classify_query(self, message: str) -> Dict[str, Any]:
@@ -217,28 +265,33 @@ class ChatManager:
     # =================
     # AGENT 3: Account Identifier
     # =================
-    async def agent_identify_account(self, message: str, module_type: ModuleType, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Identify which account/property the user is referring to"""
+    async def agent_identify_account(self, message: str, module_type: ModuleType, context: Dict[str, Any], token: str, user_email: str) -> Dict[str, Any]:
+        """Identify which account/property the user is referring to by name or use active/selected account"""
         
         prompt = f"""
-        Identify if the user is referring to a specific account/property in their message.
+        Identify the account or property the user is referring to in their message.
         Module type: {module_type.value}
         Current context: {json.dumps(context)}
-
         User Message: "{message}"
 
         Look for:
-        - Specific account names or IDs
-        - References like "this account", "current campaign"
-        - Implicit references based on context
+        - Specific account names (e.g., "My Summer Campaign", "Main Website Analytics")
+        - References like "this account", "my ads account", "current campaign"
+        - Implicit references based on context (e.g., no account mentioned, use active account)
+
+        If an account name is mentioned, return it for lookup.
+        If no specific account name is mentioned, use the active/selected account from context.
+        If no account can be determined, indicate that a list of accounts should be fetched.
 
         Respond in JSON format:
         {{
             "has_specific_reference": true/false,
             "reference_type": "explicit" or "implicit" or "none",
             "account_name": "name if mentioned" or null,
-            "use_current": true/false,
-            "needs_account_list": true/false
+            "account_id": "specific ID if identified" or null,
+            "use_active_account": true/false,
+            "needs_account_list": true/false,
+            "clarification_message": "message to request account clarification" or null
         }}
         """
 
@@ -252,24 +305,60 @@ class ChatManager:
             
             result = json.loads(response.choices[0].message.content)
             
-            # Add current account/property from context
-            if result['use_current'] or not result['has_specific_reference']:
+            # If an account name is mentioned, fetch the account list to map name to ID
+            if result['has_specific_reference'] and result['account_name']:
+                account_list = await self._fetch_account_list(module_type, token, user_email)
+                for account in account_list:
+                    # Match account name (case-insensitive)
+                    if account.get('name', '').lower() == result['account_name'].lower() or \
+                       account.get('descriptiveName', '').lower() == result['account_name'].lower():
+                        result['account_id'] = account.get('id') or account.get('customerId') or \
+                                             account.get('account_id') or account.get('page_id')
+                        result['needs_account_list'] = False
+                        result['clarification_message'] = None
+                        break
+                if not result.get('account_id'):
+                    result['needs_account_list'] = True
+                    result['clarification_message'] = f"Could not find an account named '{result['account_name']}'. Please specify a valid account name or ID, or I can provide a list of available accounts. Would you like me to do that?"
+            
+            # If no specific account mentioned, use active/selected account from context
+            if not result['has_specific_reference'] or result.get('use_active_account'):
                 if module_type == ModuleType.GOOGLE_ADS:
-                    result['customer_id'] = context.get('customer_id')
+                    result['account_id'] = context.get('account_id') or context.get('customer_id') or context.get('campaign_id')
+                    result['account_name'] = context.get('account_name') or context.get('campaign_name')
                 elif module_type == ModuleType.GOOGLE_ANALYTICS:
-                    result['property_id'] = context.get('property_id')
+                    result['account_id'] = context.get('property_id')
+                    result['account_name'] = context.get('property_name')
                 elif module_type == ModuleType.META_ADS:
                     result['account_id'] = context.get('account_id')
+                    result['account_name'] = context.get('account_name')
                 elif module_type == ModuleType.FACEBOOK_ANALYTICS:
-                    result['page_id'] = context.get('page_id')
+                    result['account_id'] = context.get('page_id')
+                    result['account_name'] = context.get('page_name')
+                elif module_type == ModuleType.INSTAGRAM_ANALYTICS:
+                    result['account_id'] = context.get('account_id')
+                    result['account_name'] = context.get('account_name')
+                
+                if result['account_id']:
+                    result['use_active_account'] = True
+                    result['needs_account_list'] = False
+                    result['clarification_message'] = None
+                else:
+                    result['needs_account_list'] = True
+                    result['clarification_message'] = f"Please specify the {module_type.value} account to analyze, or I can fetch a list of available accounts. Would you like me to do that?"
             
             return result
             
         except Exception as e:
             logger.error(f"Error identifying account: {e}")
             return {
-                'use_current': True,
-                'needs_account_list': False
+                'has_specific_reference': False,
+                'reference_type': 'none',
+                'account_name': None,
+                'account_id': None,
+                'use_active_account': True,
+                'needs_account_list': True,
+                'clarification_message': f"Please specify the {module_type.value} account to analyze, or I can fetch a list of available accounts."
             }
 
     # =================
@@ -285,6 +374,7 @@ class ChatManager:
         
         User Query: "{message}"
         Module: {module_type.value}
+        Account Info: {json.dumps(account_info)}
         Available Endpoints: {json.dumps(available_endpoints, indent=2)}
 
         Consider:
@@ -315,12 +405,18 @@ class ChatManager:
                 if endpoint:
                     selected.append(endpoint)
             
+            # If no endpoints selected, default to a key stats endpoint for analytics queries
+            if not selected and module_type == ModuleType.GOOGLE_ADS:
+                selected = [e for e in available_endpoints if e['name'] == 'get_ads_key_stats']
+            
             return selected
             
         except Exception as e:
             logger.error(f"Error selecting endpoints: {e}")
-            # Default to key stats endpoint
-            return [available_endpoints[1]] if len(available_endpoints) > 1 else available_endpoints
+            # Default to key stats endpoint for Google Ads
+            if module_type == ModuleType.GOOGLE_ADS:
+                return [e for e in available_endpoints if e['name'] == 'get_ads_key_stats']
+            return []
 
     # =================
     # AGENT 5: Endpoint Executor
@@ -333,11 +429,19 @@ class ChatManager:
         
         for endpoint in endpoints:
             try:
+                # Validate required parameters
+                for param in ['customer_id', 'property_id', 'account_id', 'page_id']:
+                    if f'{{{param}}}' in endpoint['path'] and (param not in params or params[param] is None):
+                        error_msg = f"Missing or invalid {param} for endpoint {endpoint['name']}"
+                        logger.error(error_msg)
+                        results[endpoint['name']] = {"error": error_msg}
+                        return results  # Exit early to avoid further processing
+                
                 # Build URL
                 url = endpoint['path']
                 for param in ['customer_id', 'property_id', 'account_id', 'page_id']:
                     if f'{{{param}}}' in url and param in params:
-                        url = url.replace(f'{{{param}}}', params[param])
+                        url = url.replace(f'{{{param}}}', str(params[param]))
                 
                 # For Meta campaigns list - special handling
                 if endpoint['name'] == 'get_meta_campaigns_list':
@@ -372,11 +476,14 @@ class ChatManager:
                                 user_email=user_email
                             )
                         else:
-                            logger.error(f"API call failed for {endpoint['name']}: {response.status}")
+                            error_msg = f"API call failed for {endpoint['name']}: {response.status}"
+                            logger.error(error_msg)
+                            results[endpoint['name']] = {"error": error_msg}
                             
             except Exception as e:
-                logger.error(f"Error executing endpoint {endpoint['name']}: {e}")
-                results[endpoint['name']] = {"error": str(e)}
+                error_msg = f"Error executing endpoint {endpoint['name']}: {str(e)}"
+                logger.error(error_msg)
+                results[endpoint['name']] = {"error": error_msg}
         
         return results
 
@@ -385,6 +492,12 @@ class ChatManager:
     # =================
     async def agent_analyze_data(self, message: str, data: Dict[str, Any], module_type: ModuleType) -> str:
         """Analyze the collected data and generate insights"""
+        
+        # Check for errors in the data
+        errors = [result['error'] for endpoint, result in data.items() if 'error' in result]
+        if errors:
+            clarification_msg = "Please specify a valid account name or ID, or I can fetch a list of available accounts. Would you like me to do that?"
+            return f"I'm sorry, but there was an issue retrieving the data: {', '.join(errors)}. {clarification_msg}"
         
         prompt = f"""
         You are a {module_type.value} analytics expert. Analyze this data and answer the user's question.
@@ -416,7 +529,7 @@ class ChatManager:
             
         except Exception as e:
             logger.error(f"Error analyzing data: {e}")
-            return "I encountered an error while analyzing your data. Please try again."
+            return "I encountered an error while analyzing your data. Please specify a valid account name or ID, or contact the technical team."
 
     # =================
     # AGENT 7: Response Formatter
@@ -508,8 +621,26 @@ class ChatManager:
         account_info = await self.agent_identify_account(
             chat_request.message,
             chat_request.module_type,
-            chat_request.context or {}
+            chat_request.context or {},
+            chat_request.context.get('token') if chat_request.context else None,
+            user_email
         )
+        
+        if account_info.get('needs_account_list'):
+            # Fetch list of accounts
+            account_list = await self._fetch_account_list(chat_request.module_type, chat_request.context.get('token'), user_email)
+            if account_list:
+                account_names = [f"{acc.get('name') or acc.get('descriptiveName') or 'Unnamed Account'} (ID: {acc.get('id') or acc.get('customerId') or acc.get('account_id') or acc.get('page_id')})" for acc in account_list]
+                response = f"I couldn't identify the account. Available accounts: {', '.join(account_names)}. Please specify an account name or ID."
+            else:
+                response = account_info['clarification_message']
+            
+            await self._save_message_to_session(session_id, MessageRole.ASSISTANT, response, user_email)
+            return ChatResponse(
+                response=response,
+                session_id=session_id,
+                module_type=chat_request.module_type
+            )
         
         # Prepare parameters
         params = {
@@ -521,13 +652,15 @@ class ChatManager:
         
         # Add account identifiers
         if chat_request.module_type == ModuleType.GOOGLE_ADS:
-            params['customer_id'] = account_info.get('customer_id', chat_request.customer_id)
+            params['customer_id'] = account_info.get('account_id', chat_request.customer_id)
         elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-            params['property_id'] = account_info.get('property_id', chat_request.property_id)
+            params['property_id'] = account_info.get('account_id', chat_request.property_id)
         elif chat_request.module_type == ModuleType.META_ADS:
             params['account_id'] = account_info.get('account_id', chat_request.context.get('account_id'))
         elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-            params['page_id'] = account_info.get('page_id', chat_request.context.get('page_id'))
+            params['page_id'] = account_info.get('account_id', chat_request.context.get('page_id'))
+        elif chat_request.module_type == ModuleType.INSTAGRAM_ANALYTICS:
+            params['account_id'] = account_info.get('account_id', chat_request.context.get('account_id'))
         
         # AGENT 4: Select endpoints
         endpoints = await self.agent_select_endpoints(
@@ -535,6 +668,15 @@ class ChatManager:
             chat_request.module_type,
             account_info
         )
+        
+        if not endpoints:
+            response = "I couldn't identify the right data to answer your question. Please provide more details or specify the account and metrics."
+            await self._save_message_to_session(session_id, MessageRole.ASSISTANT, response, user_email)
+            return ChatResponse(
+                response=response,
+                session_id=session_id,
+                module_type=chat_request.module_type
+            )
         
         # Special message for Meta campaigns
         if any(e['name'] == 'get_meta_campaigns_all' for e in endpoints):
