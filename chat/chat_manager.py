@@ -172,6 +172,537 @@ class ChatManager:
             }
         )
 
+    async def select_relevant_collections(
+        self,
+        user_message: str,
+        module_type: ModuleType
+    ) -> List[str]:
+        """Use AI agent to select relevant collections based on user query with detailed logging"""
+        
+        logger.info(f"COLLECTION SELECTION - Query: '{user_message[:100]}...' Module: {module_type.value}")
+        
+        available_collections = []
+        if module_type == ModuleType.GOOGLE_ADS:
+            available_collections.extend(self.collection_mapping['google_ads'])
+        elif module_type == ModuleType.GOOGLE_ANALYTICS:
+            available_collections.extend(self.collection_mapping['google_analytics'])
+            available_collections.extend(self.collection_mapping['revenue_analysis'])
+            available_collections.extend(self.collection_mapping['channel_timeseries'])
+        elif module_type == ModuleType.INTENT_INSIGHTS:
+            available_collections.extend(self.collection_mapping['intent_insights'])
+        elif module_type == ModuleType.META_ADS:  # Add this
+            available_collections.extend(self.collection_mapping['meta_ads'])
+        elif module_type == ModuleType.FACEBOOK_ANALYTICS:  # Add this
+            available_collections.extend(self.collection_mapping['facebook_analytics'])
+    
+        
+        # Cross-module collections
+        if "keyword" in user_message.lower() or "search" in user_message.lower():
+            available_collections.extend(self.collection_mapping['intent_insights'])
+        
+        if "revenue" in user_message.lower() or "roas" in user_message.lower() or "roi" in user_message.lower():
+            available_collections.extend(self.collection_mapping['revenue_analysis'])
+            available_collections.extend(self.collection_mapping['combined_metrics'])
+
+        logger.info(f"AVAILABLE COLLECTIONS TO LLM: {available_collections}")
+
+        selection_prompt = f"""
+        Analyze this user query and select the most relevant data collections to answer their question.
+
+        User Query: "{user_message}"
+        Module Type: {module_type.value}
+
+        Available Collections:
+        {chr(10).join([f"- {col}: {self._get_collection_description(col)}" for col in available_collections])}
+
+        Instructions:
+        1. Select 2-4 most relevant collections that would help answer the user's question
+        2. Prioritize collections that directly relate to the user's specific query
+        3. Include supporting collections that provide context
+        4. Return ONLY a JSON list of collection names, nothing else
+
+        Example response: ["google_ads_campaigns", "google_ads_key_stats"]
+        """
+
+        logger.info(f"PROMPT SENT TO LLM FOR COLLECTION SELECTION:\n{selection_prompt}")
+
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": selection_prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            content = response.choices[0].message.content.strip()
+            logger.info(f"LLM COLLECTION SELECTION RESPONSE: {content}")
+            
+            selected_collections = json.loads(content)
+            
+            # Validate selections
+            valid_collections = [col for col in selected_collections if col in available_collections]
+            invalid_collections = [col for col in selected_collections if col not in available_collections]
+            
+            if invalid_collections:
+                logger.warning(f"INVALID COLLECTIONS SELECTED BY LLM: {invalid_collections}")
+            
+            logger.info(f"FINAL VALID COLLECTIONS SELECTED: {valid_collections}")
+            return valid_collections
+            
+        except Exception as e:
+            logger.error(f"ERROR IN COLLECTION SELECTION: {e}")
+            fallback_collections = []
+            if module_type == ModuleType.GOOGLE_ADS:
+                fallback_collections = ['google_ads_key_stats', 'google_ads_campaigns']
+            elif module_type == ModuleType.GOOGLE_ANALYTICS:
+                fallback_collections = ['google_analytics_metrics', 'google_analytics_conversions']
+            else:
+                fallback_collections = ['intent_keyword_insights']
+            
+            logger.info(f"USING FALLBACK COLLECTIONS: {fallback_collections}")
+            return fallback_collections
+
+
+    async def _generate_enhanced_ai_response_simple(
+        self,
+        message: str,
+        context: Dict[str, Any],
+        module_type: ModuleType,
+        session_id: str
+    ) -> str:
+        """Generate AI response using simple session format"""
+        
+        # Get conversation history from session
+        collection = self.db.chat_sessions
+        session = await collection.find_one({"session_id": session_id})
+        
+        conversation_history = []
+        if session and session.get("messages"):
+            # Get last 6 messages for context
+            recent_messages = session["messages"][-6:]
+            for msg in recent_messages:
+                conversation_history.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+        
+        # Create enhanced system prompt
+        system_prompt = self._get_enhanced_system_prompt_v2(module_type, context)
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(conversation_history)
+        messages.append({"role": "user", "content": message})
+        
+        logger.info(f"SENDING TO AI - System prompt length: {len(system_prompt)} chars")
+        logger.info(f"CONVERSATION HISTORY: {len(conversation_history)} messages")
+        
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            
+            ai_response = response.choices[0].message.content
+            logger.info(f"AI RESPONSE GENERATED - Length: {len(ai_response)} chars")
+            return ai_response
+            
+        except Exception as e:
+            logger.error(f"ERROR GENERATING AI RESPONSE: {e}")
+            return "I apologize, but I'm having trouble analyzing your data right now. Please try again."
+        
+
+
+    def _get_collection_description(self, collection_name: str) -> str:
+        """Return a human-readable description of the specified collection."""
+
+        collection_descriptions = {
+            # ---------------- GOOGLE ADS ----------------
+            'google_ads_customers': 'List of linked Google Ads customer accounts.',
+            'google_ads_key_stats': 'Key performance indicators for Google Ads accounts, including impressions, clicks, CTR, and cost metrics.',
+            'google_ads_campaigns': 'Detailed data for Google Ads campaigns, including campaign names, objectives, and performance results.',
+            'google_ads_keywords': 'Performance data of individual keywords in Google Ads, including impressions, clicks, and cost.',
+            'google_ads_performance': 'Overall performance data for Google Ads, combining clicks, conversions, spend, and ROI metrics.',
+            'google_ads_geographic': 'Geographic distribution of Google Ads performance, showing results by region or location.',
+            'google_ads_device_performance': 'Performance metrics for Google Ads across devices such as mobile, desktop, and tablet.',
+            'google_ads_time_performance': 'Time-based Google Ads performance metrics showing trends by day, week, or month.',
+            'google_ads_keyword_ideas': 'Suggested keyword ideas for Google Ads campaigns, based on seed keywords and location targeting.',
+
+            # ---------------- GOOGLE ANALYTICS ----------------
+            'google_analytics_properties': 'List of connected Google Analytics properties and configuration details.',
+            'google_analytics_metrics': 'Core Google Analytics data, including sessions, users, bounce rates, and engagement metrics.',
+            'google_analytics_traffic_sources': 'Breakdown of website traffic sources, including organic, paid, referral, and direct channels.',
+            'google_analytics_conversions': 'Goal and conversion metrics tracked in Google Analytics, including conversion rate and value.',
+            'google_analytics_channel_performance': 'Performance comparison between marketing channels such as organic search, paid ads, and social.',
+            'google_analytics_audience_insights': 'Audience demographics and behavioral insights from Google Analytics.',
+            'google_analytics_time_series': 'Time-series data from Google Analytics showing trends in traffic and engagement.',
+            'google_analytics_revenue_breakdown_channel': 'Revenue breakdown by marketing channel in Google Analytics.',
+            'google_analytics_revenue_breakdown_source': 'Revenue breakdown by traffic source in Google Analytics.',
+            'google_analytics_revenue_breakdown_device': 'Revenue analysis segmented by user device (mobile, desktop, tablet).',
+            'google_analytics_revenue_breakdown_location': 'Revenue distribution by user location or region.',
+            'google_analytics_revenue_breakdown_page': 'Revenue performance by top-performing pages on the website.',
+            'google_analytics_comprehensive_revenue_breakdown': 'A comprehensive revenue analysis combining multiple dimensions.',
+            'google_analytics_revenue_breakdown_raw': 'Raw-level revenue breakdown data from Google Analytics.',
+            'google_analytics_channel_revenue_timeseries': 'Time-series view of revenue by marketing channel.',
+            'google_analytics_specific_channels_timeseries': 'Performance over time for selected Google Analytics channels.',
+            'google_analytics_available_channels': 'List of available channels for Google Analytics revenue reporting.',
+            'google_analytics_channel_revenue_timeseries_raw': 'Raw time-series data of channel-level revenue metrics.',
+            'google_analytics_revenue_time_series': 'Revenue trends over time, segmented by selected dimensions.',
+            'google_analytics_top_pages': 'Top pages on the website ranked by traffic, engagement, or conversions.',
+            'google_analytics_trends': 'Identified performance trends from Google Analytics data.',
+            'google_analytics_roas_roi_time_series': 'ROAS (Return on Ad Spend) and ROI trends over time.',
+            'google_analytics_combined_overview': 'High-level overview combining Google Ads and Analytics data.',
+            'google_analytics_enhanced_combined_roas_roi_metrics': 'Enhanced cross-platform ROI and ROAS calculations.',
+            'google_analytics_combined_roas_roi_metrics_legacy': 'Legacy combined metrics for ROAS and ROI calculations.',
+            'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
+
+            # ---------------- META ADS ----------------
+            'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
+            'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
+            'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
+            'meta_campaigns_list': 'List view of Meta Ad Campaigns filtered by status.',
+            'meta_campaigns_timeseries': 'Time-series data for Meta Ad Campaigns showing daily or weekly performance.',
+            'meta_campaigns_demographics': 'Demographic breakdown of Meta Ad Campaign performance.',
+            'meta_campaigns_placements': 'Placement performance data for Meta Ads across different surfaces (Feed, Reels, Stories, etc.).',
+            'meta_adsets_timeseries': 'Time-based performance data for Meta AdSets.',
+            'meta_adsets_demographics': 'Demographic performance analysis of Meta AdSets.',
+            'meta_adsets_placements': 'Ad placement effectiveness at the AdSet level.',
+            'meta_ads_by_adsets': 'List of ads under each AdSet with corresponding performance data.',
+            'meta_ads_timeseries': 'Time-series trends for individual Meta Ads.',
+            'meta_ads_demographics': 'Demographic performance data for specific Meta Ads.',
+            'meta_ads_placements': 'Performance insights for Meta Ads across placements such as Feed, Stories, or Audience Network.',
+            'meta_overview': 'Overall summary of Meta Ads performance and account activity.',
+            'meta_debug_permissions': 'Debugging information for Meta Ads API permissions and access validation.',
+
+            # ---------------- FACEBOOK ANALYTICS ----------------
+            'facebook_pages': 'List of Facebook pages connected to the account.',
+            'facebook_page_insights': 'Analytics for Facebook Pages including engagement, reach, and page interactions.',
+            'facebook_page_posts': 'Performance of Facebook Page posts including likes, shares, and comments.',
+            'facebook_page_demographics': 'Audience demographic breakdown for Facebook Pages.',
+            'facebook_page_engagement': 'Detailed engagement metrics for Facebook Pages.',
+            'facebook_page_insights_timeseries': 'Time-based performance trends for Facebook Page insights.',
+            'facebook_page_posts_timeseries': 'Time-series data for Facebook Page posts.',
+            'facebook_video_views_breakdown': 'Breakdown of Facebook video views by type or duration.',
+            'facebook_content_type_breakdown': 'Engagement analysis by content type (video, image, text, etc.) on Facebook.',
+            'facebook_follows_unfollows': 'Daily trends in Facebook Page follows and unfollows.',
+            'facebook_organic_vs_paid': 'Comparison of organic and paid reach for Facebook Pages.',
+
+            # ---------------- INSTAGRAM ANALYTICS ----------------
+            'instagram_accounts': 'List of connected Instagram business accounts.',
+            'instagram_insights': 'Overall Instagram account insights including reach, impressions, and engagement.',
+            'instagram_insights_timeseries': 'Time-series view of Instagram account performance metrics.',
+            'instagram_media': 'Details of Instagram posts including engagement and caption data.',
+            'instagram_media_timeseries': 'Time-based trends of Instagram media performance.',
+
+            # ---------------- INTENT INSIGHTS ----------------
+            'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, and competition trends across markets.',
+
+            # ---------------- CHAT & MISC ----------------
+            'chat_sessions': 'Stored chat sessions and conversations for AI-driven analytics or support.',
+            'chat_history': 'Historical chat messages across sessions.',
+            'chat_debug_sessions': 'Debug data for chatbot session management.',
+            'combined_metrics': 'Combined data metrics integrating multiple ad and analytics platforms.',
+            'revenue_analysis': 'Comprehensive revenue analysis across campaigns, channels, and platforms.',
+        }
+
+        return collection_descriptions.get(
+            collection_name,
+            f'Data collection for {collection_name.replace("_", " ")}.'
+        )
+
+    async def _fetch_account_list(self, module_type: ModuleType, token: str, user_email: str) -> List[Dict[str, Any]]:
+        """Fetch a list of available accounts for the specified module type."""
+        import aiohttp
+        from fastapi import HTTPException
+
+        logger.info(f"Fetching account list for user: {user_email}, module: {module_type.value}")
+
+        # Define endpoint mappings for account list retrieval based on module type
+        endpoint_mapping = {
+            ModuleType.GOOGLE_ADS: {
+                'endpoint': 'get_ads_customers',
+                'path': '/api/ads/customers',
+                'response_key': 'customers',
+                'id_field': 'customer_id',
+                'name_field': 'name'
+            },
+            ModuleType.GOOGLE_ANALYTICS: {
+                'endpoint': 'get_ga_properties',
+                'path': '/api/analytics/properties',
+                'response_key': 'properties',
+                'id_field': 'property_id',
+                'name_field': 'name'
+            },
+            ModuleType.META_ADS: {
+                'endpoint': 'get_meta_ad_accounts',
+                'path': '/api/meta/ad-accounts',
+                'response_key': 'accounts',
+                'id_field': 'account_id',
+                'name_field': 'name'
+            },
+            ModuleType.FACEBOOK_ANALYTICS: {
+                'endpoint': 'get_facebook_pages',
+                'path': '/api/meta/pages',
+                'response_key': 'pages',
+                'id_field': 'page_id',
+                'name_field': 'name'
+            },
+            ModuleType.INSTAGRAM_ANALYTICS: {
+                'endpoint': 'get_meta_instagram_accounts',
+                'path': '/api/meta/instagram/accounts',
+                'response_key': 'accounts',
+                'id_field': 'account_id',
+                'name_field': 'name'
+            }
+        }
+
+        # Check if module type is supported
+        if module_type not in endpoint_mapping:
+            logger.error(f"Unsupported module type for account list: {module_type.value}")
+            raise HTTPException(status_code=400, detail=f"Module type {module_type.value} not supported for account listing")
+
+        endpoint_config = endpoint_mapping[module_type]
+        url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{endpoint_config['path']}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {'Authorization': f'Bearer {token}'}
+                async with session.get(url, headers=headers) as response:
+                    if response.status != 200:
+                        error_msg = f"Failed to fetch accounts for {module_type.value}: Status {response.status}"
+                        logger.error(error_msg)
+                        raise HTTPException(status_code=response.status, detail=error_msg)
+
+                    data = await response.json()
+                    accounts = data.get(endpoint_config['response_key'], [])
+
+                    # Normalize the account list format
+                    normalized_accounts = []
+                    for account in accounts:
+                        normalized_account = {
+                            'id': account.get(endpoint_config['id_field']),
+                            'name': account.get(endpoint_config['name_field'], 'Unnamed Account'),
+                            'descriptiveName': account.get('descriptiveName', account.get(endpoint_config['name_field'], 'Unnamed Account'))
+                        }
+                        normalized_accounts.append(normalized_account)
+
+                    logger.info(f"Fetched {len(normalized_accounts)} accounts for {module_type.value}")
+                    return normalized_accounts
+
+        except Exception as e:
+            logger.error(f"Error fetching account list for {module_type.value}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error fetching accounts: {str(e)}")
+
+
+    async def _save_endpoint_response(self, endpoint_name: str, endpoint_path: str, params: Dict[str, Any], response_data: Any, user_email: str) -> None:
+        """Save API endpoint response data to MongoDB for future use."""
+        try:
+            collection = self.db['endpoint_responses']
+            
+            # Prepare document to be saved
+            document = {
+                "user_email": user_email,
+                "endpoint_name": endpoint_name,
+                "endpoint_path": endpoint_path,
+                "request_params": params,
+                "response_data": response_data,
+                "last_updated": datetime.utcnow(),
+                "module_type": self._infer_module_type(endpoint_name),
+                "customer_id": params.get('customer_id'),
+                "property_id": params.get('property_id'),
+                "account_id": params.get('account_id'),
+                "page_id": params.get('page_id'),
+                "period": params.get('period')
+            }
+
+            # Insert or update document based on unique criteria
+            await collection.update_one(
+                {
+                    "user_email": user_email,
+                    "endpoint_name": endpoint_name,
+                    "customer_id": document.get("customer_id"),
+                    "property_id": document.get("property_id"),
+                    "account_id": document.get("account_id"),
+                    "page_id": document.get("page_id"),
+                    "period": document.get("period")
+                },
+                {"$set": document},
+                upsert=True
+            )
+            
+            logger.info(f"Saved response for endpoint {endpoint_name} for user {user_email}")
+
+        except Exception as e:
+            logger.error(f"Error saving endpoint response for {endpoint_name}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to save endpoint response: {str(e)}")
+
+    def _infer_module_type(self, endpoint_name: str) -> str:
+        """Infer the module type based on the endpoint name."""
+        module_mapping = {
+            'ads_': ModuleType.GOOGLE_ADS.value,
+            'ga_': ModuleType.GOOGLE_ANALYTICS.value,
+            'meta_': ModuleType.META_ADS.value,
+            'facebook_': ModuleType.FACEBOOK_ANALYTICS.value,
+            'instagram_': ModuleType.INSTAGRAM_ANALYTICS.value,
+            'keyword_': ModuleType.INTENT_INSIGHTS.value
+        }
+        
+        for prefix, module_type in module_mapping.items():
+            if endpoint_name.startswith(prefix):
+                return module_type
+        return 'other'
+
+
+    def _create_visualizations(self, data: Dict[str, Any], viz_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Create visualizations (tables or charts) based on the provided data and visualization configuration."""
+        visualizations = []
+        
+        try:
+            # Handle table visualization
+            if viz_config.get('needs_table', False) and viz_config.get('table_columns'):
+                table_data = []
+                for endpoint, endpoint_data in data.items():
+                    if isinstance(endpoint_data, dict) and 'error' not in endpoint_data:
+                        # Extract relevant data for table
+                        rows = self._extract_table_data(endpoint_data, viz_config['table_columns'])
+                        table_data.extend(rows)
+                
+                if table_data:
+                    visualizations.append({
+                        'type': 'table',
+                        'columns': viz_config['table_columns'],
+                        'data': table_data[:50]  # Limit to 50 rows for performance
+                    })
+                    logger.info(f"Created table visualization with {len(table_data)} rows")
+
+            # Handle chart visualization
+            if viz_config.get('needs_chart', False) and viz_config.get('chart_type'):
+                chart_type = viz_config['chart_type']
+                if chart_type not in ['bar', 'line', 'pie']:
+                    logger.warning(f"Unsupported chart type: {chart_type}. Skipping chart creation.")
+                    return visualizations
+
+                chart_data = self._prepare_chart_data(data, chart_type)
+                if chart_data:
+                    chart_config = {
+                        'type': chart_type,
+                        'data': {
+                            'labels': chart_data['labels'],
+                            'datasets': [{
+                                'label': chart_data['dataset_label'],
+                                'data': chart_data['values'],
+                                'backgroundColor': self._get_chart_colors(chart_type, len(chart_data['values'])),
+                                'borderColor': self._get_chart_colors(chart_type, len(chart_data['values'])),
+                                'borderWidth': 1
+                            }]
+                        },
+                        'options': {
+                            'responsive': True,
+                            'plugins': {
+                                'legend': {'position': 'top'},
+                                'title': {'display': True, 'text': chart_data['title']}
+                            }
+                        }
+                    }
+                    
+                    # Add specific options for different chart types
+                    if chart_type == 'bar':
+                        chart_config['options']['scales'] = {
+                            'y': {'beginAtZero': True}
+                        }
+                    elif chart_type == 'line':
+                        chart_config['options']['elements'] = {
+                            'line': {'tension': 0.4}
+                        }
+                    
+                    visualizations.append({
+                        'type': 'chart',
+                        'chartjs': chart_config
+                    })
+                    logger.info(f"Created {chart_type} chart visualization with {len(chart_data['values'])} data points")
+
+        except Exception as e:
+            logger.error(f"Error creating visualizations: {str(e)}")
+            return visualizations
+
+        return visualizations
+
+    def _extract_table_data(self, endpoint_data: Dict[str, Any], columns: List[str]) -> List[Dict[str, Any]]:
+        """Extract data for table visualization from endpoint response."""
+        table_rows = []
+        
+        # Handle different data structures
+        if isinstance(endpoint_data, list):
+            for item in endpoint_data:
+                row = {}
+                for col in columns:
+                    row[col] = item.get(col, 'N/A')
+                table_rows.append(row)
+        elif isinstance(endpoint_data, dict):
+            # Handle nested metrics or key-value pairs
+            row = {}
+            for col in columns:
+                if col in endpoint_data:
+                    value = endpoint_data.get(col)
+                    row[col] = value.get('formatted', value.get('value', 'N/A')) if isinstance(value, dict) else value
+                else:
+                    row[col] = 'N/A'
+            table_rows.append(row)
+        
+        return table_rows
+
+    def _prepare_chart_data(self, data: Dict[str, Any], chart_type: str) -> Dict[str, Any]:
+        """Prepare data for chart visualization."""
+        chart_data = {'labels': [], 'values': [], 'title': 'Data Visualization', 'dataset_label': 'Metrics'}
+        
+        # Simple heuristic to extract chartable data
+        for endpoint, endpoint_data in data.items():
+            if isinstance(endpoint_data, dict) and 'error' not in endpoint_data:
+                if 'metrics' in endpoint_data or 'data' in endpoint_data:
+                    data_source = endpoint_data.get('metrics', endpoint_data.get('data', []))
+                    
+                    if isinstance(data_source, list):
+                        for item in data_source:
+                            if isinstance(item, dict):
+                                label = item.get('date') or item.get('name') or item.get('label') or 'Unknown'
+                                value = item.get('value') or item.get('impressions') or item.get('clicks') or 0
+                                if isinstance(value, (int, float)):
+                                    chart_data['labels'].append(str(label))
+                                    chart_data['values'].append(value)
+                    
+                    elif isinstance(data_source, dict):
+                        for key, value in data_source.items():
+                            if isinstance(value, dict) and 'value' in value:
+                                chart_data['labels'].append(key)
+                                chart_data['values'].append(value['value'])
+                            elif isinstance(value, (int, float)):
+                                chart_data['labels'].append(key)
+                                chart_data['values'].append(value)
+                    
+                    chart_data['title'] = f"{endpoint.replace('_', ' ').title()} Trends"
+                    chart_data['dataset_label'] = endpoint.replace('_', ' ').title()
+                    break  # Use first valid data source
+        
+        return chart_data
+
+    def _get_chart_colors(self, chart_type: str, data_length: int) -> List[str]:
+        """Return appropriate colors for chart visualization."""
+        base_colors = [
+            'rgba(75, 192, 192, 0.6)',  # Teal
+            'rgba(255, 99, 132, 0.6)',   # Red
+            'rgba(54, 162, 235, 0.6)',   # Blue
+            'rgba(255, 206, 86, 0.6)',   # Yellow
+            'rgba(153, 102, 255, 0.6)',  # Purple
+        ]
+        
+        if chart_type == 'pie':
+            return base_colors[:min(data_length, len(base_colors))]
+        else:
+            # For bar and line charts, use single color or repeat first color
+            return [base_colors[0]] * data_length
+
+
     # =================
     # AGENT 1: General Query Classifier
     # =================
