@@ -122,6 +122,33 @@ class ChatManager:
             return {"status": status, "details": details, "timestamp": datetime.utcnow()}
 
 
+    async def create_or_get_simple_session(self, user_email: str, module_type: ModuleType, session_id: Optional[str] = None, customer_id: Optional[str] = None, property_id: Optional[str] = None, account_id: Optional[str] = None, page_id: Optional[str] = None, period: str = "LAST_7_DAYS") -> str:
+        """Create new session or get existing one"""
+        collection = self.db.chat_sessions
+        if session_id:
+            existing_session = await collection.find_one({"session_id": session_id, "user_email": user_email})
+            if existing_session:
+                await collection.update_one({"session_id": session_id}, {"$set": {"last_activity": datetime.utcnow()}})
+                logger.info(f"Using existing session: {session_id}")
+                return session_id
+        
+        new_session_id = str(uuid.uuid4())
+        session_doc = {
+            "session_id": new_session_id,
+            "user_email": user_email,
+            "module_type": module_type.value,
+            "customer_id": customer_id,
+            "property_id": property_id,
+            "account_id": account_id,
+            "page_id": page_id,
+            "created_at": datetime.utcnow(),
+            "last_activity": datetime.utcnow(),
+            "is_active": True,
+            "messages": []
+        }
+        await collection.insert_one(session_doc)
+        logger.info(f"Created new chat session: {new_session_id}")
+        return new_session_id
     # =================
     # AGENT 1: General Query Classifier
     # =================
