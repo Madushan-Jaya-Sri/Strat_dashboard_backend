@@ -20,6 +20,89 @@ class ChatManager:
         self.openai_client = openai.AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.db = mongo_manager.db
         
+
+                # Complete collection mappings to match your actual MongoDB structure
+        self.collection_mapping = {
+            'google_ads': [
+                'google_ads_customers_accounts',
+                'google_ads_key_stats',
+                'google_ads_campaigns', 
+                'google_ads_keywords_related_to_campaign',
+                'google_ads_performance',
+                'google_ads_geographic_performance',
+                'google_ads_device_performance',
+                'google_ads_time_performance',
+                'google_ads_keyword_ideas'
+            ],
+            'google_analytics': [
+                'google_analytics_properties',
+                'google_analytics_metrics',
+                'google_analytics_conversions',
+                'google_analytics_traffic_sources',
+                'google_analytics_top_pages',
+                'google_analytics_channel_performance',
+                'ga_audience_insights_city',
+                'ga_audience_insights_userAgeBracket', 
+                'ga_audience_insights_userGender',
+                'ga_audience_insights_deviceCategory',
+                'ga_audience_insights_browser',
+                'google_analytics_time_series',
+                'google_analytics_trends',
+                'google_analytics_roas_roi_time_series'
+            ],
+            'intent_insights': [
+                'intent_keyword_insights'
+            ],
+                'meta_ads': [
+                'meta_ad_accounts',
+                'meta_account_insights_summary',
+                'meta_campaigns_paginated',
+                'meta_campaigns_list',
+                'meta_campaigns_timeseries',
+                'meta_campaigns_demographics',
+                'meta_campaigns_placements',
+                'meta_adsets',
+                'meta_adsets_timeseries',
+                'meta_adsets_demographics',
+                'meta_adsets_placements',
+                'meta_ads',
+                'meta_ads_timeseries',
+                'meta_ads_demographics',
+                'meta_ads_placements'
+            ],
+            'facebook_analytics': [
+                'facebook_pages',
+                'facebook_page_insights',
+                'facebook_page_insights_timeseries',
+                'facebook_page_posts',
+                'facebook_page_posts_timeseries',
+                'facebook_video_views_breakdown',
+                'facebook_content_type_breakdown',
+                'facebook_page_demographics',
+                'facebook_follows_unfollows',
+                'facebook_engagement_breakdown',
+                'facebook_organic_vs_paid'
+            ],
+            'revenue_analysis': [
+                'ga_revenue_breakdown_by_channel',
+                'ga_revenue_breakdown_by_source',
+                'ga_revenue_breakdown_by_device',
+                'ga_revenue_breakdown_by_location',
+                'ga_revenue_breakdown_by_page',
+                'ga_revenue_breakdown_by_comprehensive',
+                'ga_combined_roas_roi_metrics',
+            ],
+            'combined_metrics': [
+                'ads_ga_combined_overview_metrics',
+                'ga_combined_roas_roi_metrics_legacy'
+            ],
+            'channel_timeseries': [
+                'ga_channel_revenue_time_series',
+                'ga_specific_channels_time_series',
+                'ga_available_channels'
+            ]
+        }
+
         # Endpoint mappings extracted from main.py
         self.endpoint_registry = {
             'google_ads': [
@@ -113,6 +196,8 @@ class ChatManager:
                 {'name': 'debug_chat_sessions', 'path': '/api/chat/debug/{module_type}', 'params': ['module_type']},
             ]
         }
+
+
 
 
     async def send_status_update(self, status: str, details: str = ""):
