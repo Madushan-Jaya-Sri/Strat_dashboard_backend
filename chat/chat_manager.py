@@ -114,6 +114,14 @@ class ChatManager:
             ]
         }
 
+
+    async def send_status_update(self, status: str, details: str = ""):
+            """Send status update (in real implementation, this would use WebSocket)"""
+            logger.info(f"STATUS: {status} - {details}")
+            # For now, just log. In production, this would send via WebSocket
+            return {"status": status, "details": details, "timestamp": datetime.utcnow()}
+
+
     # =================
     # AGENT 1: General Query Classifier
     # =================
