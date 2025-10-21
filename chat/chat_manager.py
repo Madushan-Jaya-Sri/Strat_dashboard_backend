@@ -8,7 +8,8 @@ import json
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from fastapi import HTTPException
-
+import aiohttp
+from typing import Tuple
 from models.chat_models import *
 from database.mongo_manager import mongo_manager
 from auth.auth_manager import AuthManager
@@ -114,7 +115,7 @@ class ChatManager:
             ]
         }
 
-
+        self._organize_endpoint_registry()
 
 
     async def send_status_update(self, status: str, details: str = ""):
@@ -321,6 +322,29 @@ class ChatManager:
     #         collection_name,
     #         f'Data collection for {collection_name.replace("_", " ")}.'
     #     )
+
+    async def get_conversation_context(self, session_id: str, limit: int = 10) -> List[Dict[str, str]]:
+        """Get recent conversation history for context"""
+        try:
+            collection = self.db.chat_sessions
+            session = await collection.find_one({"session_id": session_id})
+            
+            if not session or not session.get("messages"):
+                return []
+            
+            # Get last N messages
+            messages = session["messages"][-limit:]
+            
+            return [
+                {
+                    "role": msg["role"],
+                    "content": msg["content"]
+                }
+                for msg in messages
+            ]
+        except Exception as e:
+            logger.error(f"Error getting conversation context: {e}")
+            return []
 
     async def _fetch_account_list(self, module_type: ModuleType, token: str, user_email: str) -> List[Dict[str, Any]]:
         """Fetch a list of available accounts for the specified module type."""
@@ -618,6 +642,9 @@ class ChatManager:
     # AGENT 1: General Query Classifier
     # =================
     async def agent_classify_query(self, message: str) -> Dict[str, Any]:
+
+        self._log_agent_step("AGENT 1: CLASSIFIER", "STARTING", {"message": message[:100]})
+    
         """Classify if query is general or analytics-related"""
         prompt = f"""
         Classify this user query into one of two categories:
@@ -642,27 +669,45 @@ class ChatManager:
                 response_format={"type": "json_object"}
             )
             
-            return json.loads(response.choices[0].message.content)
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"Query classified as: {result['category']} (confidence: {result['confidence']})")
+            self._log_agent_step("AGENT 1: CLASSIFIER", "COMPLETE", result)
+            return result
         except Exception as e:
             logger.error(f"Error in query classification: {e}")
-            return {"category": "ANALYTICS", "confidence": 0.5, "reason": "Default to analytics"}
+            return {"category": "ANALYTICS", "confidence": 0.5, "reason": "Default to analytics on error"}
 
     # =================
     # AGENT 2: Time Period Extractor
     # =================
     async def agent_extract_time_period(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract time period from message or request it from user"""
+        self._log_agent_step("AGENT 2: TIME - EXTRACTOR AGENT", "STARTING", {"message": message[:100]})
+
+        """Extract time period from message or use context"""
         
-        # Check if custom dates are in context
-        if context.get('custom_dates'):
+        # Check if custom dates are in context first
+        if context.get('custom_dates') and context['custom_dates'].get('startDate') and context['custom_dates'].get('endDate'):
+            logger.info(f"Using custom dates from context: {context['custom_dates']}")
             return {
                 'has_period': True,
                 'period': 'CUSTOM',
-                'start_date': context['custom_dates']['start_date'],
-                'end_date': context['custom_dates']['end_date'],
+                'start_date': context['custom_dates']['startDate'],
+                'end_date': context['custom_dates']['endDate'],
                 'needs_clarification': False
             }
         
+        # Check if period is in context
+        if context.get('period') and context['period'] != 'CUSTOM':
+            logger.info(f"Using period from context: {context['period']}")
+            return {
+                'has_period': True,
+                'period': context['period'],
+                'start_date': None,
+                'end_date': None,
+                'needs_clarification': False
+            }
+        
+        # Try to extract from message
         prompt = f"""
         Extract time period information from this message.
         Look for:
@@ -697,142 +742,136 @@ class ChatManager:
             
             result = json.loads(response.choices[0].message.content)
             
-            # If no period found and not in context, need to ask user
-            if not result['has_period'] and not context.get('period'):
-                result['needs_clarification'] = True
-                result['clarification_message'] = "What time period would you like to analyze? (e.g., last 7 days, last month, or specific dates)"
+            # If no period found in message and not in context, use default
+            if not result['has_period']:
+                logger.info("No period found in message, using LAST_7_DAYS as default")
+                result['has_period'] = True
+                result['period'] = 'LAST_7_DAYS'
+                result['needs_clarification'] = False
             
+            logger.info(f"Time period extracted: {result}")
+            self._log_agent_step("AGENT 2: TIME - EXTRACTOR AGENT", "COMPLETE", result)
             return result
             
         except Exception as e:
             logger.error(f"Error extracting time period: {e}")
+            # Use default period on error
             return {
-                'has_period': False,
-                'period': None,
-                'needs_clarification': True,
-                'clarification_message': "What time period would you like to analyze?"
+                'has_period': True,
+                'period': 'LAST_7_DAYS',
+                'needs_clarification': False
             }
 
     # =================
     # AGENT 3: Account Identifier
     # =================
-    
-    async def agent_identify_account(self, message: str, module_type: ModuleType, context: Dict[str, Any], token: str, user_email: str) -> Dict[str, Any]:
-        """Identify which account/property the user is referring to"""
+    async def agent_identify_account(
+        self, 
+        message: str, 
+        module_type: ModuleType, 
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+
+        """Identify which account the user is referring to"""
         
         logger.info("\n" + "="*80)
         logger.info("🔍 AGENT 3: ACCOUNT IDENTIFIER - STARTING")
         logger.info(f"Module: {module_type.value}")
         logger.info(f"Context received: {json.dumps(context, default=str, indent=2)}")
-        logger.info(f"User message: {message}")
         
-        # Skip for unsupported modules
-        if module_type == ModuleType.INSTAGRAM_ANALYTICS:
-            logger.warning("⚠️ Instagram Analytics not supported yet")
-            return {
-                'has_specific_reference': False,
-                'reference_type': 'none',
-                'account_name': None,
-                'account_id': None,
-                'use_active_account': False,
-                'needs_account_list': False,
-                'clarification_message': "Instagram Analytics module is currently under development."
-            }
+        # Get account ID from context based on module type
+        account_id = None
+        if module_type == ModuleType.GOOGLE_ADS:
+            account_id = context.get('customer_id')
+            logger.info(f"Google Ads - customer_id: {account_id}")
+        elif module_type == ModuleType.GOOGLE_ANALYTICS:
+            account_id = context.get('property_id')
+            logger.info(f"Google Analytics - property_id: {account_id}")
+        elif module_type == ModuleType.META_ADS:
+            account_id = context.get('account_id')
+            logger.info(f"Meta Ads - account_id: {account_id}")
+        elif module_type == ModuleType.FACEBOOK_ANALYTICS:
+            account_id = context.get('page_id')
+            logger.info(f"Facebook - page_id: {account_id}")
+        elif module_type == ModuleType.INSTAGRAM_ANALYTICS:
+            account_id = context.get('account_id')
+            logger.info(f"Instagram - account_id: {account_id}")
+        elif module_type == ModuleType.INTENT_INSIGHTS:
+            account_id = context.get('account_id')
+            logger.info(f"Intent Insights - account_id: {account_id}")
         
-        prompt = f"""
-        Identify the account or property the user is referring to in their message.
-        Module type: {module_type.value}
-        Current context: {json.dumps(context, default=str)}
-        User Message: "{message}"
+        result = {
+            'has_specific_reference': bool(account_id),
+            'reference_type': 'context' if account_id else 'none',
+            'account_id': account_id,
+            'use_active_account': bool(account_id),
+            'needs_account_list': not bool(account_id)
+        }
+        
+        if not account_id:
+            result['clarification_message'] = f"Please specify the {module_type.value} account to analyze."
+        
+        logger.info(f"✅ AGENT 3 COMPLETE: {result}")
+        logger.info("="*80 + "\n")
+        self._log_agent_step("AGENT 3: ACCOUNT IDENTIFIER AGENT", "COMPLETE", result)
 
-        Look for:
-        - Specific account names or IDs mentioned
-        - References like "this account", "my ads account"
-        - If no specific mention, use active account from context
+        
+        return result
 
-        Respond in JSON format:
-        {{
-            "has_specific_reference": true/false,
-            "reference_type": "explicit" or "implicit" or "none",
-            "account_name": "name if mentioned" or null,
-            "use_active_account": true/false
-        }}
-        """
-
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
-            
-            result = json.loads(response.choices[0].message.content)
-            logger.info(f"🤖 LLM Result: {json.dumps(result, indent=2)}")
-            
-            # Use active account from context if no specific reference
-            if not result.get('has_specific_reference') or result.get('use_active_account'):
-                logger.info("📌 Using active account from context")
-                
-                if module_type == ModuleType.GOOGLE_ADS:
-                    result['account_id'] = context.get('customer_id')
-                    logger.info(f"  - customer_id: {result['account_id']}")
-                elif module_type == ModuleType.GOOGLE_ANALYTICS:
-                    result['account_id'] = context.get('property_id')
-                    logger.info(f"  - property_id: {result['account_id']}")
-                elif module_type == ModuleType.META_ADS:
-                    result['account_id'] = context.get('account_id')
-                    logger.info(f"  - account_id: {result['account_id']}")
-                elif module_type == ModuleType.FACEBOOK_ANALYTICS:
-                    result['account_id'] = context.get('page_id')
-                    logger.info(f"  - page_id: {result['account_id']}")
-                
-                if result.get('account_id'):
-                    result['use_active_account'] = True
-                    result['needs_account_list'] = False
-                    result['clarification_message'] = None
-                    logger.info(f"✅ Resolved account_id: {result['account_id']}")
-                else:
-                    logger.warning("⚠️ No account ID found in context")
-                    result['needs_account_list'] = True
-                    result['clarification_message'] = f"Please specify the {module_type.value} account to analyze."
-            
-            logger.info(f"✅ AGENT 3 COMPLETE")
-            logger.info(f"Final result: {json.dumps(result, default=str, indent=2)}")
-            logger.info("="*80 + "\n")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ Error in agent_identify_account: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
     # =================
     # AGENT 4: Endpoint Selector
     # =================
-    async def agent_select_endpoints(self, message: str, module_type: ModuleType, account_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def agent_select_endpoints(
+        self, 
+        message: str, 
+        module_type: ModuleType, 
+        account_info: Dict[str, Any],
+        conversation_history: List[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        self._log_agent_step("AGENT 4: ENDPOINT SELECTOR AGENT", "STARTING", {"message": message[:100]})
+
         """Select relevant endpoints based on the query"""
         
         available_endpoints = self.endpoint_registry.get(module_type.value, [])
         
+        # Build conversation context
+        history_context = ""
+        if conversation_history:
+            recent_history = conversation_history[-4:]  # Last 2 exchanges
+            history_context = "\n".join([
+                f"{msg['role'].upper()}: {msg['content']}"
+                for msg in recent_history
+            ])
+        
         prompt = f"""
         Select the most relevant API endpoints to answer this user query.
         
-        User Query: "{message}"
+        {"CONVERSATION HISTORY:\n" + history_context + "\n" if history_context else ""}
+        
+        Current Query: "{message}"
         Module: {module_type.value}
         Account Info: {json.dumps(account_info)}
-        Available Endpoints: {json.dumps(available_endpoints, indent=2)}
+        
+        Available Endpoints:
+        {json.dumps([{
+            'name': e['name'],
+            'path': e['path'],
+            'description': self._get_endpoint_description(e['name'])
+        } for e in available_endpoints], indent=2)}
 
-        Consider:
-        - What data is needed to answer the question
-        - Dependencies between endpoints (e.g., get list first, then details)
-        - Minimum set of endpoints needed
+        Rules:
+        1. Select MINIMUM endpoints needed to answer the question
+        2. For overview questions, select 1-2 key metric endpoints
+        3. For specific questions, select targeted endpoints
+        4. Consider follow-up context - don't repeat data already provided
+        5. For comparison questions, select endpoints that provide comparative data
+        6. AVOID selecting the 'get_meta_ad_accounts/campaigns/list' endpoint unless specifically asked for ALL campaigns
 
-        Respond with JSON array of selected endpoint names:
+        Respond with JSON array:
         {{
             "endpoints": ["endpoint_name1", "endpoint_name2"],
-            "reasoning": "brief explanation"
+            "reasoning": "brief explanation",
+            "is_followup": true/false
         }}
         """
 
@@ -852,113 +891,230 @@ class ChatManager:
                 if endpoint:
                     selected.append(endpoint)
             
-            # If no endpoints selected, default to a key stats endpoint for analytics queries
-            if not selected and module_type == ModuleType.GOOGLE_ADS:
-                selected = [e for e in available_endpoints if e['name'] == 'get_ads_key_stats']
+            logger.info(f"Selected {len(selected)} endpoints: {[e['name'] for e in selected]}")
+            logger.info(f"Reasoning: {result.get('reasoning')}")
+            
+            # Fallback to default endpoints if none selected
+            if not selected:
+                selected = self._get_default_endpoints(module_type, available_endpoints)
+            self._log_agent_step("AGENT 4: ENDPOINT SELECTOR AGENT", "COMPLETE", result)
+
             
             return selected
             
         except Exception as e:
             logger.error(f"Error selecting endpoints: {e}")
-            # Default to key stats endpoint for Google Ads
-            if module_type == ModuleType.GOOGLE_ADS:
-                return [e for e in available_endpoints if e['name'] == 'get_ads_key_stats']
-            return []
+            return self._get_default_endpoints(module_type, available_endpoints)
 
-    # =================
-    # AGENT 5: Endpoint Executor
-    # =================
+    def _get_endpoint_description(self, endpoint_name: str) -> str:
+        """Get human-readable description of endpoint"""
 
-    async def agent_execute_endpoints(self, endpoints: List[Dict[str, Any]], params: Dict[str, Any], user_email: str) -> Dict[str, Any]:
-        """Execute selected endpoints and collect data"""
+        descriptions = {
+            # ---------------- GOOGLE ADS ----------------
+            'google_ads_customers': 'List of linked Google Ads customer accounts.',
+            'google_ads_key_stats': 'Key performance indicators for Google Ads accounts, including impressions, clicks, CTR, and cost metrics.',
+            'google_ads_campaigns': 'Detailed data for Google Ads campaigns, including campaign names, objectives, and performance results.',
+            'google_ads_keywords': 'Performance data of individual keywords in Google Ads, including impressions, clicks, and cost.',
+            'google_ads_performance': 'Overall performance data for Google Ads, combining clicks, conversions, spend, and ROI metrics.',
+            'google_ads_geographic': 'Geographic distribution of Google Ads performance, showing results by region or location.',
+            'google_ads_device_performance': 'Performance metrics for Google Ads across devices such as mobile, desktop, and tablet.',
+            'google_ads_time_performance': 'Time-based Google Ads performance metrics showing trends by day, week, or month.',
+            'google_ads_keyword_ideas': 'Suggested keyword ideas for Google Ads campaigns, based on seed keywords and location targeting.',
+
+            # ---------------- GOOGLE ANALYTICS ----------------
+            'google_analytics_properties': 'List of connected Google Analytics properties and configuration details.',
+            'google_analytics_metrics': 'Core Google Analytics data, including sessions, users, bounce rates, and engagement metrics.',
+            'google_analytics_traffic_sources': 'Breakdown of website traffic sources, including organic, paid, referral, and direct channels.',
+            'google_analytics_conversions': 'Goal and conversion metrics tracked in Google Analytics, including conversion rate and value.',
+            'google_analytics_channel_performance': 'Performance comparison between marketing channels such as organic search, paid ads, and social.',
+            'google_analytics_audience_insights': 'Audience demographics and behavioral insights from Google Analytics.',
+            'google_analytics_time_series': 'Time-series data from Google Analytics showing trends in traffic and engagement.',
+            'google_analytics_revenue_breakdown_channel': 'Revenue breakdown by marketing channel in Google Analytics.',
+            'google_analytics_revenue_breakdown_source': 'Revenue breakdown by traffic source in Google Analytics.',
+            'google_analytics_revenue_breakdown_device': 'Revenue analysis segmented by user device (mobile, desktop, tablet).',
+            'google_analytics_revenue_breakdown_location': 'Revenue distribution by user location or region.',
+            'google_analytics_revenue_breakdown_page': 'Revenue performance by top-performing pages on the website.',
+            'google_analytics_comprehensive_revenue_breakdown': 'A comprehensive revenue analysis combining multiple dimensions.',
+            'google_analytics_revenue_breakdown_raw': 'Raw-level revenue breakdown data from Google Analytics.',
+            'google_analytics_channel_revenue_timeseries': 'Time-series view of revenue by marketing channel.',
+            'google_analytics_specific_channels_timeseries': 'Performance over time for selected Google Analytics channels.',
+            'google_analytics_available_channels': 'List of available channels for Google Analytics revenue reporting.',
+            'google_analytics_channel_revenue_timeseries_raw': 'Raw time-series data of channel-level revenue metrics.',
+            'google_analytics_revenue_time_series': 'Revenue trends over time, segmented by selected dimensions.',
+            'google_analytics_top_pages': 'Top pages on the website ranked by traffic, engagement, or conversions.',
+            'google_analytics_trends': 'Identified performance trends from Google Analytics data.',
+            'google_analytics_roas_roi_time_series': 'ROAS (Return on Ad Spend) and ROI trends over time.',
+            'google_analytics_combined_overview': 'High-level overview combining Google Ads and Analytics data.',
+            'google_analytics_enhanced_combined_roas_roi_metrics': 'Enhanced cross-platform ROI and ROAS calculations.',
+            'google_analytics_combined_roas_roi_metrics_legacy': 'Legacy combined metrics for ROAS and ROI calculations.',
+            'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
+
+            # ---------------- META ADS ----------------
+            'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
+            'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
+            'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
+            'meta_campaigns_list': 'List view of Meta Ad Campaigns filtered by status.',
+            'meta_campaigns_timeseries': 'Time-series data for Meta Ad Campaigns showing daily or weekly performance.',
+            'meta_campaigns_demographics': 'Demographic breakdown of Meta Ad Campaign performance.',
+            'meta_campaigns_placements': 'Placement performance data for Meta Ads across different surfaces (Feed, Reels, Stories, etc.).',
+            'meta_adsets_timeseries': 'Time-based performance data for Meta AdSets.',
+            'meta_adsets_demographics': 'Demographic performance analysis of Meta AdSets.',
+            'meta_adsets_placements': 'Ad placement effectiveness at the AdSet level.',
+            'meta_ads_by_adsets': 'List of ads under each AdSet with corresponding performance data.',
+            'meta_ads_timeseries': 'Time-series trends for individual Meta Ads.',
+            'meta_ads_demographics': 'Demographic performance data for specific Meta Ads.',
+            'meta_ads_placements': 'Performance insights for Meta Ads across placements such as Feed, Stories, or Audience Network.',
+            'meta_overview': 'Overall summary of Meta Ads performance and account activity.',
+            'meta_debug_permissions': 'Debugging information for Meta Ads API permissions and access validation.',
+
+            # ---------------- FACEBOOK ANALYTICS ----------------
+            'facebook_pages': 'List of Facebook pages connected to the account.',
+            'facebook_page_insights': 'Analytics for Facebook Pages including engagement, reach, and page interactions.',
+            'facebook_page_posts': 'Performance of Facebook Page posts including likes, shares, and comments.',
+            'facebook_page_demographics': 'Audience demographic breakdown for Facebook Pages.',
+            'facebook_page_engagement': 'Detailed engagement metrics for Facebook Pages.',
+            'facebook_page_insights_timeseries': 'Time-based performance trends for Facebook Page insights.',
+            'facebook_page_posts_timeseries': 'Time-series data for Facebook Page posts.',
+            'facebook_video_views_breakdown': 'Breakdown of Facebook video views by type or duration.',
+            'facebook_content_type_breakdown': 'Engagement analysis by content type (video, image, text, etc.) on Facebook.',
+            'facebook_follows_unfollows': 'Daily trends in Facebook Page follows and unfollows.',
+            'facebook_organic_vs_paid': 'Comparison of organic and paid reach for Facebook Pages.',
+
+            # ---------------- INSTAGRAM ANALYTICS ----------------
+            'instagram_accounts': 'List of connected Instagram business accounts.',
+            'instagram_insights': 'Overall Instagram account insights including reach, impressions, and engagement.',
+            'instagram_insights_timeseries': 'Time-series view of Instagram account performance metrics.',
+            'instagram_media': 'Details of Instagram posts including engagement and caption data.',
+            'instagram_media_timeseries': 'Time-based trends of Instagram media performance.',
+
+            # ---------------- INTENT INSIGHTS ----------------
+            'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, and competition trends across markets.',
+
+            # ---------------- CHAT & MISC ----------------
+            'chat_sessions': 'Stored chat sessions and conversations for AI-driven analytics or support.',
+            'chat_history': 'Historical chat messages across sessions.',
+            'chat_debug_sessions': 'Debug data for chatbot session management.',
+            'combined_metrics': 'Combined data metrics integrating multiple ad and analytics platforms.',
+            'revenue_analysis': 'Comprehensive revenue analysis across campaigns, channels, and platforms.',
+        }
+
+        return descriptions.get(endpoint_name, 'Data endpoint')
+
+    def _get_default_endpoints(self, module_type: ModuleType, available_endpoints: List[Dict]) -> List[Dict]:
+        """Get default endpoints when selection fails"""
+        defaults = {
+            ModuleType.GOOGLE_ADS: ['get_ads_key_stats'],
+            ModuleType.GOOGLE_ANALYTICS: ['get_ga_metrics'],
+            ModuleType.META_ADS: ['get_meta_account_insights'],
+            ModuleType.FACEBOOK_ANALYTICS: ['get_facebook_page_insights'],
+        }
         
-        logger.info("=" * 80)
+        default_names = defaults.get(module_type, [])
+        return [e for e in available_endpoints if e['name'] in default_names]
+
+    # =================
+    # AGENT 5: Endpoint Executor with Special Handling
+    # =================
+    async def agent_execute_endpoints(
+        self, 
+        endpoints: List[Dict[str, Any]], 
+        params: Dict[str, Any], 
+        user_email: str,
+        status_callback=None
+    ) -> Dict[str, Any]:
+
+        """Execute selected endpoints with special handling for slow endpoints"""
+        
+        logger.info("="*80)
         logger.info("🔧 AGENT 5: ENDPOINT EXECUTOR - STARTING")
-        logger.info("=" * 80)
         logger.info(f"📋 Endpoints to execute: {[e['name'] for e in endpoints]}")
-        logger.info(f"📦 Received params: {json.dumps(params, default=str, indent=2)}")
-        logger.info(f"👤 User email: {user_email}")
         
         results = {}
         token = params.get('token', '')
         
         if not token:
-            logger.error("❌ No token provided in params!")
+            logger.error("❌ No token provided!")
             return {"error": "Authentication token missing"}
+        
+        # Check for slow endpoints that need special handling
+        slow_endpoints = ['get_meta_campaigns_list', 'get_campaigns_list']
+        has_slow_endpoint = any(e['name'] in slow_endpoints for e in endpoints)
+        
+        if has_slow_endpoint and status_callback:
+            await status_callback(
+                "Fetching comprehensive data",
+                "This may take 30-60 seconds as we're retrieving all campaigns..."
+            )
         
         for endpoint in endpoints:
             endpoint_name = endpoint['name']
             logger.info(f"\n{'='*60}")
             logger.info(f"🎯 Executing endpoint: {endpoint_name}")
-            logger.info(f"📍 Path template: {endpoint['path']}")
-            logger.info(f"📝 Required params: {endpoint['params']}")
+            
+            # Send status update for slow endpoints
+            if endpoint_name in slow_endpoints and status_callback:
+                await status_callback(
+                    "Processing large dataset",
+                    f"Fetching all campaigns from {endpoint_name}. Please wait..."
+                )
             
             try:
+                # Build URL with path parameters
+                url = endpoint['path']
+                path_params = {}
+                
+                # Extract path parameters
+                if '{customer_id}' in url:
+                    path_params['customer_id'] = params.get('customer_id')
+                    url = url.replace('{customer_id}', str(params['customer_id']))
+                if '{property_id}' in url:
+                    path_params['property_id'] = params.get('property_id')
+                    url = url.replace('{property_id}', str(params['property_id']))
+                if '{account_id}' in url:
+                    path_params['account_id'] = params.get('account_id')
+                    url = url.replace('{account_id}', str(params['account_id']))
+                if '{page_id}' in url:
+                    path_params['page_id'] = params.get('page_id')
+                    url = url.replace('{page_id}', str(params['page_id']))
+                
                 # Validate required path parameters
-                path_params_needed = []
-                if '{customer_id}' in endpoint['path']:
-                    path_params_needed.append('customer_id')
-                if '{property_id}' in endpoint['path']:
-                    path_params_needed.append('property_id')
-                if '{account_id}' in endpoint['path']:
-                    path_params_needed.append('account_id')
-                if '{page_id}' in endpoint['path']:
-                    path_params_needed.append('page_id')
-                
-                logger.info(f"🔍 Path parameters needed: {path_params_needed}")
-                
-                # Check for missing parameters
-                missing_params = []
-                for param in path_params_needed:
-                    param_value = params.get(param)
-                    logger.info(f"  - {param}: {param_value} (type: {type(param_value).__name__})")
-                    if param_value is None:
-                        missing_params.append(param)
-                
+                missing_params = [k for k, v in path_params.items() if v is None]
                 if missing_params:
-                    error_msg = f"Missing required parameters for {endpoint_name}: {missing_params}"
+                    error_msg = f"Missing required parameters: {missing_params}"
                     logger.error(f"❌ {error_msg}")
-                    logger.error(f"Available params keys: {list(params.keys())}")
                     results[endpoint_name] = {"error": error_msg}
                     continue
                 
-                # Build URL with path parameters
-                url = endpoint['path']
-                for param in path_params_needed:
-                    placeholder = f'{{{param}}}'
-                    value = str(params[param])
-                    url = url.replace(placeholder, value)
-                    logger.info(f"✅ Replaced {placeholder} with {value}")
-                
-                logger.info(f"🌐 Final URL path: {url}")
-                
-                # Prepare query parameters (exclude path params)
+                # Prepare query parameters
                 query_params = {}
                 for param_name in endpoint['params']:
-                    if param_name not in path_params_needed and param_name in params:
+                    if param_name not in path_params and param_name in params:
                         if params[param_name] is not None:
                             query_params[param_name] = params[param_name]
                 
-                logger.info(f"🔧 Query params: {query_params}")
+                logger.info(f"🌐 URL: {url}")
+                logger.info(f"📦 Query params: {query_params}")
                 
-                # Make API call
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
+                # Make API call with extended timeout for slow endpoints
+                timeout = 120 if endpoint_name in slow_endpoints else 30
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
                     headers = {'Authorization': f'Bearer {token}'}
                     full_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{url}"
                     
-                    logger.info(f"📡 Making request to: {full_url}")
-                    logger.info(f"📋 Query params: {query_params}")
-                    
                     async with session.get(full_url, params=query_params, headers=headers) as response:
                         response_text = await response.text()
-                        logger.info(f"📊 Response status: {response.status}")
                         
                         if response.status == 200:
                             try:
                                 data = json.loads(response_text)
-                                logger.info(f"✅ Successfully fetched data from {endpoint_name}")
-                                logger.info(f"📦 Data keys: {list(data.keys()) if isinstance(data, dict) else 'List data'}")
+                                logger.info(f"✅ Successfully fetched from {endpoint_name}")
+                                
+                                # For large datasets, log summary
+                                if endpoint_name in slow_endpoints:
+                                    campaign_count = len(data.get('campaigns', []))
+                                    logger.info(f"📊 Retrieved {campaign_count} campaigns")
+                                
                                 results[endpoint_name] = data
                                 
                                 # Save to MongoDB
@@ -969,60 +1125,97 @@ class ChatManager:
                                     response_data=data,
                                     user_email=user_email
                                 )
-                                logger.info(f"💾 Saved response to MongoDB")
+                                
                             except json.JSONDecodeError as e:
-                                error_msg = f"Invalid JSON response from {endpoint_name}"
-                                logger.error(f"❌ {error_msg}: {response_text[:200]}")
+                                error_msg = f"Invalid JSON from {endpoint_name}"
+                                logger.error(f"❌ {error_msg}")
                                 results[endpoint_name] = {"error": error_msg}
                         else:
-                            error_msg = f"API call failed for {endpoint_name}: Status {response.status}"
+                            error_msg = f"API call failed: Status {response.status}"
                             logger.error(f"❌ {error_msg}")
-                            logger.error(f"Response: {response_text[:500]}")
                             results[endpoint_name] = {"error": error_msg, "status": response.status}
                             
-            except Exception as e:
-                error_msg = f"Error executing endpoint {endpoint_name}: {str(e)}"
+            except asyncio.TimeoutError:
+                error_msg = f"Request timeout for {endpoint_name}"
                 logger.error(f"❌ {error_msg}")
-                logger.error(f"Exception type: {type(e).__name__}")
-                import traceback
-                logger.error(f"Traceback: {traceback.format_exc()}")
+                results[endpoint_name] = {"error": error_msg}
+            except Exception as e:
+                error_msg = f"Error executing {endpoint_name}: {str(e)}"
+                logger.error(f"❌ {error_msg}")
                 results[endpoint_name] = {"error": error_msg}
         
-        logger.info("\n" + "="*80)
-        logger.info(f"✅ AGENT 5 COMPLETE - Executed {len(results)} endpoints")
-        logger.info(f"Results summary: {list(results.keys())}")
+        logger.info(f"\n✅ AGENT 5 COMPLETE - Executed {len(results)} endpoints")
         logger.info("="*80 + "\n")
         
         return results
-    
+
     # =================
-    # AGENT 6: Data Analyzer
+    # AGENT 6: Data Analyzer with Context Awareness
     # =================
-    async def agent_analyze_data(self, message: str, data: Dict[str, Any], module_type: ModuleType) -> str:
-        """Analyze the collected data and generate insights"""
+    async def agent_analyze_data(
+        self, 
+        message: str, 
+        data: Dict[str, Any], 
+        module_type: ModuleType,
+        conversation_history: List[Dict[str, str]] = None
+    ) -> str:
+
+        self._log_agent_step("AGENT 6: ANALYZER", "STARTING", {"message": message[:100]})
+
+        """Analyze data and generate insights with conversation awareness"""
         
-        # Check for errors in the data
+        # Check for errors
         errors = [result['error'] for endpoint, result in data.items() if 'error' in result]
         if errors:
-            clarification_msg = "Please specify a valid account name or ID, or I can fetch a list of available accounts. Would you like me to do that?"
-            return f"I'm sorry, but there was an issue retrieving the data: {', '.join(errors)}. {clarification_msg}"
+            return f"I encountered an issue retrieving the data: {', '.join(errors)}. Please try rephrasing your question."
+        
+        # Build conversation context
+        history_context = ""
+        if conversation_history:
+            recent_history = conversation_history[-6:]  # Last 3 exchanges
+            history_context = "\n".join([
+                f"{msg['role'].upper()}: {msg['content']}"
+                for msg in recent_history
+            ])
+        
+        # Prepare data summary (limit size)
+        data_summary = {}
+        for endpoint, endpoint_data in data.items():
+            if isinstance(endpoint_data, dict):
+                # Summarize large datasets
+                if 'campaigns' in endpoint_data and len(endpoint_data['campaigns']) > 20:
+                    data_summary[endpoint] = {
+                        'total_campaigns': len(endpoint_data['campaigns']),
+                        'sample': endpoint_data['campaigns'][:5],
+                        'status_summary': endpoint_data.get('status_summary', {}),
+                        'note': 'Large dataset - showing summary'
+                    }
+                else:
+                    data_summary[endpoint] = endpoint_data
+            else:
+                data_summary[endpoint] = endpoint_data
         
         prompt = f"""
         You are a {module_type.value} analytics expert. Analyze this data and answer the user's question.
         
-        User Question: "{message}"
+        {"CONVERSATION HISTORY:\n" + history_context + "\n" if history_context else ""}
+        
+        Current Question: "{message}"
         
         Available Data:
-        {json.dumps(data, indent=2)[:10000]}  # Limit to 10k chars
+        {json.dumps(data_summary, indent=2, default=str)[:8000]}
         
-        Provide a comprehensive answer that:
-        1. Directly addresses the user's question
-        2. Includes specific numbers and metrics from the data
-        3. Highlights key insights and trends
-        4. Provides actionable recommendations where appropriate
-        5. Uses clear, professional language
+        Instructions:
+        1. Directly answer the user's question
+        2. If this is a follow-up, acknowledge previous context
+        3. Use specific numbers and metrics from the data
+        4. Highlight key insights and trends
+        5. Provide actionable recommendations where appropriate
+        6. Format numbers properly (e.g., 1,234 or $1.5K)
+        7. Be concise but comprehensive
+        8. If data shows ALL campaigns, mention this is comprehensive data
         
-        Format numbers properly (e.g., 1,234 instead of 1234, $1.5K instead of 1500)
+        Format your response in a conversational, professional tone.
         """
 
         try:
@@ -1033,56 +1226,54 @@ class ChatManager:
                 max_tokens=1500
             )
             
+            self._log_agent_step("AGENT 6: ANALYZER", "COMPLETE")
+
             return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Error analyzing data: {e}")
-            return "I encountered an error while analyzing your data. Please specify a valid account name or ID, or contact the technical team."
+            return "I encountered an error while analyzing your data. Please try rephrasing your question."
 
     # =================
     # AGENT 7: Response Formatter
     # =================
-    async def agent_format_response(self, analysis: str, data: Dict[str, Any], needs_visualization: bool = False) -> Dict[str, Any]:
-        """Format the response with proper structure and visualizations if needed"""
+    async def agent_format_response(self, analysis: str) -> str:
+        self._log_agent_step("AGENT 7: RESPONSE FORMATTER", "STARTING")
+
+        """Format the final response for optimal readability"""
         
-        formatted_response = {
-            'text': analysis,
-            'visualizations': []
-        }
+        prompt = f"""
+        Format this analytics response for better readability:
         
-        if needs_visualization:
-            prompt = f"""
-            Determine if this data would benefit from visualization (tables or charts).
-            
-            Analysis: {analysis[:500]}
-            Data structure: {list(data.keys())}
-            
-            Respond in JSON:
-            {{
-                "needs_table": true/false,
-                "needs_chart": true/false,
-                "chart_type": "line" or "bar" or "pie" or null,
-                "table_columns": ["col1", "col2"] or null
-            }}
-            """
-            
-            try:
-                response = await self.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    response_format={"type": "json_object"}
-                )
-                
-                viz_config = json.loads(response.choices[0].message.content)
-                
-                if viz_config.get('needs_table') or viz_config.get('needs_chart'):
-                    formatted_response['visualizations'] = self._create_visualizations(data, viz_config)
-                    
-            except Exception as e:
-                logger.error(f"Error creating visualizations: {e}")
+        {analysis}
         
-        return formatted_response
+        Instructions:
+        1. Ensure proper paragraph breaks
+        2. Use bullet points for lists (use • not *)
+        3. Highlight key metrics naturally in the text
+        4. Keep it conversational and easy to scan
+        5. Remove any redundant formatting
+        6. Ensure numbers are properly formatted
+        
+        Return the formatted response only, no explanations.
+        """
+        
+        try:
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=1500
+            )
+            
+            formatted = response.choices[0].message.content
+            self._log_agent_step("AGENT 7: RESPONSE FORMATTER", "COMPLETE")
+
+            return formatted.strip()
+            
+        except Exception as e:
+            logger.error(f"Error formatting response: {e}")
+            return analysis 
 
     # =================
     # Main Orchestrator
@@ -1093,7 +1284,7 @@ class ChatManager:
         chat_request: ChatRequest,
         user_email: str
     ) -> ChatResponse:
-        """Process chat message with intelligent agentic workflow"""
+        """Process chat message with intelligent multi-agent workflow"""
         
         logger.info(f"🚀 Processing chat message for user: {user_email}")
         logger.info(f"💬 Message: '{chat_request.message}'")
@@ -1109,7 +1300,7 @@ class ChatManager:
         ]
         
         if chat_request.module_type not in supported_modules:
-            error_message = f"The {chat_request.module_type.value} module is currently under development. Please use one of: Google Ads, Google Analytics, Meta Ads, or Facebook Analytics."
+            error_message = f"The {chat_request.module_type.value} module is currently under development. Please use Google Ads, Google Analytics, Meta Ads, Facebook Analytics, or Intent Insights."
             
             if chat_request.session_id:
                 session_id = chat_request.session_id
@@ -1142,10 +1333,7 @@ class ChatManager:
                 module_type=chat_request.module_type
             )
         
-        # Status 1: Message received
-        await self.send_status_update("Message received", "Processing your question...")
-        
-        # Handle session continuation properly
+        # Handle session
         if chat_request.session_id:
             session_id = chat_request.session_id
             await self.db.chat_sessions.update_one(
@@ -1153,17 +1341,14 @@ class ChatManager:
                 {"$set": {"last_activity": datetime.utcnow()}}
             )
         else:
-            account_id = chat_request.context.get('account_id') if chat_request.context else None
-            page_id = chat_request.context.get('page_id') if chat_request.context else None
-            
             session_id = await self.create_or_get_simple_session(
                 user_email=user_email,
                 module_type=chat_request.module_type,
                 session_id=None,
                 customer_id=chat_request.customer_id,
                 property_id=chat_request.property_id,
-                account_id=account_id,
-                page_id=page_id,
+                account_id=chat_request.context.get('account_id') if chat_request.context else None,
+                page_id=chat_request.context.get('page_id') if chat_request.context else None,
                 period=chat_request.period or "LAST_7_DAYS"
             )
         
@@ -1175,179 +1360,139 @@ class ChatManager:
         )
         await self.add_message_to_simple_session(session_id, user_message)
         
-        # === START: NEW AGENTIC WORKFLOW ===
+        # Get conversation history for context
+        collection = self.db.chat_sessions
+        session = await collection.find_one({"session_id": session_id})
+        conversation_history = []
+        if session and session.get("messages"):
+            conversation_history = [
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in session["messages"][-10:]  # Last 5 exchanges
+            ]
         
-        # ✅ INITIALIZE endpoint_data EARLY
+        # Initialize response variables
         endpoint_data = {}
         ai_response = ""
         
         try:
-            # Agent 1: Classify query
-            await self.send_status_update("Analyzing query", "Understanding your question...")
+            # ===== AGENT 1: Classify Query =====
+            await self.send_status_update_to_frontend("Analyzing query", "Understanding your question...")
             classification = await self.agent_classify_query(chat_request.message)
             
             if classification['category'] == 'GENERAL':
-                # Handle general chat without API calls
-                ai_response = await self._generate_enhanced_ai_response_simple(
-                    message=chat_request.message,
-                    context={"endpoint_data": {}},
-                    module_type=chat_request.module_type,
-                    session_id=session_id
-                )
-            else:
-                # Agent 2: Extract time period
-                await self.send_status_update("Extracting time period", "Determining time range...")
-                time_period = await self.agent_extract_time_period(
-                    chat_request.message,
-                    {
-                        'period': chat_request.period,
-                        'custom_dates': chat_request.context.get('custom_dates') if chat_request.context else None
-                    }
+                # Handle general chat
+                prompt = f"""
+                You are a friendly marketing analytics assistant. The user asked: "{chat_request.message}"
+                
+                This is a general question (not analytics-related). Respond naturally and helpfully.
+                Keep your response brief and conversational.
+                """
+                
+                response = await self.openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=500
                 )
                 
-                if time_period.get('needs_clarification'):
-                    ai_response = time_period['clarification_message']
+                ai_response = response.choices[0].message.content
+                
+            else:
+                # ===== AGENT 2: Extract Time Period =====
+                await self.send_status_update_to_frontend("Extracting time period", "Determining time range...")
+                
+                time_context = {
+                    'period': chat_request.period,
+                    'custom_dates': chat_request.context.get('custom_dates') if chat_request.context else None
+                }
+                
+                time_period = await self.agent_extract_time_period(chat_request.message, time_context)
+                
+                # ===== AGENT 3: Identify Account =====
+                await self.send_status_update_to_frontend("Identifying account", "Finding relevant account...")
+                
+                account_context = {
+                    'customer_id': chat_request.customer_id,
+                    'property_id': chat_request.property_id,
+                    'account_id': chat_request.context.get('account_id') if chat_request.context else None,
+                    'page_id': chat_request.context.get('page_id') if chat_request.context else None,
+                }
+                
+                account_info = await self.agent_identify_account(
+                    chat_request.message,
+                    chat_request.module_type,
+                    account_context
+                )
+                
+                if account_info.get('needs_account_list'):
+                    ai_response = account_info.get('clarification_message', 'Please specify which account to analyze.')
                 else:
-                    # Agent 3: Identify account
-                    await self.send_status_update("Identifying account", "Finding relevant account...")
+                    # ===== AGENT 4: Select Endpoints =====
+                    await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
                     
-                    # ✅ EXTRACT account_id and page_id FROM CONTEXT EARLY
-                    context_account_id = chat_request.context.get('account_id') if chat_request.context else None
-                    context_page_id = chat_request.context.get('page_id') if chat_request.context else None
-                    
-                    account_info = await self.agent_identify_account(
+                    selected_endpoints = await self.agent_select_endpoints(
                         chat_request.message,
                         chat_request.module_type,
-                        {
-                            'customer_id': chat_request.customer_id,
-                            'property_id': chat_request.property_id,
-                            'account_id': context_account_id,
-                            'page_id': context_page_id
-                        },
-                        chat_request.context.get('token', '') if chat_request.context else '',
-                        user_email
+                        account_info,
+                        conversation_history
                     )
                     
-                    if account_info.get('needs_account_list'):
-                        # Return account list to user
-                        accounts = await self._fetch_account_list(
-                            chat_request.module_type,
-                            chat_request.context.get('token', '') if chat_request.context else '',
-                            user_email
-                        )
-                        ai_response = f"{account_info.get('clarification_message', 'Please select an account:')}\n\nAvailable accounts:\n"
-                        for acc in accounts:
-                            ai_response += f"- {acc['name']} (ID: {acc['id']})\n"
+                    if not selected_endpoints:
+                        ai_response = "I couldn't determine which data sources to use. Please try rephrasing your question."
                     else:
-                        # Agent 4: Select endpoints
-                        await self.send_status_update("Selecting endpoints", "Determining data sources...")
-                        selected_endpoints = await self.agent_select_endpoints(
-                            chat_request.message,
-                            chat_request.module_type,
-                            account_info
+                        # ===== AGENT 5: Execute Endpoints =====
+                        await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
+                        
+                        # Build endpoint parameters
+                        endpoint_params = {
+                            'token': chat_request.context.get('token', '') if chat_request.context else '',
+                            'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
+                            'start_date': time_period.get('start_date'),
+                            'end_date': time_period.get('end_date'),
+                        }
+                        
+                        # Map account_id to correct parameter
+                        resolved_account_id = account_info.get('account_id')
+                        
+                        if chat_request.module_type == ModuleType.GOOGLE_ADS:
+                            endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
+                        elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
+                            endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
+                        elif chat_request.module_type == ModuleType.META_ADS:
+                            endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                        elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
+                            endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
+                        elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
+                            endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                        
+                        # Execute endpoints with status callback
+                        endpoint_data = await self.agent_execute_endpoints(
+                            selected_endpoints,
+                            endpoint_params,
+                            user_email,
+                            status_callback=self.send_status_update_to_frontend
                         )
                         
-                        if not selected_endpoints:
-                            ai_response = "I couldn't determine which data sources to use for your question. Please try rephrasing your question."
-                        else:
-                            # Agent 5: Execute endpoints
-                            await self.send_status_update("Fetching data", f"Calling {len(selected_endpoints)} APIs...")
-                            
-                            logger.info("\n" + "="*80)
-                            logger.info("🔧 BUILDING ENDPOINT PARAMETERS")
-                            logger.info(f"Module type: {chat_request.module_type.value}")
-                            logger.info(f"Account info account_id: {account_info.get('account_id')}")
-                            logger.info(f"Context customer_id: {chat_request.customer_id}")
-                            logger.info(f"Context property_id: {chat_request.property_id}")
-                            
-                            endpoint_params = {
-                                'token': chat_request.context.get('token', '') if chat_request.context else '',
-                                'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
-                                'start_date': time_period.get('start_date'),
-                                'end_date': time_period.get('end_date'),
-                            }
-                            
-                            # Map account_id to the correct parameter based on module type
-                            resolved_account_id = account_info.get('account_id')
-                            
-                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                                endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
-                                logger.info(f"✅ Set customer_id: {endpoint_params['customer_id']}")
-                                
-                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                                endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
-                                logger.info(f"✅ Set property_id: {endpoint_params['property_id']}")
-                                
-                            elif chat_request.module_type == ModuleType.META_ADS:
-                                endpoint_params['account_id'] = resolved_account_id or context_account_id
-                                logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
-                                
-                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                                endpoint_params['page_id'] = resolved_account_id or context_page_id
-                                logger.info(f"✅ Set page_id: {endpoint_params['page_id']}")
-                                
-                            elif chat_request.module_type == ModuleType.INSTAGRAM_ANALYTICS:
-                                endpoint_params['account_id'] = resolved_account_id or context_account_id
-                                logger.info(f"✅ Set account_id: {endpoint_params['account_id']}")
-                            
-                            logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
-                            logger.info("="*80 + "\n")
-                            
-                            # Validate critical parameters before calling
-                            critical_param = None
-                            param_name = None
-                            
-                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                                critical_param = endpoint_params.get('customer_id')
-                                param_name = 'customer_id'
-                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                                critical_param = endpoint_params.get('property_id')
-                                param_name = 'property_id'
-                            elif chat_request.module_type in [ModuleType.META_ADS, ModuleType.INSTAGRAM_ANALYTICS]:
-                                critical_param = endpoint_params.get('account_id')
-                                param_name = 'account_id'
-                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                                critical_param = endpoint_params.get('page_id')
-                                param_name = 'page_id'
-                            
-                            if not critical_param:
-                                logger.error(f"❌ Critical parameter '{param_name}' is None!")
-                                logger.error(f"Chat request: customer_id={chat_request.customer_id}, property_id={chat_request.property_id}")
-                                logger.error(f"Account info: {account_info}")
-                                ai_response = f"I couldn't identify which {chat_request.module_type.value} account to analyze. Please specify the account name or ID."
-                            else:
-                                # ✅ EXECUTE ENDPOINTS
-                                endpoint_data = await self.agent_execute_endpoints(
-                                    selected_endpoints,
-                                    endpoint_params,
-                                    user_email
-                                )
-                                
-                                # Agent 6: Analyze data
-                                await self.send_status_update("Analyzing data", "Generating insights...")
-                                analysis = await self.agent_analyze_data(
-                                    chat_request.message,
-                                    endpoint_data,
-                                    chat_request.module_type
-                                )
-                                
-                                # Agent 7: Format response
-                                await self.send_status_update("Formatting response", "Finalizing answer...")
-                                formatted_response = await self.agent_format_response(
-                                    analysis,
-                                    endpoint_data,
-                                    needs_visualization=True
-                                )
-                                
-                                ai_response = formatted_response['text']
+                        # ===== AGENT 6: Analyze Data =====
+                        await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
+                        
+                        analysis = await self.agent_analyze_data(
+                            chat_request.message,
+                            endpoint_data,
+                            chat_request.module_type,
+                            conversation_history
+                        )
+                        
+                        # ===== AGENT 7: Format Response =====
+                        await self.send_status_update_to_frontend("Formatting response", "Finalizing answer...")
+                        
+                        ai_response = await self.agent_format_response(analysis)
             
         except Exception as e:
             logger.error(f"❌ ERROR in process_chat_message: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            ai_response = f"I apologize, but I encountered an error: {str(e)}. Please try rephrasing your question or contact support if the issue persists."
-        
-        # === END: NEW AGENTIC WORKFLOW ===
+            ai_response = f"I apologize, but I encountered an error while processing your request. Please try rephrasing your question or contact support if the issue persists."
         
         # Add AI response to session
         ai_message = ChatMessage(
@@ -1357,16 +1502,57 @@ class ChatManager:
         )
         await self.add_message_to_simple_session(session_id, ai_message)
         
-        await self.send_status_update("Complete", "Analysis ready!")
+        await self.send_status_update_to_frontend("Complete", "Analysis ready!")
         
         return ChatResponse(
             response=ai_response,
             session_id=session_id,
             triggered_endpoint=None,
-            endpoint_data=endpoint_data,  # ✅ Now always defined
+            endpoint_data=endpoint_data,
             module_type=chat_request.module_type
         )
 
+
+    def _log_agent_step(self, agent_name: str, status: str, details: Dict = None):
+        """Consistent logging for agent steps"""
+        logger.info(f"\n{'='*80}")
+        logger.info(f"🤖 {agent_name} - {status}")
+        if details:
+            logger.info(f"Details: {json.dumps(details, default=str, indent=2)}")
+        logger.info(f"{'='*80}\n")
+
+    def _organize_endpoint_registry(self):
+        """Organize endpoints by category for better selection"""
+        self.endpoint_categories = {
+            'google_ads': {
+                'overview': ['get_ads_key_stats', 'get_ads_campaigns'],
+                'performance': ['get_ads_performance', 'get_ads_keywords'],
+                'analysis': ['get_ads_geographic', 'get_ads_device_performance', 'get_ads_time_performance'],
+                'research': ['get_keyword_ideas']
+            },
+            'google_analytics': {
+                'overview': ['get_ga_metrics', 'get_ga_properties'],
+                'traffic': ['get_ga_traffic_sources', 'get_ga_channel_performance'],
+                'behavior': ['get_ga_top_pages', 'get_ga_audience_insights'],
+                'conversions': ['get_ga_conversions', 'generate_engagement_funnel_with_llm'],
+                'revenue': ['get_revenue_breakdown_by_channel', 'get_revenue_breakdown_by_source'],
+                'trends': ['get_ga_time_series', 'get_ga_trends']
+            },
+            'meta_ads': {
+                'overview': ['get_meta_account_insights', 'get_campaigns_paginated'],
+                'campaigns': ['get_meta_campaigns_timeseries', 'get_meta_campaigns_demographics'],
+                'detailed': ['get_meta_campaigns_list'],  # Slow endpoint
+                'adsets': ['get_adsets_by_campaigns', 'get_adsets_timeseries'],
+                'ads': ['get_ads_by_adsets', 'get_ads_timeseries']
+            },
+            'facebook_analytics': {
+                'overview': ['get_facebook_page_insights', 'get_facebook_pages'],
+                'content': ['get_facebook_page_posts', 'get_facebook_engagement'],
+                'audience': ['get_facebook_demographics', 'get_meta_follows_unfollows'],
+                'performance': ['get_meta_organic_vs_paid', 'get_meta_video_views_breakdown']
+            }
+        }
+        
     def _get_enhanced_system_prompt_v2(self, module_type: ModuleType, context: Dict[str, Any]) -> str:
         """Enhanced system prompt with complete data extraction and intelligent analysis"""
         
@@ -1529,5 +1715,11 @@ class ChatManager:
             "success": result.modified_count > 0
         }
 
+
+    async def send_status_update_to_frontend(self, status: str, details: str = ""):
+        """Send status update (placeholder for WebSocket implementation)"""
+        logger.info(f"STATUS: {status} - {details}")
+        # TODO: Implement WebSocket for real-time updates
+        return {"status": status, "details": details, "timestamp": datetime.utcnow()}
 # Create singleton instance
 chat_manager = ChatManager()
