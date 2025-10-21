@@ -13,6 +13,7 @@ from typing import Tuple
 from models.chat_models import *
 from database.mongo_manager import mongo_manager
 from auth.auth_manager import AuthManager
+from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -679,10 +680,11 @@ class ChatManager:
     # =================
     # AGENT 2: Time Period Extractor
     # =================
-    async def agent_extract_time_period(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        self._log_agent_step("AGENT 2: TIME - EXTRACTOR AGENT", "STARTING", {"message": message[:100]})
 
-        """Extract time period from message or use context"""
+    async def agent_extract_time_period(self, message: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract time period from message or use context with proper format conversion"""
+        
+        self._log_agent_step("AGENT 2: TIME EXTRACTOR", "STARTING", {"message": message[:100]})
         
         # Check if custom dates are in context first
         if context.get('custom_dates') and context['custom_dates'].get('startDate') and context['custom_dates'].get('endDate'):
@@ -692,48 +694,52 @@ class ChatManager:
                 'period': 'CUSTOM',
                 'start_date': context['custom_dates']['startDate'],
                 'end_date': context['custom_dates']['endDate'],
-                'needs_clarification': False
+                'needs_clarification': False,
+                'extracted_from': 'context'
             }
         
-        # Check if period is in context
-        if context.get('period') and context['period'] != 'CUSTOM':
-            logger.info(f"Using period from context: {context['period']}")
-            return {
-                'has_period': True,
-                'period': context['period'],
-                'start_date': None,
-                'end_date': None,
-                'needs_clarification': False
-            }
-        
-        # Try to extract from message
-        prompt = f"""
-        Extract time period information from this message.
-        Look for:
-        - Specific dates (e.g., "from Jan 1 to Jan 31", "in December 2024")
-        - Relative periods (e.g., "last 7 days", "past month", "this quarter", "yesterday")
-        - Time keywords (e.g., "recently", "latest", "current")
+        # Try to extract time period from the user's message
+        prompt = f"""Extract time period information from this message.
 
-        User Message: "{message}"
+    Look for:
+    - Specific dates (e.g., "from Jan 1 to Jan 31", "December 2024", "2024-01-01 to 2024-01-31")
+    - Relative periods:
+    * "last 7 days", "past week", "this week"
+    * "last 30 days", "last month", "past month", "this month"
+    * "last 3 months", "last quarter", "past 3 months"
+    * "last 6 months"
+    * "last year", "past year", "this year", "last 12 months"
+    * "yesterday", "today"
+    - Time keywords: "recently", "latest", "current"
 
-        If time period is found, convert to either:
-        - Standard period: LAST_7_DAYS, LAST_30_DAYS, LAST_3_MONTHS, LAST_1_YEAR
-        - Custom dates: specific start_date and end_date (YYYY-MM-DD format)
+    User Message: "{message}"
 
-        Respond in JSON format:
-        {{
-            "has_period": true/false,
-            "period": "LAST_7_DAYS" or "CUSTOM" or null,
-            "start_date": "YYYY-MM-DD" or null,
-            "end_date": "YYYY-MM-DD" or null,
-            "extracted_text": "the time phrase found" or null,
-            "needs_clarification": true/false
-        }}
-        """
+    Convert to:
+    - For predefined periods: LAST_7_DAYS, LAST_30_DAYS, LAST_90_DAYS, LAST_365_DAYS
+    - For custom dates: start_date and end_date in YYYY-MM-DD format
+
+    Current date for reference: {datetime.now().strftime('%Y-%m-%d')}
+
+    Examples:
+    - "last month" → LAST_30_DAYS
+    - "last 3 months" → LAST_90_DAYS
+    - "last year" → LAST_365_DAYS
+    - "from January 1 to January 31" → CUSTOM with dates
+    - "in December 2024" → CUSTOM with dates (2024-12-01 to 2024-12-31)
+
+    Respond in JSON format:
+    {{
+        "has_period": true/false,
+        "period": "LAST_7_DAYS" or "LAST_30_DAYS" or "LAST_90_DAYS" or "LAST_365_DAYS" or "CUSTOM" or null,
+        "start_date": "YYYY-MM-DD" or null,
+        "end_date": "YYYY-MM-DD" or null,
+        "extracted_text": "the time phrase found" or null,
+        "needs_clarification": true/false
+    }}"""
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",  # ✅ Changed from gpt-3.5-turbo
+                model="gpt-4-turbo-preview",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"}
@@ -741,27 +747,48 @@ class ChatManager:
             
             result = json.loads(response.choices[0].message.content)
             
-            # If no period found in message and not in context, use default
-            if not result['has_period']:
-                logger.info("No period found in message, using LAST_7_DAYS as default")
-                result['has_period'] = True
-                result['period'] = 'LAST_7_DAYS'
-                result['needs_clarification'] = False
+            # If period found in message, use it (override context)
+            if result.get('has_period') and result.get('extracted_text'):
+                logger.info(f"Time period extracted from message: {result}")
+                result['extracted_from'] = 'message'
+                self._log_agent_step("AGENT 2: TIME EXTRACTOR", "COMPLETE", result)
+                return result
             
-            logger.info(f"Time period extracted: {result}")
-            self._log_agent_step("AGENT 2: TIME - EXTRACTOR AGENT", "COMPLETE", result)
+            # If no period found in message, check context
+            if context.get('period') and context['period'] != 'CUSTOM':
+                logger.info(f"Using period from context: {context['period']}")
+                return {
+                    'has_period': True,
+                    'period': context['period'],
+                    'start_date': None,
+                    'end_date': None,
+                    'needs_clarification': False,
+                    'extracted_from': 'context'
+                }
+            
+            # Default to LAST_7_DAYS if nothing found
+            logger.info("No period found, using LAST_7_DAYS as default")
+            result = {
+                'has_period': True,
+                'period': 'LAST_7_DAYS',
+                'start_date': None,
+                'end_date': None,
+                'needs_clarification': False,
+                'extracted_from': 'default'
+            }
+            
+            self._log_agent_step("AGENT 2: TIME EXTRACTOR", "COMPLETE", result)
             return result
             
         except Exception as e:
             logger.error(f"Error extracting time period: {e}")
-            # Use default period on error
             return {
                 'has_period': True,
                 'period': 'LAST_7_DAYS',
-                'needs_clarification': False
+                'needs_clarification': False,
+                'extracted_from': 'error_default'
             }
-        # =================
-    
+
     # AGENT 3: Account Identifier
     # =================
     async def agent_identify_account(
@@ -1023,6 +1050,55 @@ class ChatManager:
         default_names = defaults.get(module_type, [])
         return [e for e in available_endpoints if e['name'] in default_names]
 
+
+    def _convert_period_for_module(self, period: str, module_type: ModuleType, start_date: str = None, end_date: str = None) -> Tuple[str, str, str]:
+        """
+        Convert period format based on module type
+        Returns: (period, start_date, end_date)
+        """
+        
+        # If custom dates provided, return them directly
+        if start_date and end_date:
+            if module_type == ModuleType.GOOGLE_ADS:
+                return ('CUSTOM', start_date, end_date)
+            else:  # GA4, Meta, Facebook, Instagram
+                return ('custom', start_date, end_date)
+        
+        # Convert predefined periods
+        if module_type == ModuleType.GOOGLE_ADS:
+            # Google Ads format: LAST_7_DAYS, LAST_30_DAYS, etc.
+            period_map = {
+                'LAST_7_DAYS': 'LAST_7_DAYS',
+                'LAST_30_DAYS': 'LAST_30_DAYS',
+                'LAST_90_DAYS': 'LAST_90_DAYS',
+                'LAST_365_DAYS': 'LAST_365_DAYS',
+                # Handle if they come in GA4 format
+                '7d': 'LAST_7_DAYS',
+                '30d': 'LAST_30_DAYS',
+                '90d': 'LAST_90_DAYS',
+                '365d': 'LAST_365_DAYS'
+            }
+            converted = period_map.get(period, 'LAST_7_DAYS')
+            logger.info(f"Converted period for Google Ads: {period} → {converted}")
+            return (converted, None, None)
+        
+        else:  # Google Analytics, Meta Ads, Facebook, Instagram
+            # GA4/Meta format: 7d, 30d, 90d, 365d
+            period_map = {
+                'LAST_7_DAYS': '7d',
+                'LAST_30_DAYS': '30d',
+                'LAST_90_DAYS': '90d',
+                'LAST_365_DAYS': '365d',
+                # Handle if already in correct format
+                '7d': '7d',
+                '30d': '30d',
+                '90d': '90d',
+                '365d': '365d'
+            }
+            converted = period_map.get(period, '30d')
+            logger.info(f"Converted period for {module_type.value}: {period} → {converted}")
+            return (converted, None, None)
+        
     # =================
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
@@ -1451,18 +1527,34 @@ class ChatManager:
                     else:
                         # ===== AGENT 5: Execute Endpoints =====
                         await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
-                        
-                        # Build endpoint parameters
+
+                        # Build endpoint parameters with proper period conversion
+                        raw_period = time_period.get('period') or chat_request.period or 'LAST_7_DAYS'
+                        raw_start_date = time_period.get('start_date')
+                        raw_end_date = time_period.get('end_date')
+
+                        # Convert period format based on module type
+                        converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
+                            period=raw_period,
+                            module_type=chat_request.module_type,
+                            start_date=raw_start_date,
+                            end_date=raw_end_date
+                        )
+
+                        logger.info(f"Period conversion: {raw_period} → {converted_period}")
+                        if converted_start_date and converted_end_date:
+                            logger.info(f"Using custom dates: {converted_start_date} to {converted_end_date}")
+
                         endpoint_params = {
                             'token': chat_request.context.get('token', '') if chat_request.context else '',
-                            'period': time_period.get('period') or chat_request.period or 'LAST_7_DAYS',
-                            'start_date': time_period.get('start_date'),
-                            'end_date': time_period.get('end_date'),
+                            'period': converted_period,
+                            'start_date': converted_start_date,
+                            'end_date': converted_end_date,
                         }
-                        
+
                         # Map account_id to correct parameter
                         resolved_account_id = account_info.get('account_id')
-                        
+
                         if chat_request.module_type == ModuleType.GOOGLE_ADS:
                             endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
                         elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
@@ -1473,7 +1565,8 @@ class ChatManager:
                             endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
                         elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
                             endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
-                        
+
+                        logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
                         # Execute endpoints with status callback
                         endpoint_data = await self.agent_execute_endpoints(
                             selected_endpoints,
