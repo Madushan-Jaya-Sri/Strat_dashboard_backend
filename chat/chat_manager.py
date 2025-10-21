@@ -642,9 +642,8 @@ class ChatManager:
     # AGENT 1: General Query Classifier
     # =================
     async def agent_classify_query(self, message: str) -> Dict[str, Any]:
-
         self._log_agent_step("AGENT 1: CLASSIFIER", "STARTING", {"message": message[:100]})
-    
+
         """Classify if query is general or analytics-related"""
         prompt = f"""
         Classify this user query into one of two categories:
@@ -663,7 +662,7 @@ class ChatManager:
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4-turbo-preview",  # ✅ Changed from gpt-3.5-turbo
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"}
@@ -734,7 +733,7 @@ class ChatManager:
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4-turbo-preview",  # ✅ Changed from gpt-3.5-turbo
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 response_format={"type": "json_object"}
@@ -761,8 +760,8 @@ class ChatManager:
                 'period': 'LAST_7_DAYS',
                 'needs_clarification': False
             }
-
-    # =================
+        # =================
+    
     # AGENT 3: Account Identifier
     # =================
     async def agent_identify_account(
@@ -818,8 +817,9 @@ class ChatManager:
         
         return result
 
+
     # =================
-    # AGENT 4: Endpoint Selector
+    # AGENT 4: Endpoint Selector (THE PROBLEMATIC ONE)
     # =================
     async def agent_select_endpoints(
         self, 
@@ -830,7 +830,7 @@ class ChatManager:
     ) -> List[Dict[str, Any]]:
         
         logger.info("\n" + "="*80)
-        logger.info("🔍 AGENT 3: ENDPOINT SELECTOR - STARTING")
+        logger.info("🔍 AGENT 4: ENDPOINT SELECTOR - STARTING")
         logger.info(f"Module: {module_type.value}")
 
         """Select relevant endpoints based on the query"""
@@ -888,10 +888,10 @@ class ChatManager:
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4-turbo-preview",  # ✅ FIXED - Changed from "gpt-4"
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"}  # ✅ Now this works
             )
             
             result = json.loads(response.choices[0].message.content)
@@ -916,6 +916,7 @@ class ChatManager:
         except Exception as e:
             logger.error(f"Error selecting endpoints: {e}")
             return self._get_default_endpoints(module_type, available_endpoints)
+
     def _get_endpoint_description(self, endpoint_name: str) -> str:
         """Get human-readable description of endpoint"""
 
@@ -1234,7 +1235,7 @@ class ChatManager:
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4-turbo-preview",  # ✅ Changed from "gpt-4" for consistency
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=1500
@@ -1245,6 +1246,7 @@ class ChatManager:
         except Exception as e:
             logger.error(f"Error analyzing data: {e}")
             return "I encountered an error while analyzing your data. Please try rephrasing your question."
+    
     # =================
     # AGENT 7: Response Formatter
     # =================
