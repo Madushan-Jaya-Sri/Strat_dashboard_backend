@@ -873,8 +873,8 @@ class ChatManager:
 
     Rules:
     1. Select MINIMUM endpoints needed to answer the question
-    2. For overview questions, select 1-2 key metric endpoints
-    3. For specific questions, select targeted endpoints
+    2. For overview questions, select all the key metrics endpoints required
+    3. For specific questions, select all targeted endpoints
     4. Consider follow-up context - don't repeat data already provided
     5. For comparison questions, select endpoints that provide comparative data
     6. AVOID selecting the 'get_meta_ad_accounts/campaigns/list' endpoint unless specifically asked for ALL campaigns
