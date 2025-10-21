@@ -698,34 +698,58 @@ class ChatManager:
                 'extracted_from': 'context'
             }
         
+        # Get current date for calculations
+        from datetime import datetime, timedelta
+        current_date = datetime.now()
+        current_date_str = current_date.strftime('%Y-%m-%d')
+        
         # Try to extract time period from the user's message
-        prompt = f"""Extract time period information from this message.
+        prompt = f"""Extract time period information from this message and convert to standard formats.
 
-    Look for:
-    - Specific dates (e.g., "from Jan 1 to Jan 31", "December 2024", "2024-01-01 to 2024-01-31")
-    - Relative periods:
-    * "last 7 days", "past week", "this week"
-    * "last 30 days", "last month", "past month", "this month"
-    * "last 3 months", "last quarter", "past 3 months"
-    * "last 6 months"
-    * "last year", "past year", "this year", "last 12 months"
-    * "yesterday", "today"
-    - Time keywords: "recently", "latest", "current"
+    Current date: {current_date_str}
 
     User Message: "{message}"
 
-    Convert to:
-    - For predefined periods: LAST_7_DAYS, LAST_30_DAYS, LAST_90_DAYS, LAST_365_DAYS
-    - For custom dates: start_date and end_date in YYYY-MM-DD format
+    IMPORTANT RULES:
+    1. Only extract if the user EXPLICITLY mentions a time period in their message
+    2. If NO time period is mentioned, return has_period: false
+    3. For standard periods (7 days, 30 days, 90 days, 365 days), use predefined format
+    4. For non-standard periods (2 months, 6 months, 2 weeks, etc.), calculate exact dates
 
-    Current date for reference: {datetime.now().strftime('%Y-%m-%d')}
+    Standard periods (use these if mentioned):
+    - "last 7 days", "past week" → LAST_7_DAYS
+    - "last 30 days", "last month", "past month" → LAST_30_DAYS  
+    - "last 3 months", "last quarter", "last 90 days" → LAST_90_DAYS
+    - "last year", "last 12 months", "last 365 days" → LAST_365_DAYS
+
+    Non-standard periods (calculate dates):
+    - "last 2 months" → Calculate 60 days back: start_date, end_date
+    - "last 6 months" → Calculate 180 days back: start_date, end_date
+    - "last 2 weeks" → Calculate 14 days back: start_date, end_date
+    - Specific dates like "from Jan 1 to Jan 31" → Convert to YYYY-MM-DD
 
     Examples:
-    - "last month" → LAST_30_DAYS
-    - "last 3 months" → LAST_90_DAYS
-    - "last year" → LAST_365_DAYS
-    - "from January 1 to January 31" → CUSTOM with dates
-    - "in December 2024" → CUSTOM with dates (2024-12-01 to 2024-12-31)
+    Input: "What is my performance?"
+    Output: {{"has_period": false, "reason": "No time period mentioned"}}
+
+    Input: "Show me last 7 days"
+    Output: {{"has_period": true, "period": "LAST_7_DAYS"}}
+
+    Input: "I want data for last 2 months"
+    Output: {{
+    "has_period": true, 
+    "period": "CUSTOM",
+    "start_date": "2024-08-21",  (60 days before current_date)
+    "end_date": "{current_date_str}"
+    }}
+
+    Input: "Performance in December 2024"
+    Output: {{
+    "has_period": true,
+    "period": "CUSTOM", 
+    "start_date": "2024-12-01",
+    "end_date": "2024-12-31"
+    }}
 
     Respond in JSON format:
     {{
@@ -734,7 +758,8 @@ class ChatManager:
         "start_date": "YYYY-MM-DD" or null,
         "end_date": "YYYY-MM-DD" or null,
         "extracted_text": "the time phrase found" or null,
-        "needs_clarification": true/false
+        "needs_clarification": false,
+        "reason": "brief explanation"
     }}"""
 
         try:
@@ -749,46 +774,57 @@ class ChatManager:
             
             # If period found in message, use it (override context)
             if result.get('has_period') and result.get('extracted_text'):
-                logger.info(f"Time period extracted from message: {result}")
+                logger.info(f"✅ Time period extracted from message: {result}")
                 result['extracted_from'] = 'message'
                 self._log_agent_step("AGENT 2: TIME EXTRACTOR", "COMPLETE", result)
                 return result
             
             # If no period found in message, check context
             if context.get('period') and context['period'] != 'CUSTOM':
-                logger.info(f"Using period from context: {context['period']}")
+                logger.info(f"⚙️ No time period in message, using period from filter: {context['period']}")
                 return {
                     'has_period': True,
                     'period': context['period'],
                     'start_date': None,
                     'end_date': None,
                     'needs_clarification': False,
-                    'extracted_from': 'context'
+                    'extracted_from': 'context_filter',
+                    'reason': 'Using module filter period as no period mentioned in message'
                 }
             
             # Default to LAST_7_DAYS if nothing found
-            logger.info("No period found, using LAST_7_DAYS as default")
+            logger.info("⚙️ No period found anywhere, using LAST_7_DAYS as default")
             result = {
                 'has_period': True,
                 'period': 'LAST_7_DAYS',
                 'start_date': None,
                 'end_date': None,
                 'needs_clarification': False,
-                'extracted_from': 'default'
+                'extracted_from': 'default',
+                'reason': 'Default period applied'
             }
             
             self._log_agent_step("AGENT 2: TIME EXTRACTOR", "COMPLETE", result)
             return result
             
         except Exception as e:
-            logger.error(f"Error extracting time period: {e}")
+            logger.error(f"❌ Error extracting time period: {e}")
+            # Use context period on error, not default
+            if context.get('period'):
+                return {
+                    'has_period': True,
+                    'period': context['period'],
+                    'start_date': None,
+                    'end_date': None,
+                    'needs_clarification': False,
+                    'extracted_from': 'error_fallback_context'
+                }
             return {
                 'has_period': True,
                 'period': 'LAST_7_DAYS',
                 'needs_clarification': False,
-                'extracted_from': 'error_default'
+                'extracted_from': 'error_fallback_default'
             }
-
     # AGENT 3: Account Identifier
     # =================
     async def agent_identify_account(
@@ -1057,12 +1093,23 @@ class ChatManager:
         Returns: (period, start_date, end_date)
         """
         
-        # If custom dates provided, return them directly
+        # If custom dates provided, always use them regardless of period
         if start_date and end_date:
+            logger.info(f"📅 Using CUSTOM date range: {start_date} to {end_date}")
             if module_type == ModuleType.GOOGLE_ADS:
                 return ('CUSTOM', start_date, end_date)
             else:  # GA4, Meta, Facebook, Instagram
                 return ('custom', start_date, end_date)
+        
+        # Only convert standard periods (7, 30, 90, 365 days)
+        # Any non-standard period should have been converted to custom dates by Agent 2
+        standard_periods = ['LAST_7_DAYS', 'LAST_30_DAYS', 'LAST_90_DAYS', 'LAST_365_DAYS', 
+                        '7d', '30d', '90d', '365d']
+        
+        if period not in standard_periods:
+            logger.warning(f"⚠️ Non-standard period received: {period}. This should have been converted to custom dates by Agent 2.")
+            # Fallback to default
+            period = 'LAST_7_DAYS' if module_type == ModuleType.GOOGLE_ADS else '7d'
         
         # Convert predefined periods
         if module_type == ModuleType.GOOGLE_ADS:
@@ -1079,7 +1126,7 @@ class ChatManager:
                 '365d': 'LAST_365_DAYS'
             }
             converted = period_map.get(period, 'LAST_7_DAYS')
-            logger.info(f"Converted period for Google Ads: {period} → {converted}")
+            logger.info(f"📊 Google Ads period: {period} → {converted}")
             return (converted, None, None)
         
         else:  # Google Analytics, Meta Ads, Facebook, Instagram
@@ -1096,9 +1143,8 @@ class ChatManager:
                 '365d': '365d'
             }
             converted = period_map.get(period, '30d')
-            logger.info(f"Converted period for {module_type.value}: {period} → {converted}")
-            return (converted, None, None)
-        
+            logger.info(f"📊 {module_type.value} period: {period} → {converted}")
+            return (converted, None, None)      
     # =================
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
@@ -1533,6 +1579,13 @@ class ChatManager:
                         raw_start_date = time_period.get('start_date')
                         raw_end_date = time_period.get('end_date')
 
+                        logger.info(f"\n{'='*60}")
+                        logger.info(f"⏰ TIME PERIOD HANDLING")
+                        logger.info(f"Raw period from Agent 2: {raw_period}")
+                        logger.info(f"Raw start_date: {raw_start_date}")
+                        logger.info(f"Raw end_date: {raw_end_date}")
+                        logger.info(f"Period source: {time_period.get('extracted_from', 'unknown')}")
+
                         # Convert period format based on module type
                         converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
                             period=raw_period,
@@ -1541,9 +1594,10 @@ class ChatManager:
                             end_date=raw_end_date
                         )
 
-                        logger.info(f"Period conversion: {raw_period} → {converted_period}")
+                        logger.info(f"✅ CONVERTED - Period: {converted_period}")
                         if converted_start_date and converted_end_date:
-                            logger.info(f"Using custom dates: {converted_start_date} to {converted_end_date}")
+                            logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
+                        logger.info(f"{'='*60}\n")
 
                         endpoint_params = {
                             'token': chat_request.context.get('token', '') if chat_request.context else '',
