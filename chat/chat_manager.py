@@ -828,52 +828,63 @@ class ChatManager:
         account_info: Dict[str, Any],
         conversation_history: List[Dict[str, str]] = None
     ) -> List[Dict[str, Any]]:
-        self._log_agent_step("AGENT 4: ENDPOINT SELECTOR AGENT", "STARTING", {"message": message[:100]})
+        
+        logger.info("\n" + "="*80)
+        logger.info("🔍 AGENT 3: ENDPOINT SELECTOR - STARTING")
+        logger.info(f"Module: {module_type.value}")
 
         """Select relevant endpoints based on the query"""
         
         available_endpoints = self.endpoint_registry.get(module_type.value, [])
         
-        # Build conversation context
+        # Build conversation context OUTSIDE f-string
         history_context = ""
         if conversation_history:
             recent_history = conversation_history[-4:]  # Last 2 exchanges
-            history_context = "\n".join([
-                f"{msg['role'].upper()}: {msg['content']}"
-                for msg in recent_history
-            ])
+            history_lines = []
+            for msg in recent_history:
+                role = msg['role'].upper()
+                content = msg['content']
+                history_lines.append(f"{role}: {content}")
+            history_context = "\n".join(history_lines)
         
-        prompt = f"""
-        Select the most relevant API endpoints to answer this user query.
+        # Prepare endpoints info OUTSIDE f-string
+        endpoints_info = []
+        for e in available_endpoints:
+            endpoints_info.append({
+                'name': e['name'],
+                'path': e['path'],
+                'description': self._get_endpoint_description(e['name'])
+            })
+        endpoints_json = json.dumps(endpoints_info, indent=2)
+        account_json = json.dumps(account_info)
         
-        {"CONVERSATION HISTORY:\n" + history_context + "\n" if history_context else ""}
+        # Build history section
+        history_section = f"CONVERSATION HISTORY:\n{history_context}\n\n" if history_context else ""
         
-        Current Query: "{message}"
-        Module: {module_type.value}
-        Account Info: {json.dumps(account_info)}
-        
-        Available Endpoints:
-        {json.dumps([{
-            'name': e['name'],
-            'path': e['path'],
-            'description': self._get_endpoint_description(e['name'])
-        } for e in available_endpoints], indent=2)}
+        prompt = f"""Select the most relevant API endpoints to answer this user query.
 
-        Rules:
-        1. Select MINIMUM endpoints needed to answer the question
-        2. For overview questions, select 1-2 key metric endpoints
-        3. For specific questions, select targeted endpoints
-        4. Consider follow-up context - don't repeat data already provided
-        5. For comparison questions, select endpoints that provide comparative data
-        6. AVOID selecting the 'get_meta_ad_accounts/campaigns/list' endpoint unless specifically asked for ALL campaigns
+    {history_section}Current Query: "{message}"
+    Module: {module_type.value}
+    Account Info: {account_json}
 
-        Respond with JSON array:
-        {{
-            "endpoints": ["endpoint_name1", "endpoint_name2"],
-            "reasoning": "brief explanation",
-            "is_followup": true/false
-        }}
-        """
+    Available Endpoints:
+    {endpoints_json}
+
+    Rules:
+    1. Select MINIMUM endpoints needed to answer the question
+    2. For overview questions, select 1-2 key metric endpoints
+    3. For specific questions, select targeted endpoints
+    4. Consider follow-up context - don't repeat data already provided
+    5. For comparison questions, select endpoints that provide comparative data
+    6. AVOID selecting the 'get_meta_ad_accounts/campaigns/list' endpoint unless specifically asked for ALL campaigns
+
+    Respond with JSON array:
+    {{
+        "endpoints": ["endpoint_name1", "endpoint_name2"],
+        "reasoning": "brief explanation",
+        "is_followup": true/false
+    }}"""
 
         try:
             response = await self.openai_client.chat.completions.create(
@@ -897,15 +908,14 @@ class ChatManager:
             # Fallback to default endpoints if none selected
             if not selected:
                 selected = self._get_default_endpoints(module_type, available_endpoints)
-            self._log_agent_step("AGENT 4: ENDPOINT SELECTOR AGENT", "COMPLETE", result)
 
-            
+            logger.info(f"✅ AGENT 4 COMPLETE: {selected}")
+            logger.info("="*80 + "\n")
             return selected
             
         except Exception as e:
             logger.error(f"Error selecting endpoints: {e}")
             return self._get_default_endpoints(module_type, available_endpoints)
-
     def _get_endpoint_description(self, endpoint_name: str) -> str:
         """Get human-readable description of endpoint"""
 
@@ -1159,9 +1169,9 @@ class ChatManager:
         module_type: ModuleType,
         conversation_history: List[Dict[str, str]] = None
     ) -> str:
-
-        self._log_agent_step("AGENT 6: ANALYZER", "STARTING", {"message": message[:100]})
-
+        
+        logger.info("="*80)
+        logger.info("🔧 AGENT 6 : ANALYZER - STARTING")
         """Analyze data and generate insights with conversation awareness"""
         
         # Check for errors
@@ -1169,14 +1179,16 @@ class ChatManager:
         if errors:
             return f"I encountered an issue retrieving the data: {', '.join(errors)}. Please try rephrasing your question."
         
-        # Build conversation context
+        # Build conversation context OUTSIDE the f-string
         history_context = ""
         if conversation_history:
             recent_history = conversation_history[-6:]  # Last 3 exchanges
-            history_context = "\n".join([
-                f"{msg['role'].upper()}: {msg['content']}"
-                for msg in recent_history
-            ])
+            history_lines = []
+            for msg in recent_history:
+                role = msg['role'].upper()
+                content = msg['content']
+                history_lines.append(f"{role}: {content}")
+            history_context = "\n".join(history_lines)
         
         # Prepare data summary (limit size)
         data_summary = {}
@@ -1195,28 +1207,30 @@ class ChatManager:
             else:
                 data_summary[endpoint] = endpoint_data
         
-        prompt = f"""
-        You are a {module_type.value} analytics expert. Analyze this data and answer the user's question.
+        # Convert data to JSON string OUTSIDE f-string
+        data_json = json.dumps(data_summary, indent=2, default=str)[:8000]
         
-        {"CONVERSATION HISTORY:\n" + history_context + "\n" if history_context else ""}
+        # Build the prompt with pre-formatted strings
+        history_section = f"CONVERSATION HISTORY:\n{history_context}\n\n" if history_context else ""
         
-        Current Question: "{message}"
-        
-        Available Data:
-        {json.dumps(data_summary, indent=2, default=str)[:8000]}
-        
-        Instructions:
-        1. Directly answer the user's question
-        2. If this is a follow-up, acknowledge previous context
-        3. Use specific numbers and metrics from the data
-        4. Highlight key insights and trends
-        5. Provide actionable recommendations where appropriate
-        6. Format numbers properly (e.g., 1,234 or $1.5K)
-        7. Be concise but comprehensive
-        8. If data shows ALL campaigns, mention this is comprehensive data
-        
-        Format your response in a conversational, professional tone.
-        """
+        prompt = f"""You are a {module_type.value} analytics expert. Analyze this data and answer the user's question.
+
+    {history_section}Current Question: "{message}"
+
+    Available Data:
+    {data_json}
+
+    Instructions:
+    1. Directly answer the user's question
+    2. If this is a follow-up, acknowledge previous context
+    3. Use specific numbers and metrics from the data
+    4. Highlight key insights and trends
+    5. Provide actionable recommendations where appropriate
+    6. Format numbers properly (e.g., 1,234 or $1.5K)
+    7. Be concise but comprehensive
+    8. If data shows ALL campaigns, mention this is comprehensive data
+
+    Format your response in a conversational, professional tone."""
 
         try:
             response = await self.openai_client.chat.completions.create(
@@ -1225,55 +1239,50 @@ class ChatManager:
                 temperature=0.7,
                 max_tokens=1500
             )
-            
-            self._log_agent_step("AGENT 6: ANALYZER", "COMPLETE")
-
+            logger.info(f"\n✅ AGENT 6 ANALYZER : COMPLETE")
             return response.choices[0].message.content
             
         except Exception as e:
             logger.error(f"Error analyzing data: {e}")
             return "I encountered an error while analyzing your data. Please try rephrasing your question."
-
     # =================
     # AGENT 7: Response Formatter
     # =================
     async def agent_format_response(self, analysis: str) -> str:
-        self._log_agent_step("AGENT 7: RESPONSE FORMATTER", "STARTING")
 
+        logger.info("="*80)
+        logger.info("🔧 AGENT 7: RESPONSE FORMATTER - STARTING")
         """Format the final response for optimal readability"""
         
-        prompt = f"""
-        Format this analytics response for better readability:
-        
-        {analysis}
-        
-        Instructions:
-        1. Ensure proper paragraph breaks
-        2. Use bullet points for lists (use • not *)
-        3. Highlight key metrics naturally in the text
-        4. Keep it conversational and easy to scan
-        5. Remove any redundant formatting
-        6. Ensure numbers are properly formatted
-        
-        Return the formatted response only, no explanations.
-        """
+        format_prompt = f"""Format this analytics response for better readability:
+
+    {analysis}
+
+    Instructions:
+    1. Ensure proper paragraph breaks
+    2. Use bullet points for lists (use • not *)
+    3. Highlight key metrics naturally in the text
+    4. Keep it conversational and easy to scan
+    5. Remove any redundant formatting
+    6. Ensure numbers are properly formatted
+
+    Return the formatted response only, no explanations."""
         
         try:
             response = await self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": format_prompt}],
                 temperature=0.3,
                 max_tokens=1500
             )
             
             formatted = response.choices[0].message.content
-            self._log_agent_step("AGENT 7: RESPONSE FORMATTER", "COMPLETE")
-
+            logger.info(f"\n✅ AGENT 7 RESPONSE FORMATTER : COMPLETE")
             return formatted.strip()
             
         except Exception as e:
             logger.error(f"Error formatting response: {e}")
-            return analysis 
+            return analysis  # Return original if formatting fails
 
     # =================
     # Main Orchestrator
@@ -1381,16 +1390,14 @@ class ChatManager:
             
             if classification['category'] == 'GENERAL':
                 # Handle general chat
-                prompt = f"""
-                You are a friendly marketing analytics assistant. The user asked: "{chat_request.message}"
-                
-                This is a general question (not analytics-related). Respond naturally and helpfully.
-                Keep your response brief and conversational.
-                """
+                general_prompt = f"""You are a friendly marketing analytics assistant. The user asked: "{chat_request.message}"
+
+            This is a general question (not analytics-related). Respond naturally and helpfully.
+            Keep your response brief and conversational."""
                 
                 response = await self.openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[{"role": "user", "content": general_prompt}],
                     temperature=0.7,
                     max_tokens=500
                 )
