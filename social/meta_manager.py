@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 import json
 import time
+from auth.auth_manager import AuthManager
+
 
 logger = logging.getLogger(__name__)
 

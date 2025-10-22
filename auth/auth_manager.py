@@ -541,17 +541,39 @@ class AuthManager:
     
     # And make sure get_facebook_access_token has this exact logic:
     def get_facebook_access_token(self, user_email: str) -> str:
+        """Get Facebook access token for user - handles both email and facebook_id keys"""
         logger.info(f"Looking for Facebook token for: {user_email}")
         logger.info(f"Available sessions: {list(self.facebook_sessions.keys())}")
         
-        if user_email not in self.facebook_sessions:
-            raise HTTPException(status_code=401, detail="Facebook authentication required")
+        # First try direct email lookup
+        if user_email in self.facebook_sessions:
+            access_token = self.facebook_sessions[user_email].get('access_token')
+            if access_token:
+                logger.info(f"✅ Found token via direct email key")
+                return access_token
         
-        access_token = self.facebook_sessions[user_email].get('access_token')
-        if not access_token:
-            raise HTTPException(status_code=401, detail="No Facebook access token available")
+        # If not found by email, search through all sessions
+        for session_key, session_data in self.facebook_sessions.items():
+            # Check if this session belongs to the user
+            session_email = session_data.get('user_email') or session_data.get('email')
+            if session_email == user_email:
+                access_token = session_data.get('access_token')
+                if access_token:
+                    logger.info(f"✅ Found token in session with key: {session_key}")
+                    return access_token
         
-        return access_token
+        # No token found
+        logger.error(f"❌ No Facebook session found for: {user_email}")
+        logger.error(f"Available session keys: {list(self.facebook_sessions.keys())}")
+        
+        # Debug: show what's in the sessions
+        for key, session in self.facebook_sessions.items():
+            logger.error(f"Session {key}: email={session.get('user_email') or session.get('email')}, has_token={bool(session.get('access_token'))}")
+        
+        raise HTTPException(
+            status_code=401, 
+            detail="Facebook authentication required. Please reconnect your Facebook account."
+        )
     
     def get_user_session(self, user_email: str, auth_provider: str = "google") -> Dict[str, Any]:
         """Get user session data"""
