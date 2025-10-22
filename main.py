@@ -1331,20 +1331,43 @@ async def get_campaigns_paginated(
 @save_response("meta_campaigns_all")
 async def get_campaigns_all(
     account_id: str,
-    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
+    period: Optional[str] = Query(None, description="Period: 7d, 30d, 90d, 365d, or custom"),
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD) - required if period=custom"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD) - required if period=custom"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     Get all campaigns with insights for an ad account.
     This endpoint returns ALL campaigns that had activity in the specified period.
+    
+    Args:
+        account_id: Ad account ID (e.g., act_303894480866908)
+        period: Either predefined (7d, 30d, 90d, 365d) or 'custom' for custom date range
+        start_date: Start date in YYYY-MM-DD format (required if period='custom')
+        end_date: End date in YYYY-MM-DD format (required if period='custom')
+    
+    Examples:
+        GET /api/meta/ad-accounts/act_123/campaigns/all?period=30d
+        GET /api/meta/ad-accounts/act_123/campaigns/all?period=custom&start_date=2025-08-01&end_date=2025-10-22
     """
     try:
         from social.meta_manager import MetaManager
         
         logger.info(f"Fetching all campaigns for account: {account_id}")
         logger.info(f"Period: {period}, Start: {start_date}, End: {end_date}")
+        
+        # Validate custom period
+        if period == 'custom':
+            if not start_date or not end_date:
+                raise HTTPException(
+                    status_code=422, 
+                    detail="start_date and end_date are required when period='custom'"
+                )
+        elif period and period not in ['7d', '30d', '90d', '365d', 'custom']:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid period: {period}. Must be one of: 7d, 30d, 90d, 365d, custom"
+            )
         
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
@@ -1357,6 +1380,8 @@ async def get_campaigns_all(
         
         return campaigns
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching all campaigns: {str(e)}")
         logger.exception(e)  # This will print the full stack trace
