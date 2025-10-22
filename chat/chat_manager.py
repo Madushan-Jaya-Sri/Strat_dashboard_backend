@@ -686,24 +686,12 @@ class ChatManager:
         
         self._log_agent_step("AGENT 2: TIME EXTRACTOR", "STARTING", {"message": message[:100]})
         
-        # Check if custom dates are in context first
-        if context.get('custom_dates') and context['custom_dates'].get('startDate') and context['custom_dates'].get('endDate'):
-            logger.info(f"Using custom dates from context: {context['custom_dates']}")
-            return {
-                'has_period': True,
-                'period': 'CUSTOM',
-                'start_date': context['custom_dates']['startDate'],
-                'end_date': context['custom_dates']['endDate'],
-                'needs_clarification': False,
-                'extracted_from': 'context'
-            }
-        
         # Get current date for calculations
         from datetime import datetime, timedelta
         current_date = datetime.now()
         current_date_str = current_date.strftime('%Y-%m-%d')
         
-        # Try to extract time period from the user's message
+        # Try to extract time period from the user's message FIRST
         prompt = f"""Extract time period information from this message and convert to standard formats.
 
     Current date: {current_date_str}
@@ -711,10 +699,10 @@ class ChatManager:
     User Message: "{message}"
 
     IMPORTANT RULES:
-    1. Only extract if the user EXPLICITLY mentions a time period in their message
-    2. If NO time period is mentioned, return has_period: false
-    3. For standard periods (7 days, 30 days, 90 days, 365 days), use predefined format
-    4. For non-standard periods (2 months, 6 months, 2 weeks, etc.), calculate exact dates
+    1. First check if the user EXPLICITLY mentions a time period in their message
+    2. If a specific date range is mentioned (like "2024-12-20 to 2025-01-13"), extract it as CUSTOM
+    3. If standard period mentioned (7 days, 30 days, etc.), use predefined format
+    4. If NO time period is mentioned at all, return has_period: false
 
     Standard periods (use these if mentioned):
     - "last 7 days", "past week" → LAST_7_DAYS
@@ -722,33 +710,35 @@ class ChatManager:
     - "last 3 months", "last quarter", "last 90 days" → LAST_90_DAYS
     - "last year", "last 12 months", "last 365 days" → LAST_365_DAYS
 
-    Non-standard periods (calculate dates):
-    - "last 2 months" → Calculate 60 days back: start_date, end_date
-    - "last 6 months" → Calculate 180 days back: start_date, end_date
-    - "last 2 weeks" → Calculate 14 days back: start_date, end_date
-    - Specific dates like "from Jan 1 to Jan 31" → Convert to YYYY-MM-DD
+    Custom date ranges (extract dates):
+    - "from 2024-12-20 to 2025-01-13" → period: CUSTOM, start_date: 2024-12-20, end_date: 2025-01-13
+    - "between Jan 1 and Jan 31" → Convert to YYYY-MM-DD format
+    - "last 2 months" → Calculate dates: period: CUSTOM, start_date, end_date
+    - "December 2024" → period: CUSTOM, start_date: 2024-12-01, end_date: 2024-12-31
 
     Examples:
     Input: "What is my performance?"
     Output: {{"has_period": false, "reason": "No time period mentioned"}}
 
     Input: "Show me last 7 days"
-    Output: {{"has_period": true, "period": "LAST_7_DAYS"}}
+    Output: {{"has_period": true, "period": "LAST_7_DAYS", "extracted_from": "message"}}
 
-    Input: "I want data for last 2 months"
+    Input: "Performance from 2024-12-20 to 2025-01-13"
     Output: {{
     "has_period": true, 
     "period": "CUSTOM",
-    "start_date": "2024-08-21",  (60 days before current_date)
-    "end_date": "{current_date_str}"
+    "start_date": "2024-12-20",
+    "end_date": "2025-01-13",
+    "extracted_from": "message"
     }}
 
-    Input: "Performance in December 2024"
+    Input: "Give me data for last 2 months"
     Output: {{
-    "has_period": true,
-    "period": "CUSTOM", 
-    "start_date": "2024-12-01",
-    "end_date": "2024-12-31"
+    "has_period": true, 
+    "period": "CUSTOM",
+    "start_date": "{(current_date - timedelta(days=60)).strftime('%Y-%m-%d')}",
+    "end_date": "{current_date_str}",
+    "extracted_from": "message"
     }}
 
     Respond in JSON format:
@@ -759,6 +749,7 @@ class ChatManager:
         "end_date": "YYYY-MM-DD" or null,
         "extracted_text": "the time phrase found" or null,
         "needs_clarification": false,
+        "extracted_from": "message",
         "reason": "brief explanation"
     }}"""
 
@@ -772,16 +763,29 @@ class ChatManager:
             
             result = json.loads(response.choices[0].message.content)
             
-            # If period found in message, use it (override context)
+            # PRIORITY 1: If period found IN MESSAGE, use it (this overrides everything)
             if result.get('has_period') and result.get('extracted_text'):
-                logger.info(f"✅ Time period extracted from message: {result}")
+                logger.info(f"✅ Time period extracted FROM MESSAGE: {result}")
                 result['extracted_from'] = 'message'
                 self._log_agent_step("AGENT 2: TIME EXTRACTOR", "COMPLETE", result)
                 return result
             
-            # If no period found in message, check context
+            # PRIORITY 2: Check if custom dates are in context (from filter only when period is CUSTOM)
+            if context.get('custom_dates') and context['custom_dates'].get('startDate') and context['custom_dates'].get('endDate'):
+                logger.info(f"⚙️ No period in message, using custom dates from FILTER: {context['custom_dates']}")
+                return {
+                    'has_period': True,
+                    'period': 'CUSTOM',
+                    'start_date': context['custom_dates']['startDate'],
+                    'end_date': context['custom_dates']['endDate'],
+                    'needs_clarification': False,
+                    'extracted_from': 'context_custom_dates',
+                    'reason': 'Using custom date range from module filter'
+                }
+            
+            # PRIORITY 3: If no period in message, check context for standard period
             if context.get('period') and context['period'] != 'CUSTOM':
-                logger.info(f"⚙️ No time period in message, using period from filter: {context['period']}")
+                logger.info(f"⚙️ No time period in message, using period from FILTER: {context['period']}")
                 return {
                     'has_period': True,
                     'period': context['period'],
@@ -792,7 +796,7 @@ class ChatManager:
                     'reason': 'Using module filter period as no period mentioned in message'
                 }
             
-            # Default to LAST_7_DAYS if nothing found
+            # PRIORITY 4: Default to LAST_7_DAYS if nothing found
             logger.info("⚙️ No period found anywhere, using LAST_7_DAYS as default")
             result = {
                 'has_period': True,
@@ -810,6 +814,15 @@ class ChatManager:
         except Exception as e:
             logger.error(f"❌ Error extracting time period: {e}")
             # Use context period on error, not default
+            if context.get('custom_dates') and context['custom_dates'].get('startDate') and context['custom_dates'].get('endDate'):
+                return {
+                    'has_period': True,
+                    'period': 'CUSTOM',
+                    'start_date': context['custom_dates']['startDate'],
+                    'end_date': context['custom_dates']['endDate'],
+                    'needs_clarification': False,
+                    'extracted_from': 'error_fallback_custom'
+                }
             if context.get('period'):
                 return {
                     'has_period': True,
@@ -825,6 +838,7 @@ class ChatManager:
                 'needs_clarification': False,
                 'extracted_from': 'error_fallback_default'
             }
+
     # AGENT 3: Account Identifier
     # =================
     async def agent_identify_account(
