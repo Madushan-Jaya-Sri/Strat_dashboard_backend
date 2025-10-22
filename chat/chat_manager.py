@@ -1184,7 +1184,7 @@ class ChatManager:
             return {"error": "Authentication token missing"}
         
         # Check for slow endpoints that need special handling
-        slow_endpoints = ['get_meta_campaigns_list', 'get_campaigns_list']
+        slow_endpoints = ['get_meta_campaigns_all','get_meta_campaigns_list', 'get_campaigns_list']
         has_slow_endpoint = any(e['name'] in slow_endpoints for e in endpoints)
         
         if has_slow_endpoint and status_callback:

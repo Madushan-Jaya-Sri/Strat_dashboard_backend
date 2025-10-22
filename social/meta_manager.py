@@ -713,6 +713,43 @@ class MetaManager:
             logger.error(f"Error fetching paginated campaigns: {e}")
             raise
 
+    def get_campaigns_all(
+        self, 
+        account_id: str, 
+        period: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get all campaigns with insights (no pagination).
+        This internally uses get_campaigns_paginated but fetches all results.
+        """
+        try:
+            all_campaigns = []
+            offset = 0
+            limit = 5000  # Fetch in batches of 50
+            
+            while True:
+                result = self.get_campaigns_paginated(
+                    account_id, period, start_date, end_date, limit, offset
+                )
+                
+                campaigns = result.get('campaigns', [])
+                all_campaigns.extend(campaigns)
+                
+                # Check if we've fetched all campaigns
+                total_count = result.get('total_count', 0)
+                if offset + limit >= total_count:
+                    break
+                    
+                offset += limit
+            
+            return all_campaigns
+            
+        except Exception as e:
+            logger.error(f"Error fetching all campaigns: {e}")
+            raise
+    
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
                                     start_date: str = None, end_date: str = None,
                                     max_workers: int = 2) -> Dict:

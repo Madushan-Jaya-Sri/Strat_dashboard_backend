@@ -11,6 +11,52 @@ from typing import Union
 # AD ACCOUNTS
 # =============================================================================
 
+
+class CampaignWithInsights(BaseModel):
+    """Campaign information with performance insights"""
+    
+    # Campaign Basic Info
+    id: str = Field(..., description="Campaign ID")
+    name: str = Field(..., description="Campaign name")
+    status: str = Field(..., description="Campaign status (ACTIVE, PAUSED, ARCHIVED)")
+    objective: Optional[str] = Field(None, description="Campaign objective")
+    
+    # Performance Metrics
+    impressions: Optional[int] = Field(0, description="Total impressions")
+    clicks: Optional[int] = Field(0, description="Total clicks")
+    spend: Optional[float] = Field(0.0, description="Total spend")
+    reach: Optional[int] = Field(0, description="Unique reach")
+    frequency: Optional[float] = Field(0.0, description="Average frequency")
+    
+    # Conversion Metrics
+    conversions: Optional[int] = Field(0, description="Total conversions")
+    purchase_value: Optional[float] = Field(0.0, description="Purchase conversion value")
+    purchases: Optional[int] = Field(0, description="Number of purchases")
+    
+    # Calculated Metrics
+    ctr: Optional[float] = Field(0.0, description="Click-through rate")
+    cpc: Optional[float] = Field(0.0, description="Cost per click")
+    cpm: Optional[float] = Field(0.0, description="Cost per mille (thousand impressions)")
+    cpp: Optional[float] = Field(0.0, description="Cost per purchase")
+    roas: Optional[float] = Field(0.0, description="Return on ad spend")
+    
+    # Engagement Metrics
+    post_engagements: Optional[int] = Field(0, description="Total post engagements")
+    link_clicks: Optional[int] = Field(0, description="Link clicks")
+    video_views: Optional[int] = Field(0, description="Video views")
+    
+    # Budget & Dates
+    daily_budget: Optional[float] = Field(None, description="Daily budget")
+    lifetime_budget: Optional[float] = Field(None, description="Lifetime budget")
+    start_time: Optional[datetime] = Field(None, description="Campaign start time")
+    stop_time: Optional[datetime] = Field(None, description="Campaign stop time")
+    
+    # Additional Info
+    account_id: Optional[str] = Field(None, description="Ad account ID")
+    created_time: Optional[datetime] = Field(None, description="Campaign creation time")
+    updated_time: Optional[datetime] = Field(None, description="Last update time")
+    
+    
 class MetaAdAccount(BaseModel):
     id: str
     account_id: str
