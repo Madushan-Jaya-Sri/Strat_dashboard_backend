@@ -28,6 +28,8 @@ from models.response_models import AdKeyStats
 from models.response_models import EnhancedAdCampaign, FunnelRequest
 from utils.charts_helper import ChartsDataTransformer
 from database.mongo_manager import MongoManager
+from models.meta_response_models import CampaignWithInsights
+
 
 
 from models.meta_response_models import (
@@ -1325,8 +1327,7 @@ async def get_campaigns_paginated(
         logger.error(f"Error fetching paginated campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-# New endpoint: Get all campaigns with insights (combines list + paginated logic)
-@app.get("/api/meta/ad-accounts/{account_id}/campaigns/all", response_model=List[CampaignWithInsights])
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/all")
 @save_response("meta_campaigns_all")
 async def get_campaigns_all(
     account_id: str,
@@ -1338,25 +1339,27 @@ async def get_campaigns_all(
     """
     Get all campaigns with insights for an ad account.
     This endpoint returns ALL campaigns that had activity in the specified period.
-    
-    Args:
-        account_id: Ad account ID (e.g., act_303894480866908)
-        period: Time period (7d, 30d, 90d, 365d)
-        start_date: Start date (YYYY-MM-DD) for custom range
-        end_date: End date (YYYY-MM-DD) for custom range
     """
     try:
         from social.meta_manager import MetaManager
+        
+        logger.info(f"Fetching all campaigns for account: {account_id}")
+        logger.info(f"Period: {period}, Start: {start_date}, End: {end_date}")
+        
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
-        # Get all campaigns with insights (no pagination limit)
-        result = meta_manager.get_campaigns_all(
+        # Get all campaigns with insights
+        campaigns = meta_manager.get_campaigns_all(
             account_id, period, start_date, end_date
         )
         
-        return result
+        logger.info(f"Successfully retrieved {len(campaigns)} campaigns")
+        
+        return campaigns
+        
     except Exception as e:
-        logger.error(f"Error fetching all campaigns: {e}")
+        logger.error(f"Error fetching all campaigns: {str(e)}")
+        logger.exception(e)  # This will print the full stack trace
         raise HTTPException(status_code=500, detail=str(e))
 
 # 2. Get campaigns list (no insights, very fast)

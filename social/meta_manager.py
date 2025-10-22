@@ -725,11 +725,28 @@ class MetaManager:
         This internally uses get_campaigns_paginated but fetches all results.
         """
         try:
+            logger.info(f"🔍 Getting all campaigns for account: {account_id}")
+            
             all_campaigns = []
             offset = 0
-            limit = 5000  # Fetch in batches of 50
+            limit = 50  # Fetch in batches of 50
             
-            while True:
+            # First call to get total count
+            first_result = self.get_campaigns_paginated(
+                account_id, period, start_date, end_date, limit, offset
+            )
+            
+            campaigns = first_result.get('campaigns', [])
+            all_campaigns.extend(campaigns)
+            
+            total_count = first_result.get('total_count', 0)
+            logger.info(f"📊 Total campaigns to fetch: {total_count}")
+            
+            # Fetch remaining campaigns if there are more
+            while offset + limit < total_count:
+                offset += limit
+                logger.info(f"📦 Fetching campaigns batch: offset={offset}, limit={limit}")
+                
                 result = self.get_campaigns_paginated(
                     account_id, period, start_date, end_date, limit, offset
                 )
@@ -737,17 +754,14 @@ class MetaManager:
                 campaigns = result.get('campaigns', [])
                 all_campaigns.extend(campaigns)
                 
-                # Check if we've fetched all campaigns
-                total_count = result.get('total_count', 0)
-                if offset + limit >= total_count:
-                    break
-                    
-                offset += limit
+                logger.info(f"✅ Fetched {len(campaigns)} campaigns (Total so far: {len(all_campaigns)})")
             
+            logger.info(f"✨ Successfully fetched all {len(all_campaigns)} campaigns")
             return all_campaigns
             
         except Exception as e:
-            logger.error(f"Error fetching all campaigns: {e}")
+            logger.error(f"❌ Error fetching all campaigns: {str(e)}")
+            logger.exception(e)
             raise
     
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
