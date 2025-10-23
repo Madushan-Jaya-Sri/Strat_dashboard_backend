@@ -1361,8 +1361,15 @@ class ChatManager:
                     logger.info(f"📦 Body params: {body_params}")
                 
                 # Make API call with extended timeout for slow endpoints
-                timeout = 120 if endpoint_name in slow_endpoints else 30
-                
+                timeout = 300 if endpoint_name in slow_endpoints else 30
+                                
+                # Send progress update for slow endpoints BEFORE making the call
+                if endpoint_name in slow_endpoints and status_callback:
+                    await status_callback(
+                        "Fetching comprehensive campaign data",
+                        "This will take 2-5 minutes as we're carefully retrieving all campaigns to avoid API rate limits. Please don't close this window."
+                    )
+
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
                     headers = {
                         'Authorization': f'Bearer {token}',

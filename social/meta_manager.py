@@ -714,7 +714,7 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching paginated campaigns: {e}")
             raise
-
+        
     def get_campaigns_all(
         self, 
         account_id: str, 
@@ -741,15 +741,24 @@ class MetaManager:
             campaigns = first_result.get('campaigns', [])
             all_campaigns.extend(campaigns)
             
-            # ✅ FIX: Get total from pagination.total, not total_count
+            # Get total from pagination.total, not total_count
             pagination = first_result.get('pagination', {})
             total_count = pagination.get('total', 0)
+            
+            # ✅ ADD: Better progress message
+            estimated_time = (total_count / 50) * 30  # ~30 seconds per batch of 50
             logger.info(f"📊 Total campaigns to fetch: {total_count}")
+            logger.info(f"⏱️ Estimated time: {estimated_time:.0f} seconds (~{estimated_time/60:.1f} minutes)")
+            logger.info(f"🚦 Processing carefully to respect Facebook API rate limits...")
             
             # Fetch remaining campaigns if there are more
+            batch_number = 1
             while offset + limit < total_count:
                 offset += limit
-                logger.info(f"📦 Fetching campaigns batch: offset={offset}, limit={limit}")
+                batch_number += 1
+                progress_percent = (len(all_campaigns) / total_count) * 100
+                
+                logger.info(f"📦 Fetching batch {batch_number}/{(total_count + limit - 1) // limit}: offset={offset}, limit={limit} ({progress_percent:.1f}% complete)")
                 
                 result = self.get_campaigns_paginated(
                     account_id, period, start_date, end_date, limit, offset
@@ -758,7 +767,7 @@ class MetaManager:
                 campaigns = result.get('campaigns', [])
                 all_campaigns.extend(campaigns)
                 
-                logger.info(f"✅ Fetched {len(campaigns)} campaigns (Total so far: {len(all_campaigns)})")
+                logger.info(f"✅ Fetched {len(campaigns)} campaigns (Total: {len(all_campaigns)}/{total_count})")
             
             logger.info(f"✨ Successfully fetched all {len(all_campaigns)} campaigns")
             return all_campaigns
@@ -767,7 +776,7 @@ class MetaManager:
             logger.error(f"❌ Error fetching all campaigns: {str(e)}")
             logger.exception(e)
             raise
-
+        
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
                                     start_date: str = None, end_date: str = None,
                                     max_workers: int = 2) -> Dict:
