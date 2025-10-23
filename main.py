@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uvicorn
 import requests
+import time
 import json
 import logging
 import asyncio
@@ -1384,6 +1385,7 @@ async def get_campaigns_all(
         logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
     
+# Find line 1396 and replace the function with this corrected version:
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/chat")
 async def get_campaigns_for_chat(
     account_id: str,
@@ -1397,6 +1399,9 @@ async def get_campaigns_for_chat(
         from social.meta_manager import MetaManager
         
         logger.info(f"[CHAT] Fetching campaigns list for chat: {account_id}")
+        
+        # Add this line - initialize start_time
+        start_time = time.time()
         
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
@@ -1435,7 +1440,6 @@ async def get_campaigns_for_chat(
     except Exception as e:
         logger.error(f"[CHAT] Error fetching campaigns: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 # 2. Get campaigns list (no insights, very fast)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
 @save_response("meta_campaigns_list")
