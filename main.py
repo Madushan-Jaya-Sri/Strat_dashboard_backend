@@ -1327,6 +1327,9 @@ async def get_campaigns_paginated(
         logger.error(f"Error fetching paginated campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
+from fastapi.responses import StreamingResponse
+import asyncio
+
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/all")
 @save_response("meta_campaigns_all")
 async def get_campaigns_all(
@@ -1338,17 +1341,7 @@ async def get_campaigns_all(
 ):
     """
     Get all campaigns with insights for an ad account.
-    This endpoint returns ALL campaigns that had activity in the specified period.
-    
-    Args:
-        account_id: Ad account ID (e.g., act_303894480866908)
-        period: Either predefined (7d, 30d, 90d, 365d) or 'custom' for custom date range
-        start_date: Start date in YYYY-MM-DD format (required if period='custom')
-        end_date: End date in YYYY-MM-DD format (required if period='custom')
-    
-    Examples:
-        GET /api/meta/ad-accounts/act_123/campaigns/all?period=30d
-        GET /api/meta/ad-accounts/act_123/campaigns/all?period=custom&start_date=2025-08-01&end_date=2025-10-22
+    Uses streaming to prevent gateway timeouts for large datasets.
     """
     try:
         from social.meta_manager import MetaManager
@@ -1371,10 +1364,14 @@ async def get_campaigns_all(
         
         meta_manager = MetaManager(current_user["email"], auth_manager)
         
-        # Get all campaigns with insights
-        campaigns = meta_manager.get_campaigns_all(
-            account_id, period, start_date, end_date
-        )
+        # ✅ Run in executor to prevent blocking
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            campaigns = await asyncio.get_event_loop().run_in_executor(
+                executor,
+                meta_manager.get_campaigns_all,
+                account_id, period, start_date, end_date
+            )
         
         logger.info(f"Successfully retrieved {len(campaigns)} campaigns")
         
@@ -1384,9 +1381,10 @@ async def get_campaigns_all(
         raise
     except Exception as e:
         logger.error(f"Error fetching all campaigns: {str(e)}")
-        logger.exception(e)  # This will print the full stack trace
+        logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
-
+    
+    
 # 2. Get campaigns list (no insights, very fast)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
 @save_response("meta_campaigns_list")

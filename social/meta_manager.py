@@ -25,7 +25,7 @@ class MetaManager:
 
       
     # Rate limiting configuration
-    RATE_LIMIT_DELAY = 0.2  # 200ms delay between requests
+    RATE_LIMIT_DELAY = 0.4  # 200ms delay between requests
     MAX_RETRIES = 3
     RETRY_DELAY = 2  # Initial retry delay in seconds
     
@@ -660,7 +660,8 @@ class MetaManager:
                 }
                 
                 try:
-                    time.sleep(self.RATE_LIMIT_DELAY)
+                    # ✅ INCREASED delay to avoid rate limits
+                    time.sleep(self.RATE_LIMIT_DELAY * 2)  # Double the delay (was 0.2s, now 0.4s)
                     
                     insights = self._rate_limited_request(f"{campaign_id}/insights", {
                         'time_range': json.dumps({"since": since, "until": until}),
@@ -693,8 +694,15 @@ class MetaManager:
                         })
                         
                 except Exception as e:
-                    logger.warning(f"Error fetching insights for campaign {campaign_id}: {e}")
-                
+                    # ✅ Handle rate limit errors with exponential backoff
+                    error_str = str(e)
+                    if 'Application request limit reached' in error_str or 'error_subcode": 1504022' in error_str:
+                        logger.warning(f"⚠️ Rate limit hit for campaign {campaign_id}, waiting 5 seconds...")
+                        time.sleep(5)  # Wait longer when rate limited
+                        # Don't mark as error, just continue without data
+                    else:
+                        logger.warning(f"Error fetching insights for campaign {campaign_id}: {e}")
+                        
                 campaigns_data.append(campaign_result)
             
             has_more = (offset + limit) < total_campaigns
@@ -714,7 +722,7 @@ class MetaManager:
         except Exception as e:
             logger.error(f"Error fetching paginated campaigns: {e}")
             raise
-        
+
     def get_campaigns_all(
         self, 
         account_id: str, 
