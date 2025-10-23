@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
+    account_id: Optional[str] = None 
     period: Optional[str] = None  # ✅ Make sure this exists
     context: Optional[Dict[str, Any]] = {}
 

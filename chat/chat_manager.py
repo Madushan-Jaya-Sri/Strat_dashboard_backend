@@ -104,7 +104,7 @@ class ChatManager:
                 {'name': 'get_meta_instagram_media_timeseries', 'path': '/api/meta/instagram/{account_id}/media/timeseries', 'params': ['account_id', 'limit', 'period', 'start_date', 'end_date']},
             ],
             'intent_insights': [
-                {'name': 'get_keyword_insights', 'path': '/api/intent/keyword-insights/{customer_id}', 'params': ['customer_id', 'seed_keywords', 'country', 'timeframe', 'start_date', 'end_date']},
+                {'name': 'get_intent_keyword_insights', 'path': '/api/intent/keyword-insights/{account_id}', 'method': 'POST', 'params': ['account_id'], 'body_params': ['seed_keywords', 'country', 'timeframe', 'start_date', 'end_date', 'include_zero_volume'], 'description': 'Get keyword insights and suggestions'},
             ],
             'other': [
                 {'name': 'get_meta_overview', 'path': '/api/meta/overview', 'params': ['period', 'start_date', 'end_date']},
@@ -864,6 +864,7 @@ class ChatManager:
                 'extracted_from': 'error_fallback_default'
             }
 
+    # =================
     # AGENT 3: Account Identifier
     # =================
     async def agent_identify_account(
@@ -872,7 +873,6 @@ class ChatManager:
         module_type: ModuleType, 
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-
         """Identify which account the user is referring to"""
         
         logger.info("\n" + "="*80)
@@ -882,29 +882,64 @@ class ChatManager:
         
         # Get account ID from context based on module type
         account_id = None
+        
         if module_type == ModuleType.GOOGLE_ADS:
             account_id = context.get('customer_id')
             logger.info(f"Google Ads - customer_id: {account_id}")
+        
         elif module_type == ModuleType.GOOGLE_ANALYTICS:
             account_id = context.get('property_id')
             logger.info(f"Google Analytics - property_id: {account_id}")
+        
         elif module_type == ModuleType.META_ADS:
             account_id = context.get('account_id')
             logger.info(f"Meta Ads - account_id: {account_id}")
+        
         elif module_type == ModuleType.FACEBOOK_ANALYTICS:
             account_id = context.get('page_id')
             logger.info(f"Facebook - page_id: {account_id}")
+        
         elif module_type == ModuleType.INSTAGRAM_ANALYTICS:
             account_id = context.get('account_id')
             logger.info(f"Instagram - account_id: {account_id}")
-        elif module_type == ModuleType.INTENT_INSIGHTS:
-            account_id = context.get('account_id')
-            logger.info(f"Intent Insights - account_id: {account_id}")
         
+        elif module_type == ModuleType.INTENT_INSIGHTS:
+            # ✅ For Intent Insights, check multiple possible keys
+            account_id = context.get('account_id') or context.get('selectedAccount')
+            
+            logger.info(f"Intent Insights - account_id from context: {account_id}")
+            
+            if account_id:
+                # User has an active account selected
+                result = {
+                    'has_specific_reference': False,
+                    'reference_type': 'active_account',
+                    'account_id': str(account_id),
+                    'use_active_account': True,
+                    'needs_account_list': False
+                }
+                logger.info(f"✅ AGENT 3 COMPLETE: {result}")
+                logger.info("="*80 + "\n")
+                return result
+            else:
+                # No account in context
+                result = {
+                    'has_specific_reference': False,
+                    'reference_type': 'none',
+                    'account_id': None,
+                    'use_active_account': False,
+                    'needs_account_list': False,
+                    'clarification_message': 'Please select an account from the Intent Insights module to continue.'
+                }
+                logger.info(f"⚠️ AGENT 3 COMPLETE (No account): {result}")
+                logger.info("="*80 + "\n")
+                return result
+        
+        # ✅ Build result for other modules
         result = {
             'has_specific_reference': bool(account_id),
             'reference_type': 'context' if account_id else 'none',
-            'account_id': account_id,
+            'account_id': str(account_id) if account_id else None,  # ✅ Convert to string
             'use_active_account': bool(account_id),
             'needs_account_list': not bool(account_id)
         }
@@ -914,14 +949,11 @@ class ChatManager:
         
         logger.info(f"✅ AGENT 3 COMPLETE: {result}")
         logger.info("="*80 + "\n")
-        self._log_agent_step("AGENT 3: ACCOUNT IDENTIFIER AGENT", "COMPLETE", result)
-
         
         return result
 
-
     # =================
-    # AGENT 4: Endpoint Selector (THE PROBLEMATIC ONE)
+    # AGENT 4: Endpoint Selector
     # =================
     async def agent_select_endpoints(
         self, 
@@ -929,20 +961,20 @@ class ChatManager:
         module_type: ModuleType, 
         account_info: Dict[str, Any],
         conversation_history: List[Dict[str, str]] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
+        """Select relevant endpoints based on the query"""
         
         logger.info("\n" + "="*80)
         logger.info("🔍 AGENT 4: ENDPOINT SELECTOR - STARTING")
         logger.info(f"Module: {module_type.value}")
-
-        """Select relevant endpoints based on the query"""
+        logger.info(f"Message: {message}")
         
         available_endpoints = self.endpoint_registry.get(module_type.value, [])
         
-        # Build conversation context OUTSIDE f-string
+        # Build conversation context
         history_context = ""
         if conversation_history:
-            recent_history = conversation_history[-4:]  # Last 2 exchanges
+            recent_history = conversation_history[-4:]
             history_lines = []
             for msg in recent_history:
                 role = msg['role'].upper()
@@ -950,7 +982,112 @@ class ChatManager:
                 history_lines.append(f"{role}: {content}")
             history_context = "\n".join(history_lines)
         
-        # Prepare endpoints info OUTSIDE f-string
+        # ============================================
+        # SPECIAL HANDLING FOR INTENT INSIGHTS MODULE
+        # ============================================
+        if module_type.value == 'intent_insights':
+            logger.info("🔍 Processing Intent Insights module")
+            
+            # Intent Insights prompt
+            prompt = f"""You are an Intent Insights endpoint selector for keyword research.
+
+    Available endpoint:
+    - intent_keyword_insights: Get keyword suggestions, search volume, competition data, and trends
+
+    Current Query: "{message}"
+    Account ID: {account_info.get('account_id')}
+
+    **Your Task:**
+    1. Extract seed keywords from the user's question
+    2. Identify the industry/niche they're researching
+    3. Determine if they specified a country/region (default: "World Wide")
+
+    **Keyword Extraction Rules:**
+    - Look for industry terms (e.g., "cosmetics", "beauty", "makeup", "skincare")
+    - Extract product categories mentioned
+    - If user asks "trending keywords in X", use X as seed keyword
+    - If no specific keywords found, set needs_clarification to true
+
+    **Examples:**
+    - "trending keywords in cosmetics" → ["cosmetics"]
+    - "beauty products keywords" → ["beauty products"]
+    - "high volume keywords for makeup industry" → ["makeup"]
+    - "keyword ideas for skincare" → ["skincare"]
+
+    Return JSON:
+    {{
+        "selected_endpoints": ["intent_keyword_insights"],
+        "extracted_keywords": ["keyword1", "keyword2"],
+        "country": "World Wide",
+        "reasoning": "Extracted keywords from industry mentioned",
+        "needs_clarification": false,
+        "clarification_message": ""
+    }}
+
+    If NO keywords can be extracted:
+    {{
+        "selected_endpoints": [],
+        "extracted_keywords": [],
+        "country": "World Wide",
+        "reasoning": "No keywords identified",
+        "needs_clarification": true,
+        "clarification_message": "Please specify the industry or keywords you want to research (e.g., 'cosmetics', 'beauty products', 'skincare')."
+    }}
+    """
+            
+            try:
+                response = await self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    response_format={"type": "json_object"}
+                )
+                
+                result = json.loads(response.choices[0].message.content)
+                
+                logger.info(f"Intent Insights extraction result: {json.dumps(result, indent=2)}")
+                
+                # Check if we need clarification
+                if result.get('needs_clarification', False) or not result.get('extracted_keywords'):
+                    logger.info("⚠️ Needs clarification for keywords")
+                    return {
+                        'selected_endpoints': [],
+                        'endpoint_configs': [],
+                        'extracted_keywords': [],
+                        'country': 'World Wide',
+                        'needs_clarification': True,
+                        'clarification_message': result.get('clarification_message', 
+                            'Please specify the keywords or industry you want to research.'),
+                        'reasoning': result.get('reasoning', 'No keywords found')
+                    }
+                
+                # Return successful result with keywords
+                endpoint_config = next((e for e in available_endpoints if e['name'] == 'intent_keyword_insights'), None)
+                
+                return {
+                    'selected_endpoints': ['intent_keyword_insights'],
+                    'endpoint_configs': [endpoint_config] if endpoint_config else [],
+                    'extracted_keywords': result.get('extracted_keywords', []),
+                    'country': result.get('country', 'World Wide'),
+                    'needs_clarification': False,
+                    'reasoning': result.get('reasoning', 'Keywords extracted successfully')
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Error in Intent Insights endpoint selection: {str(e)}")
+                return {
+                    'selected_endpoints': [],
+                    'endpoint_configs': [],
+                    'needs_clarification': True,
+                    'clarification_message': 'An error occurred. Please try again.',
+                    'reasoning': f'Error: {str(e)}'
+                }
+        
+        # ============================================
+        # STANDARD HANDLING FOR OTHER MODULES
+        # ============================================
+        
+        # Prepare endpoints info
         endpoints_info = []
         for e in available_endpoints:
             endpoints_info.append({
@@ -975,53 +1112,71 @@ class ChatManager:
 
     Rules:
     1. Select MINIMUM endpoints needed to answer the question
-    2. For overview questions, select all the key metrics endpoints required
-    3. For specific questions, select all targeted endpoints
+    2. For overview questions, select key metrics endpoints
+    3. For specific questions, select targeted endpoints
     4. Consider follow-up context - don't repeat data already provided
     5. For comparison questions, select endpoints that provide comparative data
-    6. AVOID selecting the 'get_meta_ad_accounts/campaigns/list' endpoint unless specifically asked for ALL campaigns
+    6. META ADS SPECIAL RULES:
+    - Use 'get_meta_campaigns_chat' for listing campaigns (FAST)
+    - ONLY use 'get_meta_campaigns_all' if user explicitly asks for performance metrics (SLOW, 2+ min)
+    - Never select 'get_meta_campaigns_all' for simple list/overview questions
 
-    Respond with JSON array:
+    Respond with JSON:
     {{
-        "endpoints": ["endpoint_name1", "endpoint_name2"],
+        "selected_endpoints": ["endpoint_name1", "endpoint_name2"],
         "reasoning": "brief explanation",
         "is_followup": true/false
     }}"""
 
         try:
             response = await self.openai_client.chat.completions.create(
-                model="gpt-4-turbo-preview",  # ✅ FIXED - Changed from "gpt-4"
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                response_format={"type": "json_object"}  # ✅ Now this works
+                response_format={"type": "json_object"}
             )
             
             result = json.loads(response.choices[0].message.content)
-            selected = []
+            selected_configs = []
             
-            for endpoint_name in result.get('endpoints', []):
+            for endpoint_name in result.get('selected_endpoints', []):
                 endpoint = next((e for e in available_endpoints if e['name'] == endpoint_name), None)
                 if endpoint:
-                    selected.append(endpoint)
+                    selected_configs.append(endpoint)
             
-            logger.info(f"Selected {len(selected)} endpoints: {[e['name'] for e in selected]}")
+            logger.info(f"✅ Selected {len(selected_configs)} endpoints: {[e['name'] for e in selected_configs]}")
             logger.info(f"Reasoning: {result.get('reasoning')}")
             
             # Fallback to default endpoints if none selected
-            if not selected:
-                selected = self._get_default_endpoints(module_type, available_endpoints)
-
-            logger.info(f"✅ AGENT 4 COMPLETE: {selected}")
+            if not selected_configs:
+                logger.warning("⚠️ No endpoints selected, using defaults")
+                selected_configs = self._get_default_endpoints(module_type, available_endpoints)
+            
+            logger.info(f"✅ AGENT 4 COMPLETE")
             logger.info("="*80 + "\n")
-            return selected
+            
+            return {
+                'selected_endpoints': [e['name'] for e in selected_configs],
+                'endpoint_configs': selected_configs,
+                'reasoning': result.get('reasoning', ''),
+                'is_followup': result.get('is_followup', False),
+                'needs_clarification': False
+            }
             
         except Exception as e:
-            logger.error(f"Error selecting endpoints: {e}")
-            return self._get_default_endpoints(module_type, available_endpoints)
+            logger.error(f"❌ Error selecting endpoints: {str(e)}")
+            default_configs = self._get_default_endpoints(module_type, available_endpoints)
+            return {
+                'selected_endpoints': [e['name'] for e in default_configs],
+                'endpoint_configs': default_configs,
+                'reasoning': f'Error occurred, using defaults: {str(e)}',
+                'needs_clarification': False
+            }
+
 
     def _get_endpoint_description(self, endpoint_name: str) -> str:
         """Get human-readable description of endpoint"""
-
+        
         descriptions = {
             # ---------------- GOOGLE ADS ----------------
             'google_ads_customers': 'List of linked Google Ads customer accounts.',
@@ -1063,9 +1218,9 @@ class ChatManager:
             'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
 
             # ---------------- META ADS ----------------
-            'get_meta_campaigns_chat' : 'FAST: Get list of ALL campaigns (name, status, ID) for overview questions. Use this for "show campaigns", "list campaigns", "active campaigns"',
-            'get_meta_campaigns_all' : 'SLOW (2+ min): Get ALL campaigns WITH performance metrics. Only use if user explicitly asks for metrics/performance data',
-            'get_meta_campaigns_timeseries' : 'Get campaign performance over time (needs campaign_ids)',
+            'get_meta_campaigns_chat': 'FAST: Get list of ALL campaigns (name, status, ID) for overview questions. Use this for "show campaigns", "list campaigns", "active campaigns"',
+            'get_meta_campaigns_all': 'SLOW (2+ min): Get ALL campaigns WITH performance metrics. Only use if user explicitly asks for metrics/performance data',
+            'get_meta_campaigns_timeseries': 'Get campaign performance over time (needs campaign_ids)',
             'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
             'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
             'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
@@ -1104,7 +1259,7 @@ class ChatManager:
             'instagram_media_timeseries': 'Time-based trends of Instagram media performance.',
 
             # ---------------- INTENT INSIGHTS ----------------
-            'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, and competition trends across markets.',
+            'intent_keyword_insights': 'Search keyword insights showing search volume, CPC, competition trends, and keyword suggestions for market research.',
 
             # ---------------- CHAT & MISC ----------------
             'chat_sessions': 'Stored chat sessions and conversations for AI-driven analytics or support.',
@@ -1113,21 +1268,22 @@ class ChatManager:
             'combined_metrics': 'Combined data metrics integrating multiple ad and analytics platforms.',
             'revenue_analysis': 'Comprehensive revenue analysis across campaigns, channels, and platforms.',
         }
-
+        
         return descriptions.get(endpoint_name, 'Data endpoint')
+
 
     def _get_default_endpoints(self, module_type: ModuleType, available_endpoints: List[Dict]) -> List[Dict]:
         """Get default endpoints when selection fails"""
         defaults = {
-            ModuleType.GOOGLE_ADS: ['get_ads_key_stats'],
-            ModuleType.GOOGLE_ANALYTICS: ['get_ga_metrics'],
-            ModuleType.META_ADS: ['get_meta_account_insights'],
-            ModuleType.FACEBOOK_ANALYTICS: ['get_facebook_page_insights'],
+            ModuleType.GOOGLE_ADS: ['google_ads_key_stats'],
+            ModuleType.GOOGLE_ANALYTICS: ['google_analytics_metrics'],
+            ModuleType.META_ADS: ['meta_account_insights'],
+            ModuleType.FACEBOOK_ANALYTICS: ['facebook_page_insights'],
+            ModuleType.INTENT_INSIGHTS: ['intent_keyword_insights'],
         }
         
         default_names = defaults.get(module_type, [])
         return [e for e in available_endpoints if e['name'] in default_names]
-
 
     def _convert_period_for_module(self, period: str, module_type: ModuleType, start_date: str = None, end_date: str = None) -> Tuple[str, str, str]:
         """
@@ -1187,15 +1343,16 @@ class ChatManager:
             converted = period_map.get(period, '30d')
             logger.info(f"📊 {module_type.value} period: {period} → {converted}")
             return (converted, None, None)      
+    
     # =================
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
-
     async def agent_execute_endpoints(
         self, 
         endpoints: List[Dict[str, Any]], 
         params: Dict[str, Any], 
         user_email: str,
+        session_id: str,
         status_callback=None
     ) -> Dict[str, Any]:
         """Execute selected endpoints with special handling for slow endpoints and POST requests"""
@@ -1213,7 +1370,7 @@ class ChatManager:
             return {"error": "Authentication token missing"}
         
         # Check for slow endpoints that need special handling
-        slow_endpoints = ['get_meta_campaigns_all','get_meta_campaigns_list', 'get_campaigns_list']
+        slow_endpoints = ['get_meta_campaigns_all', 'get_meta_campaigns_list', 'get_campaigns_list']
         has_slow_endpoint = any(e['name'] in slow_endpoints for e in endpoints)
         
         if has_slow_endpoint and status_callback:
@@ -1227,9 +1384,93 @@ class ChatManager:
             logger.info(f"\n{'='*60}")
             logger.info(f"🎯 Executing endpoint: {endpoint_name}")
             
-
-            
             try:
+                # ============================================
+                # SPECIAL HANDLING FOR INTENT INSIGHTS
+                # ============================================
+                if endpoint_name == 'intent_keyword_insights':
+                    logger.info("🔍 Processing Intent Insights endpoint")
+                    
+                    account_id = params.get('account_id')
+                    extracted_keywords = params.get('extracted_keywords', [])
+                    country = params.get('country', 'World Wide')
+                    
+                    if not account_id:
+                        logger.error("❌ Missing account_id for Intent Insights")
+                        results[endpoint_name] = {"error": "Missing account_id"}
+                        continue
+                    
+                    if not extracted_keywords or len(extracted_keywords) == 0:
+                        logger.error("❌ Missing keywords for Intent Insights")
+                        results[endpoint_name] = {"error": "Missing keywords"}
+                        continue
+                    
+                    # Build request body
+                    body = {
+                        'seed_keywords': extracted_keywords,
+                        'country': country,
+                        'timeframe': 'custom',
+                        'start_date': params.get('start_date'),
+                        'end_date': params.get('end_date'),
+                        'include_zero_volume': True
+                    }
+                    
+                    url = f"{self.BASE_URL}/api/intent/keyword-insights/{account_id}"
+                    
+                    logger.info(f"🔗 Intent URL: {url}")
+                    logger.info(f"📦 Intent Body: {json.dumps(body, indent=2)}")
+                    
+                    try:
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+                            headers = {
+                                'Authorization': f'Bearer {token}',
+                                'Content-Type': 'application/json'
+                            }
+                            
+                            async with session.post(url, json=body, headers=headers) as response:
+                                response_text = await response.text()
+                                status = response.status
+                                
+                                if status == 200:
+                                    data = json.loads(response_text)
+                                    logger.info(f"✅ Successfully fetched Intent Insights")
+                                    
+                                    # Log summary
+                                    keyword_count = len(data.get('keyword_ideas_raw', {}).get('results', []))
+                                    logger.info(f"📊 Retrieved {keyword_count} keyword suggestions")
+                                    
+                                    results[endpoint_name] = data
+                                    
+                                    # Save to MongoDB
+                                    await self._save_endpoint_response(
+                                        endpoint_name=endpoint_name,
+                                        endpoint_path=url,
+                                        params={'account_id': account_id, 'body': body},
+                                        response_data=data,
+                                        user_email=user_email,
+                                        session_id=session_id
+                                    )
+                                else:
+                                    error_msg = f"Intent API failed: Status {status}"
+                                    logger.error(f"❌ {error_msg}")
+                                    logger.error(f"Response: {response_text[:500]}")
+                                    results[endpoint_name] = {"error": error_msg, "status": status}
+                                    
+                    except asyncio.TimeoutError:
+                        error_msg = f"Timeout fetching Intent Insights"
+                        logger.error(f"❌ {error_msg}")
+                        results[endpoint_name] = {"error": error_msg}
+                    except Exception as e:
+                        error_msg = f"Error fetching Intent Insights: {str(e)}"
+                        logger.error(f"❌ {error_msg}")
+                        results[endpoint_name] = {"error": error_msg}
+                    
+                    continue  # Skip to next endpoint
+                
+                # ============================================
+                # STANDARD ENDPOINT HANDLING
+                # ============================================
+                
                 # Build URL with path parameters
                 url = endpoint['path']
                 path_params = {}
@@ -1303,7 +1544,7 @@ class ChatManager:
                         logger.info(f"📋 Fetching campaigns for account {account_id} first...")
                         
                         # Build URL for get_campaigns_all
-                        campaigns_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com/api/meta/ad-accounts/{account_id}/campaigns/all"
+                        campaigns_url = f"{self.BASE_URL}/api/meta/ad-accounts/{account_id}/campaigns/all"
                         campaigns_params = {}
                         
                         if params.get('start_date') and params.get('end_date'):
@@ -1361,15 +1602,13 @@ class ChatManager:
                 
                 # Make API call with extended timeout for slow endpoints
                 timeout = 300 if endpoint_name in slow_endpoints else 30
-                                
-
-
+                
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
                     headers = {
                         'Authorization': f'Bearer {token}',
                         'Content-Type': 'application/json'
                     }
-                    full_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{url}"
+                    full_url = f"{self.BASE_URL}{url}"
                     
                     # Make appropriate HTTP request
                     if http_method == 'POST':
@@ -1408,7 +1647,8 @@ class ChatManager:
                                 endpoint_path=url,
                                 params=params,
                                 response_data=data,
-                                user_email=user_email
+                                user_email=user_email,
+                                session_id=session_id
                             )
                             
                         except json.JSONDecodeError as e:
@@ -1433,7 +1673,42 @@ class ChatManager:
         logger.info(f"\n✅ AGENT 5 COMPLETE - Executed {len(results)} endpoints")
         logger.info("="*80 + "\n")
         
-        return results 
+        return results
+
+
+    # ============================================
+    # Helper Method to Save Endpoint Responses
+    # ============================================
+    async def _save_endpoint_response(
+        self,
+        endpoint_name: str,
+        endpoint_path: str,
+        params: Dict[str, Any],
+        response_data: Any,
+        user_email: str,
+        session_id: str
+    ) -> None:
+        """Save endpoint response to MongoDB for future reference"""
+        try:
+            collection = self.db.endpoint_responses
+            
+            document = {
+                'user_email': user_email,
+                'session_id': session_id,
+                'endpoint_name': endpoint_name,
+                'endpoint_path': endpoint_path,
+                'request_params': params,
+                'response_data': response_data,
+                'timestamp': datetime.utcnow(),
+                'created_at': datetime.utcnow()
+            }
+            
+            await collection.insert_one(document)
+            logger.info(f"✅ Saved endpoint response to MongoDB: {endpoint_name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving endpoint response: {str(e)}")
+            
     # =================
     # AGENT 6: Data Analyzer with Context Awareness
     # =================
