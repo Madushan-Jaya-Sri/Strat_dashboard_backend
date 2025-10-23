@@ -63,23 +63,26 @@ class ChatManager:
                 {'name': 'get_channel_revenue_time_series_raw', 'path': '/api/analytics/channel-revenue-timeseries/{property_id}/raw', 'params': ['property_id', 'period', 'channels']},
                 {'name': 'get_revenue_time_series', 'path': '/api/analytics/revenue-timeseries/{property_id}', 'params': ['property_id', 'breakdown_by', 'period', 'start_date', 'end_date']},
             ],
+            # Around line 71 in chat_manager.py, update the endpoint registry:
             'meta_ads': [
                 {'name': 'get_meta_ad_accounts', 'path': '/api/meta/ad-accounts', 'params': []},
                 {'name': 'get_meta_account_insights', 'path': '/api/meta/ad-accounts/{account_id}/insights/summary', 'params': ['account_id', 'period', 'start_date', 'end_date']},
                 {'name': 'get_meta_campaigns_all', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/all', 'params': ['account_id', 'period', 'start_date', 'end_date']},
                 {'name': 'get_meta_campaigns_list', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/list', 'params': ['account_id', 'status']},
-                {'name': 'get_meta_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'params': ['campaign_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_meta_adsets', 'path': '/api/meta/campaigns/adsets', 'params': ['campaign_ids', 'period', 'start_date', 'end_date']},
+                # ⚠️ CHANGE THIS LINE - Add method and body params:
+                {'name': 'get_meta_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
+                # ⚠️ CHANGE THESE LINES TOO - They're all POST endpoints:
+                {'name': 'get_meta_adsets', 'path': '/api/meta/campaigns/adsets', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
                 {'name': 'get_campaigns_paginated', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/paginated', 'params': ['account_id', 'period', 'start_date', 'end_date', 'limit', 'offset']},
-                {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'params': ['campaign_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'params': ['campaign_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'params': ['adset_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'params': ['adset_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'params': ['adset_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_ads_by_adsets', 'path': '/api/meta/adsets/ads', 'params': ['adset_ids']},
-                {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'params': ['ad_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'params': ['ad_ids', 'period', 'start_date', 'end_date']},
-                {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'params': ['ad_ids', 'period', 'start_date', 'end_date']},
+                {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
+                {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
+                {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
+                {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
+                {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
+                {'name': 'get_ads_by_adsets', 'path': '/api/meta/adsets/ads', 'method': 'POST', 'params': [], 'body_params': ['adset_ids']},
+                {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
+                {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
+                {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
             ],
             'facebook_analytics': [
                 {'name': 'get_facebook_pages', 'path': '/api/meta/pages', 'params': []},
@@ -118,6 +121,29 @@ class ChatManager:
 
         self._organize_endpoint_registry()
 
+
+    async def _get_token_for_module(self, user_email: str, module_type: ModuleType, auth_manager) -> Optional[str]:
+        """Get authentication token based on module type"""
+        try:
+            if module_type in [ModuleType.META_ADS, ModuleType.FACEBOOK_ANALYTICS, ModuleType.INSTAGRAM]:
+                # For Meta modules, get Facebook token
+                token = auth_manager.get_facebook_token(user_email)
+                if not token:
+                    logger.error(f"❌ No Facebook token found for user: {user_email}")
+                    return None
+                logger.info(f"✅ Retrieved Facebook token for user: {user_email}")
+                return token
+            else:
+                # For Google modules, get Google token
+                token = auth_manager.get_google_token(user_email)
+                if not token:
+                    logger.error(f"❌ No Google token found for user: {user_email}")
+                    return None
+                logger.info(f"✅ Retrieved Google token for user: {user_email}")
+                return token
+        except Exception as e:
+            logger.error(f"❌ Error getting token: {str(e)}")
+            return None
 
     async def send_status_update(self, status: str, details: str = ""):
             """Send status update (in real implementation, this would use WebSocket)"""
@@ -1169,8 +1195,7 @@ class ChatManager:
         user_email: str,
         status_callback=None
     ) -> Dict[str, Any]:
-
-        """Execute selected endpoints with special handling for slow endpoints"""
+        """Execute selected endpoints with special handling for slow endpoints and POST requests"""
         
         logger.info("="*80)
         logger.info("🔧 AGENT 5: ENDPOINT EXECUTOR - STARTING")
@@ -1178,6 +1203,7 @@ class ChatManager:
         
         results = {}
         token = params.get('token', '')
+        module_type = params.get('module_type')
         
         if not token:
             logger.error("❌ No token provided!")
@@ -1232,56 +1258,90 @@ class ChatManager:
                     results[endpoint_name] = {"error": error_msg}
                     continue
                 
-                # Prepare query parameters
+                # Determine HTTP method and separate query params from body params
+                http_method = endpoint.get('method', 'GET').upper()
+                body_param_names = endpoint.get('body_params', [])
+                
                 query_params = {}
-                for param_name in endpoint['params']:
+                body_params = {}
+                
+                # Separate query and body parameters
+                for param_name in endpoint.get('params', []):
                     if param_name not in path_params and param_name in params:
                         if params[param_name] is not None:
                             query_params[param_name] = params[param_name]
                 
+                # Add body parameters (for POST requests)
+                for body_param in body_param_names:
+                    if body_param in params and params[body_param] is not None:
+                        body_params[body_param] = params[body_param]
+                
+                logger.info(f"🌐 Method: {http_method}")
                 logger.info(f"🌐 URL: {url}")
                 logger.info(f"📦 Query params: {query_params}")
+                if body_params:
+                    logger.info(f"📦 Body params: {body_params}")
                 
                 # Make API call with extended timeout for slow endpoints
                 timeout = 120 if endpoint_name in slow_endpoints else 30
                 
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                    headers = {'Authorization': f'Bearer {token}'}
+                    headers = {
+                        'Authorization': f'Bearer {token}',
+                        'Content-Type': 'application/json'
+                    }
                     full_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{url}"
                     
-                    async with session.get(full_url, params=query_params, headers=headers) as response:
-                        response_text = await response.text()
-                        
-                        if response.status == 200:
-                            try:
-                                data = json.loads(response_text)
-                                logger.info(f"✅ Successfully fetched from {endpoint_name}")
-                                
-                                # For large datasets, log summary
-                                if endpoint_name in slow_endpoints:
-                                    campaign_count = len(data.get('campaigns', []))
-                                    logger.info(f"📊 Retrieved {campaign_count} campaigns")
-                                
-                                results[endpoint_name] = data
-                                
-                                # Save to MongoDB
-                                await self._save_endpoint_response(
-                                    endpoint_name=endpoint_name,
-                                    endpoint_path=url,
-                                    params=params,
-                                    response_data=data,
-                                    user_email=user_email
-                                )
-                                
-                            except json.JSONDecodeError as e:
-                                error_msg = f"Invalid JSON from {endpoint_name}"
-                                logger.error(f"❌ {error_msg}")
-                                results[endpoint_name] = {"error": error_msg}
-                        else:
-                            error_msg = f"API call failed: Status {response.status}"
-                            logger.error(f"❌ {error_msg}")
-                            results[endpoint_name] = {"error": error_msg, "status": response.status}
+                    # Make appropriate HTTP request
+                    if http_method == 'POST':
+                        async with session.post(
+                            full_url, 
+                            params=query_params, 
+                            json=body_params, 
+                            headers=headers
+                        ) as response:
+                            response_text = await response.text()
+                            status = response.status
+                    else:  # GET
+                        async with session.get(
+                            full_url, 
+                            params=query_params, 
+                            headers=headers
+                        ) as response:
+                            response_text = await response.text()
+                            status = response.status
+                    
+                    if status == 200:
+                        try:
+                            data = json.loads(response_text)
+                            logger.info(f"✅ Successfully fetched from {endpoint_name}")
                             
+                            # For large datasets, log summary
+                            if endpoint_name in slow_endpoints:
+                                campaign_count = len(data.get('campaigns', []))
+                                logger.info(f"📊 Retrieved {campaign_count} campaigns")
+                            
+                            results[endpoint_name] = data
+                            
+                            # Save to MongoDB
+                            await self._save_endpoint_response(
+                                endpoint_name=endpoint_name,
+                                endpoint_path=url,
+                                params=params,
+                                response_data=data,
+                                user_email=user_email
+                            )
+                            
+                        except json.JSONDecodeError as e:
+                            error_msg = f"Invalid JSON from {endpoint_name}"
+                            logger.error(f"❌ {error_msg}")
+                            results[endpoint_name] = {"error": error_msg}
+                    else:
+                        error_msg = f"API call failed: Status {status}"
+                        logger.error(f"❌ {error_msg}")
+                        logger.error(f"Response: {response_text[:500]}")
+                        results[endpoint_name] = {"error": error_msg, "status": status}
+                        
             except asyncio.TimeoutError:
                 error_msg = f"Request timeout for {endpoint_name}"
                 logger.error(f"❌ {error_msg}")
@@ -1295,7 +1355,6 @@ class ChatManager:
         logger.info("="*80 + "\n")
         
         return results
-
     # =================
     # AGENT 6: Data Analyzer with Context Awareness
     # =================
@@ -1618,6 +1677,7 @@ class ChatManager:
                             'period': converted_period,
                             'start_date': converted_start_date,
                             'end_date': converted_end_date,
+                            'module_type': chat_request.module_type 
                         }
 
                         # Map account_id to correct parameter
