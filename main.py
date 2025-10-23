@@ -1384,62 +1384,100 @@ async def get_campaigns_all(
         logger.error(f"Error fetching all campaigns: {str(e)}")
         logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
-    
-# Find line 1396 and replace the function with this corrected version:
+
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/chat")
 async def get_campaigns_for_chat(
     account_id: str,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    FAST endpoint for chat service - returns ALL campaigns WITHOUT insights.
-    This is much faster because it doesn't fetch individual campaign insights.
+    FAST endpoint for chat service - returns ALL campaigns WITH full details.
+    Includes pagination and rate-limiting safety.
     """
     try:
+        import time
+        import requests
         from social.meta_manager import MetaManager
-        
-        logger.info(f"[CHAT] Fetching campaigns list for chat: {account_id}")
-        
-        # Add this line - initialize start_time
+
+        logger.info(f"[CHAT] Fetching full campaign data for account: {account_id}")
         start_time = time.time()
-        
+
+        # Initialize MetaManager (handles auth and rate limiting)
         meta_manager = MetaManager(current_user["email"], auth_manager)
-        
-        # Get ALL campaigns without insights (super fast)
-        all_campaigns = []
+
+        # Meta Marketing API allows specifying fields — use a comprehensive set
+        # See: https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group
+        fields = [
+            "id",
+            "name",
+            "status",
+            "objective",
+            "buying_type",
+            "bid_strategy",
+            "daily_budget",
+            "lifetime_budget",
+            "start_time",
+            "stop_time",
+            "created_time",
+            "updated_time",
+            "effective_status",
+            "special_ad_categories",
+            "budget_rebalance_flag",
+            "spend_cap",
+            "source_campaign",
+            "recommendations",
+            "execution_options",
+            "campaign_schedule",
+            "topline_id",
+            "is_skadnetwork_attribution",
+            "is_using_l2",
+            "l2_click",
+            "issues_info",
+            "primary_attribution_spec",
+            "smart_promotion_type",
+            "special_ad_category_country",
+        ]
+
         params = {
-            'fields': 'id,name,status,objective,created_time,updated_time',
-            'limit': 500,  # Max per page
+            "fields": ",".join(fields),
+            "limit": 500,  # maximum allowed per request
         }
-        
+
+        all_campaigns = []
         next_url = None
+
         while True:
             if next_url:
                 response = requests.get(next_url)
                 if response.status_code != 200:
+                    logger.warning(f"[CHAT] Pagination request failed: {response.status_code}")
                     break
                 data = response.json()
             else:
                 data = meta_manager._rate_limited_request(f"{account_id}/campaigns", params)
-            
-            campaigns_batch = data.get('data', [])
+
+            campaigns_batch = data.get("data", [])
             all_campaigns.extend(campaigns_batch)
-            
-            next_url = data.get('paging', {}).get('next')
+
+            next_url = data.get("paging", {}).get("next")
             if not next_url:
                 break
-        
-        logger.info(f"[CHAT] Retrieved {len(all_campaigns)} campaigns in {time.time() - start_time:.2f}s")
-        
-        # Return simple format
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"[CHAT] Retrieved {len(all_campaigns)} full campaign records in {elapsed_time:.2f}s")
+
         return {
             "campaigns": all_campaigns,
-            "total": len(all_campaigns)
+            "total": len(all_campaigns),
+            "fetch_time_seconds": round(elapsed_time, 2)
         }
-        
+
     except Exception as e:
         logger.error(f"[CHAT] Error fetching campaigns: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Error fetching campaigns: {str(e)}")
+
+    
+
 # 2. Get campaigns list (no insights, very fast)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
 @save_response("meta_campaigns_list")
