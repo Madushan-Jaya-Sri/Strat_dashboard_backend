@@ -741,7 +741,9 @@ class MetaManager:
             campaigns = first_result.get('campaigns', [])
             all_campaigns.extend(campaigns)
             
-            total_count = first_result.get('total_count', 0)
+            # ✅ FIX: Get total from pagination.total, not total_count
+            pagination = first_result.get('pagination', {})
+            total_count = pagination.get('total', 0)
             logger.info(f"📊 Total campaigns to fetch: {total_count}")
             
             # Fetch remaining campaigns if there are more
@@ -765,7 +767,7 @@ class MetaManager:
             logger.error(f"❌ Error fetching all campaigns: {str(e)}")
             logger.exception(e)
             raise
-    
+
     def get_campaigns_with_totals(self, account_id: str, period: str = None, 
                                     start_date: str = None, end_date: str = None,
                                     max_workers: int = 2) -> Dict:
