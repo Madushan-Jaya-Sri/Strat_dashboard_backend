@@ -1384,7 +1384,58 @@ async def get_campaigns_all(
         logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
     
-    
+@app.get("/api/meta/ad-accounts/{account_id}/campaigns/chat")
+async def get_campaigns_for_chat(
+    account_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    FAST endpoint for chat service - returns ALL campaigns WITHOUT insights.
+    This is much faster because it doesn't fetch individual campaign insights.
+    """
+    try:
+        from social.meta_manager import MetaManager
+        
+        logger.info(f"[CHAT] Fetching campaigns list for chat: {account_id}")
+        
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+        
+        # Get ALL campaigns without insights (super fast)
+        all_campaigns = []
+        params = {
+            'fields': 'id,name,status,objective,created_time,updated_time',
+            'limit': 500,  # Max per page
+        }
+        
+        next_url = None
+        while True:
+            if next_url:
+                response = requests.get(next_url)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+            else:
+                data = meta_manager._rate_limited_request(f"{account_id}/campaigns", params)
+            
+            campaigns_batch = data.get('data', [])
+            all_campaigns.extend(campaigns_batch)
+            
+            next_url = data.get('paging', {}).get('next')
+            if not next_url:
+                break
+        
+        logger.info(f"[CHAT] Retrieved {len(all_campaigns)} campaigns in {time.time() - start_time:.2f}s")
+        
+        # Return simple format
+        return {
+            "campaigns": all_campaigns,
+            "total": len(all_campaigns)
+        }
+        
+    except Exception as e:
+        logger.error(f"[CHAT] Error fetching campaigns: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 2. Get campaigns list (no insights, very fast)
 @app.get("/api/meta/ad-accounts/{account_id}/campaigns/list", response_model=CampaignsList)
 @save_response("meta_campaigns_list")

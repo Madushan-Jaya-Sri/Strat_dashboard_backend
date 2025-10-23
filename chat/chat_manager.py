@@ -66,6 +66,7 @@ class ChatManager:
             'meta_ads': [
                 {'name': 'get_meta_ad_accounts', 'path': '/api/meta/ad-accounts', 'params': []},
                 {'name': 'get_meta_account_insights', 'path': '/api/meta/ad-accounts/{account_id}/insights/summary', 'params': ['account_id', 'period', 'start_date', 'end_date']},
+                {'name': 'get_meta_campaigns_chat', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/chat', 'params': ['account_id']},
                 {'name': 'get_meta_campaigns_all', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/all', 'params': ['account_id', 'period', 'start_date', 'end_date']},
                 {'name': 'get_meta_campaigns_list', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/list', 'params': ['account_id', 'status']},
                 # For POST endpoints with body params, period should be optional and handled specially
@@ -1062,6 +1063,9 @@ class ChatManager:
             'google_analytics_engagement_funnel': 'LLM-generated engagement funnel derived from Google Analytics events and conversion data.',
 
             # ---------------- META ADS ----------------
+            'get_meta_campaigns_chat' : 'FAST: Get list of ALL campaigns (name, status, ID) for overview questions. Use this for "show campaigns", "list campaigns", "active campaigns"',
+            'get_meta_campaigns_all' : 'SLOW (2+ min): Get ALL campaigns WITH performance metrics. Only use if user explicitly asks for metrics/performance data',
+            'get_meta_campaigns_timeseries' : 'Get campaign performance over time (needs campaign_ids)',
             'meta_ad_accounts': 'List of connected Meta (Facebook + Instagram) Ad Accounts.',
             'meta_account_insights': 'Account-level performance insights for Meta Ads, including reach, engagement, and spend.',
             'meta_campaigns_all': 'Comprehensive details of all Meta Ad Campaigns including active and inactive ones.',
@@ -1223,12 +1227,7 @@ class ChatManager:
             logger.info(f"\n{'='*60}")
             logger.info(f"🎯 Executing endpoint: {endpoint_name}")
             
-            # Send status update for slow endpoints
-            if endpoint_name in slow_endpoints and status_callback:
-                await status_callback(
-                    "Processing large dataset",
-                    f"Fetching all campaigns from {endpoint_name}. Please wait..."
-                )
+
             
             try:
                 # Build URL with path parameters
@@ -1363,12 +1362,7 @@ class ChatManager:
                 # Make API call with extended timeout for slow endpoints
                 timeout = 300 if endpoint_name in slow_endpoints else 30
                                 
-                # Send progress update for slow endpoints BEFORE making the call
-                if endpoint_name in slow_endpoints and status_callback:
-                    await status_callback(
-                        "Fetching comprehensive campaign data",
-                        "This will take 2-5 minutes as we're carefully retrieving all campaigns to avoid API rate limits. Please don't close this window."
-                    )
+
 
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
                     headers = {
