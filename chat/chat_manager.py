@@ -63,26 +63,24 @@ class ChatManager:
                 {'name': 'get_channel_revenue_time_series_raw', 'path': '/api/analytics/channel-revenue-timeseries/{property_id}/raw', 'params': ['property_id', 'period', 'channels']},
                 {'name': 'get_revenue_time_series', 'path': '/api/analytics/revenue-timeseries/{property_id}', 'params': ['property_id', 'breakdown_by', 'period', 'start_date', 'end_date']},
             ],
-            # Around line 71 in chat_manager.py, update the endpoint registry:
             'meta_ads': [
                 {'name': 'get_meta_ad_accounts', 'path': '/api/meta/ad-accounts', 'params': []},
                 {'name': 'get_meta_account_insights', 'path': '/api/meta/ad-accounts/{account_id}/insights/summary', 'params': ['account_id', 'period', 'start_date', 'end_date']},
                 {'name': 'get_meta_campaigns_all', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/all', 'params': ['account_id', 'period', 'start_date', 'end_date']},
                 {'name': 'get_meta_campaigns_list', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/list', 'params': ['account_id', 'status']},
-                # ⚠️ CHANGE THIS LINE - Add method and body params:
-                {'name': 'get_meta_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
-                # ⚠️ CHANGE THESE LINES TOO - They're all POST endpoints:
-                {'name': 'get_meta_adsets', 'path': '/api/meta/campaigns/adsets', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
+                # For POST endpoints with body params, period should be optional and handled specially
+                {'name': 'get_meta_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
+                {'name': 'get_meta_adsets', 'path': '/api/meta/campaigns/adsets', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
                 {'name': 'get_campaigns_paginated', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/paginated', 'params': ['account_id', 'period', 'start_date', 'end_date', 'limit', 'offset']},
-                {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
-                {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids']},
-                {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
-                {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
-                {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids']},
+                {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
+                {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
+                {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
+                {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
+                {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
                 {'name': 'get_ads_by_adsets', 'path': '/api/meta/adsets/ads', 'method': 'POST', 'params': [], 'body_params': ['adset_ids']},
-                {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
-                {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
-                {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids']},
+                {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
+                {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
+                {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
             ],
             'facebook_analytics': [
                 {'name': 'get_facebook_pages', 'path': '/api/meta/pages', 'params': []},
@@ -1188,6 +1186,7 @@ class ChatManager:
     # =================
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
+
     async def agent_execute_endpoints(
         self, 
         endpoints: List[Dict[str, Any]], 
@@ -1261,6 +1260,7 @@ class ChatManager:
                 # Determine HTTP method and separate query params from body params
                 http_method = endpoint.get('method', 'GET').upper()
                 body_param_names = endpoint.get('body_params', [])
+                optional_param_names = endpoint.get('optional_params', [])
                 
                 query_params = {}
                 body_params = {}
@@ -1270,11 +1270,89 @@ class ChatManager:
                     if param_name not in path_params and param_name in params:
                         if params[param_name] is not None:
                             query_params[param_name] = params[param_name]
+
+                # Handle optional params (like period) - only add if value exists and is valid
+                for param_name in optional_param_names:
+                    if param_name in params and params[param_name] is not None:
+                        # Special handling for period with custom dates
+                        if param_name == 'period':
+                            # If we have custom dates, don't send period parameter
+                            if params.get('start_date') and params.get('end_date'):
+                                logger.info(f"⚠️ Skipping 'period' param because custom dates are provided")
+                                continue
+                            # Only send period if it matches the expected pattern
+                            if params[param_name] in ['7d', '30d', '90d', '365d']:
+                                query_params[param_name] = params[param_name]
+                            else:
+                                logger.warning(f"⚠️ Invalid period value '{params[param_name]}', skipping")
+                        else:
+                            query_params[param_name] = params[param_name]
                 
                 # Add body parameters (for POST requests)
                 for body_param in body_param_names:
                     if body_param in params and params[body_param] is not None:
                         body_params[body_param] = params[body_param]
+                
+                # CRITICAL: For Meta POST endpoints that need campaign_ids but don't have them,
+                # fetch campaigns first using get_meta_campaigns_all
+                if http_method == 'POST' and 'campaign_ids' in body_param_names and not body_params.get('campaign_ids'):
+                    logger.warning(f"⚠️ {endpoint_name} requires campaign_ids but none provided. Will fetch campaigns first.")
+                    
+                    # Check if we have account_id to fetch campaigns
+                    account_id = params.get('account_id')
+                    if account_id:
+                        logger.info(f"📋 Fetching campaigns for account {account_id} first...")
+                        
+                        # Build URL for get_campaigns_all
+                        campaigns_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com/api/meta/ad-accounts/{account_id}/campaigns/all"
+                        campaigns_params = {}
+                        
+                        if params.get('start_date') and params.get('end_date'):
+                            campaigns_params['period'] = 'custom'
+                            campaigns_params['start_date'] = params['start_date']
+                            campaigns_params['end_date'] = params['end_date']
+                        elif params.get('period') in ['7d', '30d', '90d', '365d']:
+                            campaigns_params['period'] = params['period']
+                        else:
+                            campaigns_params['period'] = '30d'
+                        
+                        try:
+                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as temp_session:
+                                headers_temp = {
+                                    'Authorization': f'Bearer {token}',
+                                    'Content-Type': 'application/json'
+                                }
+                                async with temp_session.get(campaigns_url, params=campaigns_params, headers=headers_temp) as camp_response:
+                                    if camp_response.status == 200:
+                                        campaigns_data = await camp_response.json()
+                                        campaign_ids = [camp['id'] for camp in campaigns_data.get('campaigns', [])]
+                                        body_params['campaign_ids'] = campaign_ids
+                                        logger.info(f"✅ Fetched {len(campaign_ids)} campaign IDs: {campaign_ids[:5]}...")
+                                    else:
+                                        error_text = await camp_response.text()
+                                        logger.error(f"❌ Failed to fetch campaigns: Status {camp_response.status}")
+                                        logger.error(f"Response: {error_text[:500]}")
+                                        results[endpoint_name] = {"error": "Could not fetch campaign IDs"}
+                                        continue
+                        except Exception as e:
+                            logger.error(f"❌ Error fetching campaigns: {str(e)}")
+                            results[endpoint_name] = {"error": f"Could not fetch campaign IDs: {str(e)}"}
+                            continue
+                    else:
+                        logger.error(f"❌ No account_id provided to fetch campaigns")
+                        results[endpoint_name] = {"error": "Missing account_id to fetch campaigns"}
+                        continue
+                
+                # Similar logic for adset_ids and ad_ids
+                if http_method == 'POST' and 'adset_ids' in body_param_names and not body_params.get('adset_ids'):
+                    logger.warning(f"⚠️ {endpoint_name} requires adset_ids but none provided. Skipping this endpoint.")
+                    results[endpoint_name] = {"error": "Missing adset_ids. Please specify which ad sets to analyze."}
+                    continue
+                
+                if http_method == 'POST' and 'ad_ids' in body_param_names and not body_params.get('ad_ids'):
+                    logger.warning(f"⚠️ {endpoint_name} requires ad_ids but none provided. Skipping this endpoint.")
+                    results[endpoint_name] = {"error": "Missing ad_ids. Please specify which ads to analyze."}
+                    continue
                 
                 logger.info(f"🌐 Method: {http_method}")
                 logger.info(f"🌐 URL: {url}")
@@ -1354,7 +1432,7 @@ class ChatManager:
         logger.info(f"\n✅ AGENT 5 COMPLETE - Executed {len(results)} endpoints")
         logger.info("="*80 + "\n")
         
-        return results
+        return results 
     # =================
     # AGENT 6: Data Analyzer with Context Awareness
     # =================
