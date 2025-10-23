@@ -444,12 +444,25 @@ class AuthManager:
                     'token_type': token_data.get("token_type", "bearer"),
                     'expires_in': token_data.get("expires_in"),
                     'user_info': formatted_user_info,
+                    'email': user_email,  # ✅ ADD THIS - Store email at top level
+                    'user_email': user_email,  # ✅ ADD THIS - Store user_email at top level
                     'auth_provider': 'facebook', 
                     'created_at': datetime.now().isoformat()
                 }
-                
+
+                # Store the session with BOTH user_email and facebook_id as keys
                 self.facebook_sessions[user_email] = session_data
                 logger.info(f"✅ Session stored for user: {user_email}")
+
+                # ALSO store with Facebook ID as key for backward compatibility
+                facebook_id = formatted_user_info.get('id') or formatted_user_info.get('sub')
+                if facebook_id:
+                    facebook_key = f"facebook_{facebook_id}"
+                    self.facebook_sessions[facebook_key] = session_data
+                    logger.info(f"✅ Session also stored with key: {facebook_key}")
+
+                logger.info(f"   - Total Facebook sessions: {len(self.facebook_sessions)}")
+                logger.info(f"   - Session keys: {list(session_data.keys())}")
                 
             except Exception as session_error:
                 logger.error(f"❌ Error creating session data: {session_error}")
@@ -545,21 +558,34 @@ class AuthManager:
         logger.info(f"Looking for Facebook token for: {user_email}")
         logger.info(f"Available sessions: {list(self.facebook_sessions.keys())}")
         
-        # First try direct email lookup
+        # Strategy 1: Direct lookup by email
         if user_email in self.facebook_sessions:
             access_token = self.facebook_sessions[user_email].get('access_token')
             if access_token:
                 logger.info(f"✅ Found token via direct email key")
                 return access_token
         
-        # If not found by email, search through all sessions
+        # Strategy 2: Search through all sessions by email field
         for session_key, session_data in self.facebook_sessions.items():
             # Check if this session belongs to the user
             session_email = session_data.get('user_email') or session_data.get('email')
+            
+            # Also check inside user_info if email is there
+            if not session_email and 'user_info' in session_data:
+                session_email = session_data['user_info'].get('email')
+            
             if session_email == user_email:
                 access_token = session_data.get('access_token')
                 if access_token:
                     logger.info(f"✅ Found token in session with key: {session_key}")
+                    return access_token
+        
+        # Strategy 3: Check if the user_email itself is a facebook_id format
+        if user_email.startswith('facebook_'):
+            if user_email in self.facebook_sessions:
+                access_token = self.facebook_sessions[user_email].get('access_token')
+                if access_token:
+                    logger.info(f"✅ Found token via Facebook ID key")
                     return access_token
         
         # No token found
@@ -568,13 +594,18 @@ class AuthManager:
         
         # Debug: show what's in the sessions
         for key, session in self.facebook_sessions.items():
-            logger.error(f"Session {key}: email={session.get('user_email') or session.get('email')}, has_token={bool(session.get('access_token'))}")
+            # Try to get email from multiple locations
+            email_from_top = session.get('user_email') or session.get('email')
+            email_from_user_info = session.get('user_info', {}).get('email') if 'user_info' in session else None
+            found_email = email_from_top or email_from_user_info
+            
+            logger.error(f"Session {key}: email={found_email}, has_token={bool(session.get('access_token'))}")
         
         raise HTTPException(
             status_code=401, 
             detail="Facebook authentication required. Please reconnect your Facebook account."
         )
-    
+
     def get_user_session(self, user_email: str, auth_provider: str = "google") -> Dict[str, Any]:
         """Get user session data"""
         if auth_provider == "google":
