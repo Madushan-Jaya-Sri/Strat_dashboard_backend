@@ -988,52 +988,44 @@ class ChatManager:
         if module_type.value == 'intent_insights':
             logger.info("🔍 Processing Intent Insights module")
             
-            # Intent Insights prompt
-            prompt = f"""You are an Intent Insights endpoint selector for keyword research.
+            # Intent Insights prompt - IMPROVED
+            prompt = f"""You are a keyword research specialist extracting seed keywords for Intent Insights.
 
-    Available endpoint:
-    - intent_keyword_insights: Get keyword suggestions, search volume, competition data, and trends
+        Current Query: "{message}"
+        Account ID: {account_info.get('account_id')}
 
-    Current Query: "{message}"
-    Account ID: {account_info.get('account_id')}
+        **Your Task:**
+        Extract seed keywords that represent what the user wants to research. Be intelligent about extraction.
 
-    **Your Task:**
-    1. Extract seed keywords from the user's question
-    2. Identify the industry/niche they're researching
-    3. Determine if they specified a country/region (default: "World Wide")
+        **Extraction Rules:**
+        1. If user says "my industry" or "our industry" → Extract general industry terms like "industry", "business", "market"
+        2. If user mentions specific industry (e.g., "cosmetics industry") → Extract that industry name
+        3. If user asks "trending keywords" → Use "trending", "popular", "top" as seed keywords
+        4. If user mentions products/services → Extract those terms
+        5. If user specifies country/region → Extract it, otherwise use "World Wide"
+        6. ALWAYS try to extract at least 1-2 seed keywords from context
 
-    **Keyword Extraction Rules:**
-    - Look for industry terms (e.g., "cosmetics", "beauty", "makeup", "skincare")
-    - Extract product categories mentioned
-    - If user asks "trending keywords in X", use X as seed keyword
-    - If no specific keywords found, set needs_clarification to true
+        **Examples:**
+        - "trending keywords in my industry" → {{"extracted_keywords": ["trending", "industry"], "country": "World Wide"}}
+        - "cosmetics industry keywords" → {{"extracted_keywords": ["cosmetics"], "country": "World Wide"}}
+        - "beauty products in USA" → {{"extracted_keywords": ["beauty products"], "country": "United States"}}
+        - "high volume keywords for skincare" → {{"extracted_keywords": ["skincare"], "country": "World Wide"}}
+        - "what keywords are popular" → {{"extracted_keywords": ["popular", "keywords"], "country": "World Wide"}}
 
-    **Examples:**
-    - "trending keywords in cosmetics" → ["cosmetics"]
-    - "beauty products keywords" → ["beauty products"]
-    - "high volume keywords for makeup industry" → ["makeup"]
-    - "keyword ideas for skincare" → ["skincare"]
+        **CRITICAL:** Even for vague queries, extract relevant seed keywords. Don't ask for clarification unless query is completely unrelated to keywords.
 
-    Return JSON:
-    {{
-        "selected_endpoints": ["intent_keyword_insights"],
-        "extracted_keywords": ["keyword1", "keyword2"],
-        "country": "World Wide",
-        "reasoning": "Extracted keywords from industry mentioned",
-        "needs_clarification": false,
-        "clarification_message": ""
-    }}
+        Return JSON:
+        {{
+            "selected_endpoints": ["intent_keyword_insights"],
+            "extracted_keywords": ["keyword1", "keyword2"],
+            "country": "World Wide",
+            "reasoning": "Extracted keywords based on context",
+            "needs_clarification": false,
+            "clarification_message": ""
+        }}
 
-    If NO keywords can be extracted:
-    {{
-        "selected_endpoints": [],
-        "extracted_keywords": [],
-        "country": "World Wide",
-        "reasoning": "No keywords identified",
-        "needs_clarification": true,
-        "clarification_message": "Please specify the industry or keywords you want to research (e.g., 'cosmetics', 'beauty products', 'skincare')."
-    }}
-    """
+        Only set needs_clarification to true if the query is completely unrelated to keyword research.
+        """
             
             try:
                 response = await self.openai_client.chat.completions.create(
@@ -1047,8 +1039,10 @@ class ChatManager:
                 
                 logger.info(f"Intent Insights extraction result: {json.dumps(result, indent=2)}")
                 
-                # Check if we need clarification
-                if result.get('needs_clarification', False) or not result.get('extracted_keywords'):
+                # ✅ IMPROVED: Only ask for clarification if truly needed
+                extracted_keywords = result.get('extracted_keywords', [])
+                
+                if result.get('needs_clarification', False) or len(extracted_keywords) == 0:
                     logger.info("⚠️ Needs clarification for keywords")
                     return {
                         'selected_endpoints': [],
@@ -1057,17 +1051,19 @@ class ChatManager:
                         'country': 'World Wide',
                         'needs_clarification': True,
                         'clarification_message': result.get('clarification_message', 
-                            'Please specify the keywords or industry you want to research.'),
+                            'Please specify the keywords, industry, or topic you want to research (e.g., "cosmetics", "beauty products", "skincare", "technology").'),
                         'reasoning': result.get('reasoning', 'No keywords found')
                     }
                 
-                # Return successful result with keywords
+                # ✅ Return successful result with keywords
                 endpoint_config = next((e for e in available_endpoints if e['name'] == 'intent_keyword_insights'), None)
+                
+                logger.info(f"✅ Successfully extracted {len(extracted_keywords)} keywords: {extracted_keywords}")
                 
                 return {
                     'selected_endpoints': ['intent_keyword_insights'],
                     'endpoint_configs': [endpoint_config] if endpoint_config else [],
-                    'extracted_keywords': result.get('extracted_keywords', []),
+                    'extracted_keywords': extracted_keywords,
                     'country': result.get('country', 'World Wide'),
                     'needs_clarification': False,
                     'reasoning': result.get('reasoning', 'Keywords extracted successfully')
@@ -1078,8 +1074,10 @@ class ChatManager:
                 return {
                     'selected_endpoints': [],
                     'endpoint_configs': [],
+                    'extracted_keywords': [],
+                    'country': 'World Wide',
                     'needs_clarification': True,
-                    'clarification_message': 'An error occurred. Please try again.',
+                    'clarification_message': 'An error occurred. Please try specifying the industry or keywords you want to research.',
                     'reasoning': f'Error: {str(e)}'
                 }
         
@@ -2022,6 +2020,28 @@ class ChatManager:
                         )
 
                         logger.info(f"✅ CONVERTED - Period: {converted_period}")
+
+                        # ✅ SPECIAL: Convert period to dates for Intent Insights
+                        if chat_request.module_type.value == 'intent_insights':
+                            if converted_period and not converted_start_date and not converted_end_date:
+                                end_date_obj = datetime.utcnow().date()
+                                
+                                if converted_period == '7d':
+                                    start_date_obj = end_date_obj - timedelta(days=7)
+                                elif converted_period == '30d':
+                                    start_date_obj = end_date_obj - timedelta(days=30)
+                                elif converted_period == '90d':
+                                    start_date_obj = end_date_obj - timedelta(days=90)
+                                elif converted_period == '365d':
+                                    start_date_obj = end_date_obj - timedelta(days=365)
+                                else:
+                                    start_date_obj = end_date_obj - timedelta(days=30)
+                                
+                                converted_start_date = start_date_obj.strftime('%Y-%m-%d')
+                                converted_end_date = end_date_obj.strftime('%Y-%m-%d')
+                                
+                                logger.info(f"🔍 Intent - Converted {converted_period} to dates: {converted_start_date} to {converted_end_date}")
+
                         if converted_start_date and converted_end_date:
                             logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
                         logger.info(f"{'='*60}\n")
@@ -2054,6 +2074,7 @@ class ChatManager:
                             selected_endpoints,
                             endpoint_params,
                             user_email,
+                            session_id=session_id,
                             status_callback=self.send_status_update_to_frontend
                         )
                         
