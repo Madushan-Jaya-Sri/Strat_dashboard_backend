@@ -1486,7 +1486,7 @@ class ChatManager:
         endpoints: List[str],
         endpoint_params: Dict[str, Any],
         module_type: str,
-        account_result: Dict[str, Any],
+        # account_result: Dict[str, Any],
         session_id: str,
         status_callback: Optional[callable] = None  # ✅ Add this parameter
     ) -> Dict[str, Any]:
