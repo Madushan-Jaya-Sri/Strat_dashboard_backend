@@ -2036,6 +2036,7 @@ class ChatManager:
                 
                 if account_info.get('needs_account_list'):
                     ai_response = account_info.get('clarification_message', 'Please specify which account to analyze.')
+               
                 else:
 
                     module_type = chat_request.module_type.value
@@ -2102,122 +2103,122 @@ class ChatManager:
                         
 
               
+                    
+                # ===== AGENT 4: Select Endpoints =====
+                await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
+                
+                selected_endpoints = await self.agent_select_endpoints(
+                    chat_request.message,
+                    chat_request.module_type,
+                    account_info,
+                    conversation_history
+                )
+                
+                if not selected_endpoints:
+                    ai_response = "I couldn't determine which data sources to use. Please try rephrasing your question."
+                else:
+                    # ===== AGENT 5: Execute Endpoints =====
+                    await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
+
+                    # Build endpoint parameters with proper period conversion
+                    raw_period = time_period.get('period') or chat_request.period or 'LAST_7_DAYS'
+                    raw_start_date = time_period.get('start_date')
+                    raw_end_date = time_period.get('end_date')
+
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"⏰ TIME PERIOD HANDLING")
+                    logger.info(f"Raw period from Agent 2: {raw_period}")
+                    logger.info(f"Raw start_date: {raw_start_date}")
+                    logger.info(f"Raw end_date: {raw_end_date}")
+                    logger.info(f"Period source: {time_period.get('extracted_from', 'unknown')}")
+
+                    # Convert period format based on module type
+                    converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
+                        period=raw_period,
+                        module_type=chat_request.module_type,
+                        start_date=raw_start_date,
+                        end_date=raw_end_date
+                    )
+
+                    logger.info(f"✅ CONVERTED - Period: {converted_period}")
+
+                    # ✅ SPECIAL: Convert period to dates for Intent Insights
+                    if chat_request.module_type.value == 'intent_insights':
+                        if converted_period and not converted_start_date and not converted_end_date:
+                            end_date_obj = datetime.utcnow().date()
                             
-                        # ===== AGENT 4: Select Endpoints =====
-                        await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
-                        
-                        selected_endpoints = await self.agent_select_endpoints(
-                            chat_request.message,
-                            chat_request.module_type,
-                            account_info,
-                            conversation_history
-                        )
-                        
-                        if not selected_endpoints:
-                            ai_response = "I couldn't determine which data sources to use. Please try rephrasing your question."
-                        else:
-                            # ===== AGENT 5: Execute Endpoints =====
-                            await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
-
-                            # Build endpoint parameters with proper period conversion
-                            raw_period = time_period.get('period') or chat_request.period or 'LAST_7_DAYS'
-                            raw_start_date = time_period.get('start_date')
-                            raw_end_date = time_period.get('end_date')
-
-                            logger.info(f"\n{'='*60}")
-                            logger.info(f"⏰ TIME PERIOD HANDLING")
-                            logger.info(f"Raw period from Agent 2: {raw_period}")
-                            logger.info(f"Raw start_date: {raw_start_date}")
-                            logger.info(f"Raw end_date: {raw_end_date}")
-                            logger.info(f"Period source: {time_period.get('extracted_from', 'unknown')}")
-
-                            # Convert period format based on module type
-                            converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
-                                period=raw_period,
-                                module_type=chat_request.module_type,
-                                start_date=raw_start_date,
-                                end_date=raw_end_date
-                            )
-
-                            logger.info(f"✅ CONVERTED - Period: {converted_period}")
-
-                            # ✅ SPECIAL: Convert period to dates for Intent Insights
-                            if chat_request.module_type.value == 'intent_insights':
-                                if converted_period and not converted_start_date and not converted_end_date:
-                                    end_date_obj = datetime.utcnow().date()
-                                    
-                                    if converted_period == '7d':
-                                        start_date_obj = end_date_obj - timedelta(days=7)
-                                    elif converted_period == '30d':
-                                        start_date_obj = end_date_obj - timedelta(days=30)
-                                    elif converted_period == '90d':
-                                        start_date_obj = end_date_obj - timedelta(days=90)
-                                    elif converted_period == '365d':
-                                        start_date_obj = end_date_obj - timedelta(days=365)
-                                    else:
-                                        start_date_obj = end_date_obj - timedelta(days=30)
-                                    
-                                    converted_start_date = start_date_obj.strftime('%Y-%m-%d')
-                                    converted_end_date = end_date_obj.strftime('%Y-%m-%d')
-                                    
-                                    logger.info(f"🔍 Intent - Converted {converted_period} to dates: {converted_start_date} to {converted_end_date}")
-
-                            if converted_start_date and converted_end_date:
-                                logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
-                            logger.info(f"{'='*60}\n")
-
-                            endpoint_params = {
-                                'token': chat_request.context.get('token', '') if chat_request.context else '',
-                                'period': converted_period,
-                                'start_date': converted_start_date,
-                                'end_date': converted_end_date,
-                                'module_type': chat_request.module_type 
-                            }
-
-                            # Map account_id to correct parameter
-                            resolved_account_id = account_info.get('account_id')
-
-                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                                endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
-                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                                endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
-                            elif chat_request.module_type == ModuleType.META_ADS:
-                                endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
-                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                                endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
-                            elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
-                                endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
-                            # Add Intent-specific parameters
-                            if chat_request.module_type == ModuleType.INTENT_INSIGHTS:
-                                endpoint_params['country'] = country_for_intent or "World Wide"
-                                endpoint_params['keywords'] = keywords_for_intent or []
-                                logger.info(f"🌍 Country set to: {endpoint_params['country']}")
-                                logger.info(f"🔑 Keywords set to: {endpoint_params['keywords']}")
-
-                            logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
-                            # Execute endpoints with status callback
-                            endpoint_data = await self.agent_execute_endpoints(
-                                selected_endpoints,
-                                endpoint_params,
-                                user_email,
-                                session_id=session_id,
-                                status_callback=self.send_status_update_to_frontend
-                            )
+                            if converted_period == '7d':
+                                start_date_obj = end_date_obj - timedelta(days=7)
+                            elif converted_period == '30d':
+                                start_date_obj = end_date_obj - timedelta(days=30)
+                            elif converted_period == '90d':
+                                start_date_obj = end_date_obj - timedelta(days=90)
+                            elif converted_period == '365d':
+                                start_date_obj = end_date_obj - timedelta(days=365)
+                            else:
+                                start_date_obj = end_date_obj - timedelta(days=30)
                             
-                            # ===== AGENT 6: Analyze Data =====
-                            await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
+                            converted_start_date = start_date_obj.strftime('%Y-%m-%d')
+                            converted_end_date = end_date_obj.strftime('%Y-%m-%d')
                             
-                            analysis = await self.agent_analyze_data(
-                                chat_request.message,
-                                endpoint_data,
-                                chat_request.module_type,
-                                conversation_history
-                            )
-                            
-                            # ===== AGENT 7: Format Response =====
-                            await self.send_status_update_to_frontend("Formatting response", "Finalizing answer...")
-                            
-                            ai_response = await self.agent_format_response(analysis)
+                            logger.info(f"🔍 Intent - Converted {converted_period} to dates: {converted_start_date} to {converted_end_date}")
+
+                    if converted_start_date and converted_end_date:
+                        logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
+                    logger.info(f"{'='*60}\n")
+
+                    endpoint_params = {
+                        'token': chat_request.context.get('token', '') if chat_request.context else '',
+                        'period': converted_period,
+                        'start_date': converted_start_date,
+                        'end_date': converted_end_date,
+                        'module_type': chat_request.module_type 
+                    }
+
+                    # Map account_id to correct parameter
+                    resolved_account_id = account_info.get('account_id')
+
+                    if chat_request.module_type == ModuleType.GOOGLE_ADS:
+                        endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
+                    elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
+                        endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
+                    elif chat_request.module_type == ModuleType.META_ADS:
+                        endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                    elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
+                        endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
+                    elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
+                        endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                    # Add Intent-specific parameters
+                    if chat_request.module_type == ModuleType.INTENT_INSIGHTS:
+                        endpoint_params['country'] = country_for_intent or "World Wide"
+                        endpoint_params['keywords'] = keywords_for_intent or []
+                        logger.info(f"🌍 Country set to: {endpoint_params['country']}")
+                        logger.info(f"🔑 Keywords set to: {endpoint_params['keywords']}")
+
+                    logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
+                    # Execute endpoints with status callback
+                    endpoint_data = await self.agent_execute_endpoints(
+                        selected_endpoints,
+                        endpoint_params,
+                        user_email,
+                        session_id=session_id,
+                        status_callback=self.send_status_update_to_frontend
+                    )
+                    
+                    # ===== AGENT 6: Analyze Data =====
+                    await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
+                    
+                    analysis = await self.agent_analyze_data(
+                        chat_request.message,
+                        endpoint_data,
+                        chat_request.module_type,
+                        conversation_history
+                    )
+                    
+                    # ===== AGENT 7: Format Response =====
+                    await self.send_status_update_to_frontend("Formatting response", "Finalizing answer...")
+                    
+                    ai_response = await self.agent_format_response(analysis)
             
         except Exception as e:
             logger.error(f"❌ ERROR in process_chat_message: {str(e)}")
