@@ -14,6 +14,7 @@ from models.chat_models import *
 from database.mongo_manager import mongo_manager
 from auth.auth_manager import AuthManager
 from typing import List, Dict, Any, Optional, Tuple
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -1346,333 +1347,239 @@ class ChatManager:
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
     async def agent_execute_endpoints(
-        self, 
-        endpoints: List[Dict[str, Any]], 
-        params: Dict[str, Any], 
-        user_email: str,
-        session_id: str,
-        status_callback=None
+        self,
+        endpoints: List[str],
+        endpoint_params: Dict[str, Any],
+        module_type: str,
+        account_result: Dict[str, Any],
+        session_id: str
     ) -> Dict[str, Any]:
-        """Execute selected endpoints with special handling for slow endpoints and POST requests"""
-        
-        logger.info("="*80)
-        logger.info("🔧 AGENT 5: ENDPOINT EXECUTOR - STARTING")
-        logger.info(f"📋 Endpoints to execute: {[e['name'] for e in endpoints]}")
-        
-        results = {}
-        token = params.get('token', '')
-        module_type = params.get('module_type')
-        
-        if not token:
-            logger.error("❌ No token provided!")
-            return {"error": "Authentication token missing"}
-        
-        # Check for slow endpoints that need special handling
-        slow_endpoints = ['get_meta_campaigns_all', 'get_meta_campaigns_list', 'get_campaigns_list']
-        has_slow_endpoint = any(e['name'] in slow_endpoints for e in endpoints)
-        
-        if has_slow_endpoint and status_callback:
-            await status_callback(
-                "Fetching comprehensive data",
-                "This may take 30-60 seconds as we're retrieving all campaigns..."
-            )
-        
-        for endpoint in endpoints:
-            endpoint_name = endpoint['name']
-            logger.info(f"\n{'='*60}")
-            logger.info(f"🎯 Executing endpoint: {endpoint_name}")
+        """
+        Agent 5: Execute selected endpoints and collect data
+        """
+        try:
+            logger.info("="*80)
+            logger.info("🔧 AGENT 5: ENDPOINT EXECUTOR - STARTING")
+            logger.info(f"📋 Endpoints to execute: {endpoints}")
+            logger.info(f"📦 Parameters: {endpoint_params}")
+            logger.info(f"🎯 Module: {module_type}")
+            logger.info("="*80)
             
-            try:
-                # ============================================
-                # SPECIAL HANDLING FOR INTENT INSIGHTS
-                # ============================================
-                if endpoint_name == 'intent_keyword_insights':
-                    logger.info("🔍 Processing Intent Insights endpoint")
+            executed_data = {}
+            execution_log = []
+            
+            # Handle different module types
+            for endpoint_name in endpoints:
+                try:
+                    logger.info(f"\n🔄 Executing endpoint: {endpoint_name}")
                     
-                    account_id = params.get('account_id')
-                    extracted_keywords = params.get('extracted_keywords', [])
-                    country = params.get('country', 'World Wide')
+                    result = None
                     
-                    if not account_id:
-                        logger.error("❌ Missing account_id for Intent Insights")
-                        results[endpoint_name] = {"error": "Missing account_id"}
-                        continue
-                    
-                    if not extracted_keywords or len(extracted_keywords) == 0:
-                        logger.error("❌ Missing keywords for Intent Insights")
-                        results[endpoint_name] = {"error": "Missing keywords"}
-                        continue
-                    
-                    # Build request body
-                    body = {
-                        'seed_keywords': extracted_keywords,
-                        'country': country,
-                        'timeframe': 'custom',
-                        'start_date': params.get('start_date'),
-                        'end_date': params.get('end_date'),
-                        'include_zero_volume': True
-                    }
-                    
-                    url = f"{self.BASE_URL}/api/intent/keyword-insights/{account_id}"
-                    
-                    logger.info(f"🔗 Intent URL: {url}")
-                    logger.info(f"📦 Intent Body: {json.dumps(body, indent=2)}")
-                    
-                    try:
-                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-                            headers = {
-                                'Authorization': f'Bearer {token}',
-                                'Content-Type': 'application/json'
-                            }
-                            
-                            async with session.post(url, json=body, headers=headers) as response:
-                                response_text = await response.text()
-                                status = response.status
-                                
-                                if status == 200:
-                                    data = json.loads(response_text)
-                                    logger.info(f"✅ Successfully fetched Intent Insights")
-                                    
-                                    # Log summary
-                                    keyword_count = len(data.get('keyword_ideas_raw', {}).get('results', []))
-                                    logger.info(f"📊 Retrieved {keyword_count} keyword suggestions")
-                                    
-                                    results[endpoint_name] = data
-                                    
-                                    # Save to MongoDB
-                                    await self._save_endpoint_response(
-                                        endpoint_name=endpoint_name,
-                                        endpoint_path=url,
-                                        params={'account_id': account_id, 'body': body},
-                                        response_data=data,
-                                        user_email=user_email,
-                                        session_id=session_id
-                                    )
-                                else:
-                                    error_msg = f"Intent API failed: Status {status}"
-                                    logger.error(f"❌ {error_msg}")
-                                    logger.error(f"Response: {response_text[:500]}")
-                                    results[endpoint_name] = {"error": error_msg, "status": status}
-                                    
-                    except asyncio.TimeoutError:
-                        error_msg = f"Timeout fetching Intent Insights"
-                        logger.error(f"❌ {error_msg}")
-                        results[endpoint_name] = {"error": error_msg}
-                    except Exception as e:
-                        error_msg = f"Error fetching Intent Insights: {str(e)}"
-                        logger.error(f"❌ {error_msg}")
-                        results[endpoint_name] = {"error": error_msg}
-                    
-                    continue  # Skip to next endpoint
-                
-                # ============================================
-                # STANDARD ENDPOINT HANDLING
-                # ============================================
-                
-                # Build URL with path parameters
-                url = endpoint['path']
-                path_params = {}
-                
-                # Extract path parameters
-                if '{customer_id}' in url:
-                    path_params['customer_id'] = params.get('customer_id')
-                    url = url.replace('{customer_id}', str(params['customer_id']))
-                if '{property_id}' in url:
-                    path_params['property_id'] = params.get('property_id')
-                    url = url.replace('{property_id}', str(params['property_id']))
-                if '{account_id}' in url:
-                    path_params['account_id'] = params.get('account_id')
-                    url = url.replace('{account_id}', str(params['account_id']))
-                if '{page_id}' in url:
-                    path_params['page_id'] = params.get('page_id')
-                    url = url.replace('{page_id}', str(params['page_id']))
-                
-                # Validate required path parameters
-                missing_params = [k for k, v in path_params.items() if v is None]
-                if missing_params:
-                    error_msg = f"Missing required parameters: {missing_params}"
-                    logger.error(f"❌ {error_msg}")
-                    results[endpoint_name] = {"error": error_msg}
-                    continue
-                
-                # Determine HTTP method and separate query params from body params
-                http_method = endpoint.get('method', 'GET').upper()
-                body_param_names = endpoint.get('body_params', [])
-                optional_param_names = endpoint.get('optional_params', [])
-                
-                query_params = {}
-                body_params = {}
-                
-                # Separate query and body parameters
-                for param_name in endpoint.get('params', []):
-                    if param_name not in path_params and param_name in params:
-                        if params[param_name] is not None:
-                            query_params[param_name] = params[param_name]
-
-                # Handle optional params (like period) - only add if value exists and is valid
-                for param_name in optional_param_names:
-                    if param_name in params and params[param_name] is not None:
-                        # Special handling for period with custom dates
-                        if param_name == 'period':
-                            # If we have custom dates, don't send period parameter
-                            if params.get('start_date') and params.get('end_date'):
-                                logger.info(f"⚠️ Skipping 'period' param because custom dates are provided")
-                                continue
-                            # Only send period if it matches the expected pattern
-                            if params[param_name] in ['7d', '30d', '90d', '365d']:
-                                query_params[param_name] = params[param_name]
-                            else:
-                                logger.warning(f"⚠️ Invalid period value '{params[param_name]}', skipping")
-                        else:
-                            query_params[param_name] = params[param_name]
-                
-                # Add body parameters (for POST requests)
-                for body_param in body_param_names:
-                    if body_param in params and params[body_param] is not None:
-                        body_params[body_param] = params[body_param]
-                
-                # CRITICAL: For Meta POST endpoints that need campaign_ids but don't have them,
-                # fetch campaigns first using get_meta_campaigns_all
-                if http_method == 'POST' and 'campaign_ids' in body_param_names and not body_params.get('campaign_ids'):
-                    logger.warning(f"⚠️ {endpoint_name} requires campaign_ids but none provided. Will fetch campaigns first.")
-                    
-                    # Check if we have account_id to fetch campaigns
-                    account_id = params.get('account_id')
-                    if account_id:
-                        logger.info(f"📋 Fetching campaigns for account {account_id} first...")
+                    # ===== GOOGLE ADS MODULE =====
+                    if module_type == "google_ads":
+                        customer_id = endpoint_params.get("customer_id")
+                        start_date = endpoint_params.get("start_date")
+                        end_date = endpoint_params.get("end_date")
                         
-                        # Build URL for get_campaigns_all
-                        campaigns_url = f"{self.BASE_URL}/api/meta/ad-accounts/{account_id}/campaigns/all"
-                        campaigns_params = {}
+                        if endpoint_name == "accounts_list":
+                            result = await self._call_google_ads_accounts(endpoint_params.get("token"))
                         
-                        if params.get('start_date') and params.get('end_date'):
-                            campaigns_params['period'] = 'custom'
-                            campaigns_params['start_date'] = params['start_date']
-                            campaigns_params['end_date'] = params['end_date']
-                        elif params.get('period') in ['7d', '30d', '90d', '365d']:
-                            campaigns_params['period'] = params['period']
-                        else:
-                            campaigns_params['period'] = '30d'
-                        
-                        try:
-                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as temp_session:
-                                headers_temp = {
-                                    'Authorization': f'Bearer {token}',
-                                    'Content-Type': 'application/json'
-                                }
-                                async with temp_session.get(campaigns_url, params=campaigns_params, headers=headers_temp) as camp_response:
-                                    if camp_response.status == 200:
-                                        campaigns_data = await camp_response.json()
-                                        campaign_ids = [camp['id'] for camp in campaigns_data.get('campaigns', [])]
-                                        body_params['campaign_ids'] = campaign_ids
-                                        logger.info(f"✅ Fetched {len(campaign_ids)} campaign IDs: {campaign_ids[:5]}...")
-                                    else:
-                                        error_text = await camp_response.text()
-                                        logger.error(f"❌ Failed to fetch campaigns: Status {camp_response.status}")
-                                        logger.error(f"Response: {error_text[:500]}")
-                                        results[endpoint_name] = {"error": "Could not fetch campaign IDs"}
-                                        continue
-                        except Exception as e:
-                            logger.error(f"❌ Error fetching campaigns: {str(e)}")
-                            results[endpoint_name] = {"error": f"Could not fetch campaign IDs: {str(e)}"}
-                            continue
-                    else:
-                        logger.error(f"❌ No account_id provided to fetch campaigns")
-                        results[endpoint_name] = {"error": "Missing account_id to fetch campaigns"}
-                        continue
-                
-                # Similar logic for adset_ids and ad_ids
-                if http_method == 'POST' and 'adset_ids' in body_param_names and not body_params.get('adset_ids'):
-                    logger.warning(f"⚠️ {endpoint_name} requires adset_ids but none provided. Skipping this endpoint.")
-                    results[endpoint_name] = {"error": "Missing adset_ids. Please specify which ad sets to analyze."}
-                    continue
-                
-                if http_method == 'POST' and 'ad_ids' in body_param_names and not body_params.get('ad_ids'):
-                    logger.warning(f"⚠️ {endpoint_name} requires ad_ids but none provided. Skipping this endpoint.")
-                    results[endpoint_name] = {"error": "Missing ad_ids. Please specify which ads to analyze."}
-                    continue
-                
-                logger.info(f"🌐 Method: {http_method}")
-                logger.info(f"🌐 URL: {url}")
-                logger.info(f"📦 Query params: {query_params}")
-                if body_params:
-                    logger.info(f"📦 Body params: {body_params}")
-                
-                # Make API call with extended timeout for slow endpoints
-                timeout = 300 if endpoint_name in slow_endpoints else 30
-                
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-                    headers = {
-                        'Authorization': f'Bearer {token}',
-                        'Content-Type': 'application/json'
-                    }
-                    full_url = f"{self.BASE_URL}{url}"
-                    
-                    # Make appropriate HTTP request
-                    if http_method == 'POST':
-                        async with session.post(
-                            full_url, 
-                            params=query_params, 
-                            json=body_params, 
-                            headers=headers
-                        ) as response:
-                            response_text = await response.text()
-                            status = response.status
-                    else:  # GET
-                        async with session.get(
-                            full_url, 
-                            params=query_params, 
-                            headers=headers
-                        ) as response:
-                            response_text = await response.text()
-                            status = response.status
-                    
-                    if status == 200:
-                        try:
-                            data = json.loads(response_text)
-                            logger.info(f"✅ Successfully fetched from {endpoint_name}")
-                            
-                            # For large datasets, log summary
-                            if endpoint_name in slow_endpoints:
-                                campaign_count = len(data.get('campaigns', []))
-                                logger.info(f"📊 Retrieved {campaign_count} campaigns")
-                            
-                            results[endpoint_name] = data
-                            
-                            # Save to MongoDB
-                            await self._save_endpoint_response(
-                                endpoint_name=endpoint_name,
-                                endpoint_path=url,
-                                params=params,
-                                response_data=data,
-                                user_email=user_email,
-                                session_id=session_id
+                        elif endpoint_name == "campaigns_list":
+                            campaign_id = endpoint_params.get("campaign_id")
+                            result = await self._call_google_ads_campaigns(
+                                customer_id, start_date, end_date, endpoint_params.get("token"), campaign_id
                             )
-                            
-                        except json.JSONDecodeError as e:
-                            error_msg = f"Invalid JSON from {endpoint_name}"
-                            logger.error(f"❌ {error_msg}")
-                            results[endpoint_name] = {"error": error_msg}
-                    else:
-                        error_msg = f"API call failed: Status {status}"
-                        logger.error(f"❌ {error_msg}")
-                        logger.error(f"Response: {response_text[:500]}")
-                        results[endpoint_name] = {"error": error_msg, "status": status}
                         
-            except asyncio.TimeoutError:
-                error_msg = f"Request timeout for {endpoint_name}"
-                logger.error(f"❌ {error_msg}")
-                results[endpoint_name] = {"error": error_msg}
-            except Exception as e:
-                error_msg = f"Error executing {endpoint_name}: {str(e)}"
-                logger.error(f"❌ {error_msg}")
-                results[endpoint_name] = {"error": error_msg}
-        
-        logger.info(f"\n✅ AGENT 5 COMPLETE - Executed {len(results)} endpoints")
-        logger.info("="*80 + "\n")
-        
-        return results
-
+                        elif endpoint_name == "ad_groups_list":
+                            ad_group_id = endpoint_params.get("ad_group_id")
+                            result = await self._call_google_ads_ad_groups(
+                                customer_id, start_date, end_date, endpoint_params.get("token"), ad_group_id
+                            )
+                        
+                        elif endpoint_name == "ads_list":
+                            ad_id = endpoint_params.get("ad_id")
+                            result = await self._call_google_ads_ads(
+                                customer_id, start_date, end_date, endpoint_params.get("token"), ad_id
+                            )
+                        
+                        elif endpoint_name == "keywords_list":
+                            keyword_id = endpoint_params.get("keyword_id")
+                            result = await self._call_google_ads_keywords(
+                                customer_id, start_date, end_date, endpoint_params.get("token"), keyword_id
+                            )
+                        
+                        elif endpoint_name == "performance_metrics":
+                            result = await self._call_google_ads_performance(
+                                customer_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                    
+                    # ===== GOOGLE ANALYTICS MODULE =====
+                    elif module_type == "google_analytics":
+                        property_id = endpoint_params.get("property_id")
+                        start_date = endpoint_params.get("start_date")
+                        end_date = endpoint_params.get("end_date")
+                        
+                        if endpoint_name == "properties_list":
+                            result = await self._call_ga4_properties(endpoint_params.get("token"))
+                        
+                        elif endpoint_name == "traffic_overview":
+                            result = await self._call_ga4_traffic_overview(
+                                property_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "acquisition_overview":
+                            result = await self._call_ga4_acquisition(
+                                property_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "engagement_overview":
+                            result = await self._call_ga4_engagement(
+                                property_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "conversion_overview":
+                            result = await self._call_ga4_conversions(
+                                property_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                    
+                    # ===== META ADS MODULE =====
+                    elif module_type == "meta_ads":
+                        account_id = endpoint_params.get("account_id")
+                        start_date = endpoint_params.get("start_date")
+                        end_date = endpoint_params.get("end_date")
+                        
+                        if endpoint_name == "ad_accounts_list":
+                            result = await self._call_meta_ad_accounts(endpoint_params.get("token"))
+                        
+                        elif endpoint_name == "campaigns_list":
+                            # Special handling for Meta campaigns - needs pagination
+                            logger.info("⚠️ Meta campaigns require full pagination - this may take time")
+                            result = await self._call_meta_campaigns_full(
+                                account_id, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "campaign_insights":
+                            campaign_id = endpoint_params.get("campaign_id")
+                            result = await self._call_meta_campaign_insights(
+                                account_id, campaign_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "adsets_list":
+                            result = await self._call_meta_adsets(
+                                account_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "ads_list":
+                            result = await self._call_meta_ads(
+                                account_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "account_insights":
+                            result = await self._call_meta_account_insights(
+                                account_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                    
+                    # ===== FACEBOOK ANALYTICS MODULE =====
+                    elif module_type == "facebook_analytics":
+                        page_id = endpoint_params.get("page_id")
+                        start_date = endpoint_params.get("start_date")
+                        end_date = endpoint_params.get("end_date")
+                        
+                        if endpoint_name == "pages_list":
+                            result = await self._call_facebook_pages(endpoint_params.get("token"))
+                        
+                        elif endpoint_name == "page_insights":
+                            result = await self._call_facebook_page_insights(
+                                page_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "posts_insights":
+                            result = await self._call_facebook_posts_insights(
+                                page_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "audience_insights":
+                            result = await self._call_facebook_audience_insights(
+                                page_id, start_date, end_date, endpoint_params.get("token")
+                            )
+                    
+                    # ===== INTENT INSIGHTS MODULE =====
+                    elif module_type == "intent_insights":
+                        account_id = endpoint_params.get("account_id")
+                        keywords = endpoint_params.get("keywords", [])
+                        country = endpoint_params.get("country", "World Wide")
+                        start_date = endpoint_params.get("start_date")
+                        end_date = endpoint_params.get("end_date")
+                        
+                        if endpoint_name == "intent_keyword_insights":
+                            result = await self._call_intent_keyword_insights(
+                                account_id, keywords, country, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "intent_trends":
+                            result = await self._call_intent_trends(
+                                account_id, keywords, country, start_date, end_date, endpoint_params.get("token")
+                            )
+                        
+                        elif endpoint_name == "intent_demographics":
+                            result = await self._call_intent_demographics(
+                                account_id, keywords, country, start_date, end_date, endpoint_params.get("token")
+                            )
+                    
+                    # Store result
+                    if result:
+                        executed_data[endpoint_name] = result
+                        execution_log.append({
+                            "endpoint": endpoint_name,
+                            "status": "success",
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "data_size": len(str(result))
+                        })
+                        
+                        # Save to MongoDB
+                        await self._save_endpoint_response(
+                            session_id=session_id,
+                            endpoint_name=endpoint_name,
+                            response_data=result,
+                            module_type=module_type
+                        )
+                        
+                        logger.info(f"✅ Successfully executed: {endpoint_name}")
+                    else:
+                        execution_log.append({
+                            "endpoint": endpoint_name,
+                            "status": "no_data",
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                        logger.warning(f"⚠️ No data returned from: {endpoint_name}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error executing {endpoint_name}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    execution_log.append({
+                        "endpoint": endpoint_name,
+                        "status": "error",
+                        "error": str(e),
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+            
+            logger.info("="*80)
+            logger.info("✅ AGENT 5: ENDPOINT EXECUTOR - COMPLETE")
+            logger.info(f"📊 Executed {len(executed_data)}/{len(endpoints)} endpoints successfully")
+            logger.info("="*80)
+            
+            return {
+                "executed_data": executed_data,
+                "execution_log": execution_log,
+                "total_endpoints": len(endpoints),
+                "successful_executions": len(executed_data),
+                "session_id": session_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ ERROR in agent_execute_endpoints: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
 
     # ============================================
     # Helper Method to Save Endpoint Responses
