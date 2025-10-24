@@ -954,6 +954,140 @@ class ChatManager:
         return result
 
     # =================
+    # AGENT 3.5: country and keywords Identifier for intent insights
+    # =================
+
+    async def agent_extract_country_and_keywords(
+        self,
+        message: str,
+        module_type: str,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Agent 3.5: Extract country and keywords for Intent Insights module
+        Only runs for intent_insights module
+        """
+        try:
+            if module_type != "intent_insights":
+                return {
+                    "country": None,
+                    "keywords": [],
+                    "needs_country_clarification": False,
+                    "needs_keyword_clarification": False
+                }
+            
+            logger.info("="*80)
+            logger.info("🌍 AGENT 3.5: COUNTRY & KEYWORD EXTRACTOR - STARTING")
+            logger.info(f"Module: {module_type}")
+            logger.info(f"Message: {message}")
+            logger.info("="*80)
+            
+            # List of valid countries
+            valid_countries = [
+                "World Wide", "Afghanistan", "Albania", "Algeria", "Andorra", "Angola",
+                "Argentina", "Armenia", "Australia", "Austria", "Azerbaijan", "Bahamas",
+                "Bahrain", "Bangladesh", "Barbados", "Belarus", "Belgium", "Belize",
+                "Benin", "Bhutan", "Bolivia", "Bosnia and Herzegovina", "Botswana",
+                "Brazil", "Brunei", "Bulgaria", "Burkina Faso", "Burundi", "Cambodia",
+                "Cameroon", "Canada", "Cape Verde", "Central African Republic", "Chad",
+                "Chile", "China", "Colombia", "Comoros", "Congo", "Costa Rica",
+                "Croatia", "Cuba", "Cyprus", "Czech Republic", "Denmark", "Djibouti",
+                "Dominica", "Dominican Republic", "Ecuador", "Egypt", "El Salvador",
+                "Equatorial Guinea", "Eritrea", "Estonia", "Eswatini", "Ethiopia",
+                "Fiji", "Finland", "France", "Gabon", "Gambia", "Georgia", "Germany",
+                "Ghana", "Greece", "Grenada", "Guatemala", "Guinea", "Guinea-Bissau",
+                "Guyana", "Haiti", "Honduras", "Hungary", "Iceland", "India",
+                "Indonesia", "Iran", "Iraq", "Ireland", "Israel", "Italy", "Jamaica",
+                "Japan", "Jordan", "Kazakhstan", "Kenya", "Kiribati", "Kuwait",
+                "Kyrgyzstan", "Laos", "Latvia", "Lebanon", "Lesotho", "Liberia",
+                "Libya", "Liechtenstein", "Lithuania", "Luxembourg", "Madagascar",
+                "Malawi", "Malaysia", "Maldives", "Mali", "Malta", "Marshall Islands",
+                "Mauritania", "Mauritius", "Mexico", "Micronesia", "Moldova", "Monaco",
+                "Mongolia", "Montenegro", "Morocco", "Mozambique", "Myanmar", "Namibia",
+                "Nauru", "Nepal", "Netherlands", "New Zealand", "Nicaragua", "Niger",
+                "Nigeria", "North Korea", "North Macedonia", "Norway", "Oman",
+                "Pakistan", "Palau", "Palestine", "Panama", "Papua New Guinea",
+                "Paraguay", "Peru", "Philippines", "Poland", "Portugal", "Qatar",
+                "Romania", "Russia", "Rwanda", "Saint Kitts and Nevis", "Saint Lucia",
+                "Saint Vincent and the Grenadines", "Samoa", "San Marino",
+                "Sao Tome and Principe", "Saudi Arabia", "Senegal", "Serbia",
+                "Seychelles", "Sierra Leone", "Singapore", "Slovakia", "Slovenia",
+                "Solomon Islands", "Somalia", "South Africa", "South Korea",
+                "South Sudan", "Spain", "Sri Lanka", "Sudan", "Suriname", "Sweden",
+                "Switzerland", "Syria", "Taiwan", "Tajikistan", "Tanzania", "Thailand",
+                "Timor-Leste", "Togo", "Tonga", "Trinidad and Tobago", "Tunisia",
+                "Turkey", "Turkmenistan", "Tuvalu", "Uganda", "Ukraine",
+                "United Arab Emirates", "United Kingdom", "United States", "Uruguay",
+                "Uzbekistan", "Vanuatu", "Vatican City", "Venezuela", "Vietnam",
+                "Yemen", "Zambia", "Zimbabwe"
+            ]
+            
+            prompt = f"""
+            Analyze this user message and extract:
+            1. Country/Region mentioned (if any)
+            2. Keywords mentioned (if any)
+            
+            User message: "{message}"
+            
+            Valid countries: {', '.join(valid_countries[:20])}... (and more)
+            
+            Return JSON:
+            {{
+                "country": "extracted country name or null",
+                "keywords": ["keyword1", "keyword2"],
+                "needs_country_clarification": true/false,
+                "needs_keyword_clarification": true/false,
+                "reasoning": "explanation"
+            }}
+            
+            Rules:
+            - If country is mentioned, extract it (must match valid country list)
+            - If no country mentioned, set needs_country_clarification to true
+            - If specific keywords mentioned, extract them
+            - If no keywords mentioned, set needs_keyword_clarification to true
+            - Default country is "World Wide" only if user says "worldwide" or "global"
+            """
+            
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            logger.info(f"✅ Extraction result: {result}")
+            
+            # Check if we have saved keywords in context
+            context_keywords = context.get("keywords", [])
+            if context_keywords and not result.get("keywords"):
+                result["keywords"] = context_keywords
+                result["needs_keyword_clarification"] = False
+                logger.info(f"📋 Using keywords from context: {context_keywords}")
+            
+            logger.info("="*80)
+            logger.info("✅ AGENT 3.5: COUNTRY & KEYWORD EXTRACTOR - COMPLETE")
+            logger.info(f"Country: {result.get('country')}")
+            logger.info(f"Keywords: {result.get('keywords')}")
+            logger.info(f"Needs country clarification: {result.get('needs_country_clarification')}")
+            logger.info(f"Needs keyword clarification: {result.get('needs_keyword_clarification')}")
+            logger.info("="*80)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ ERROR in agent_extract_country_and_keywords: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                "country": "World Wide",
+                "keywords": [],
+                "needs_country_clarification": False,
+                "needs_keyword_clarification": False,
+                "error": str(e)
+            }
+
+
+    # =================
     # AGENT 4: Endpoint Selector
     # =================
     async def agent_select_endpoints(
@@ -1346,13 +1480,15 @@ class ChatManager:
     # =================
     # AGENT 5: Endpoint Executor with Special Handling
     # =================
+   
     async def agent_execute_endpoints(
         self,
         endpoints: List[str],
         endpoint_params: Dict[str, Any],
         module_type: str,
         account_result: Dict[str, Any],
-        session_id: str
+        session_id: str,
+        status_callback: Optional[callable] = None  # ✅ Add this parameter
     ) -> Dict[str, Any]:
         """
         Agent 5: Execute selected endpoints and collect data
@@ -1365,13 +1501,19 @@ class ChatManager:
             logger.info(f"🎯 Module: {module_type}")
             logger.info("="*80)
             
+            if status_callback:
+                await status_callback("Fetching data from selected endpoints...")
+            
             executed_data = {}
             execution_log = []
             
             # Handle different module types
-            for endpoint_name in endpoints:
+            for idx, endpoint_name in enumerate(endpoints, 1):
                 try:
-                    logger.info(f"\n🔄 Executing endpoint: {endpoint_name}")
+                    if status_callback:
+                        await status_callback(f"Executing endpoint {idx}/{len(endpoints)}: {endpoint_name}")
+                    
+                    logger.info(f"\n🔄 Executing endpoint {idx}/{len(endpoints)}: {endpoint_name}")
                     
                     result = None
                     
@@ -1454,6 +1596,8 @@ class ChatManager:
                         elif endpoint_name == "campaigns_list":
                             # Special handling for Meta campaigns - needs pagination
                             logger.info("⚠️ Meta campaigns require full pagination - this may take time")
+                            if status_callback:
+                                await status_callback("Loading all Meta campaigns (this may take a few minutes)...")
                             result = await self._call_meta_campaigns_full(
                                 account_id, endpoint_params.get("token")
                             )
@@ -1563,6 +1707,9 @@ class ChatManager:
                         "timestamp": datetime.utcnow().isoformat()
                     })
             
+            if status_callback:
+                await status_callback("Data fetching complete. Analyzing results...")
+            
             logger.info("="*80)
             logger.info("✅ AGENT 5: ENDPOINT EXECUTOR - COMPLETE")
             logger.info(f"📊 Executed {len(executed_data)}/{len(endpoints)} endpoints successfully")
@@ -1580,7 +1727,7 @@ class ChatManager:
             logger.error(f"❌ ERROR in agent_execute_endpoints: {str(e)}")
             logger.error(traceback.format_exc())
             raise
-
+    
     # ============================================
     # Helper Method to Save Endpoint Responses
     # ============================================
@@ -1890,115 +2037,159 @@ class ChatManager:
                 if account_info.get('needs_account_list'):
                     ai_response = account_info.get('clarification_message', 'Please specify which account to analyze.')
                 else:
-                    # ===== AGENT 4: Select Endpoints =====
-                    await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
-                    
-                    selected_endpoints = await self.agent_select_endpoints(
-                        chat_request.message,
-                        chat_request.module_type,
-                        account_info,
-                        conversation_history
-                    )
-                    
-                    if not selected_endpoints:
-                        ai_response = "I couldn't determine which data sources to use. Please try rephrasing your question."
-                    else:
-                        # ===== AGENT 5: Execute Endpoints =====
-                        await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
 
-                        # Build endpoint parameters with proper period conversion
-                        raw_period = time_period.get('period') or chat_request.period or 'LAST_7_DAYS'
-                        raw_start_date = time_period.get('start_date')
-                        raw_end_date = time_period.get('end_date')
-
-                        logger.info(f"\n{'='*60}")
-                        logger.info(f"⏰ TIME PERIOD HANDLING")
-                        logger.info(f"Raw period from Agent 2: {raw_period}")
-                        logger.info(f"Raw start_date: {raw_start_date}")
-                        logger.info(f"Raw end_date: {raw_end_date}")
-                        logger.info(f"Period source: {time_period.get('extracted_from', 'unknown')}")
-
-                        # Convert period format based on module type
-                        converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
-                            period=raw_period,
-                            module_type=chat_request.module_type,
-                            start_date=raw_start_date,
-                            end_date=raw_end_date
-                        )
-
-                        logger.info(f"✅ CONVERTED - Period: {converted_period}")
-
-                        # ✅ SPECIAL: Convert period to dates for Intent Insights
-                        if chat_request.module_type.value == 'intent_insights':
-                            if converted_period and not converted_start_date and not converted_end_date:
-                                end_date_obj = datetime.utcnow().date()
-                                
-                                if converted_period == '7d':
-                                    start_date_obj = end_date_obj - timedelta(days=7)
-                                elif converted_period == '30d':
-                                    start_date_obj = end_date_obj - timedelta(days=30)
-                                elif converted_period == '90d':
-                                    start_date_obj = end_date_obj - timedelta(days=90)
-                                elif converted_period == '365d':
-                                    start_date_obj = end_date_obj - timedelta(days=365)
-                                else:
-                                    start_date_obj = end_date_obj - timedelta(days=30)
-                                
-                                converted_start_date = start_date_obj.strftime('%Y-%m-%d')
-                                converted_end_date = end_date_obj.strftime('%Y-%m-%d')
-                                
-                                logger.info(f"🔍 Intent - Converted {converted_period} to dates: {converted_start_date} to {converted_end_date}")
-
-                        if converted_start_date and converted_end_date:
-                            logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
-                        logger.info(f"{'='*60}\n")
-
-                        endpoint_params = {
-                            'token': chat_request.context.get('token', '') if chat_request.context else '',
-                            'period': converted_period,
-                            'start_date': converted_start_date,
-                            'end_date': converted_end_date,
-                            'module_type': chat_request.module_type 
+                    module_type = chat_request.module_type.value
+                    # After Agent 3 (Account Identifier)
+                    if module_type == "intent_insights":
+                        # Run Agent 3.5 for country and keyword extraction
+                        agent_35_context = {
+                            'keywords': chat_request.context.get('keywords', []) if chat_request.context else [],
+                            'country': chat_request.context.get('country') if chat_request.context else None,
                         }
 
-                        # Map account_id to correct parameter
-                        resolved_account_id = account_info.get('account_id')
-
-                        if chat_request.module_type == ModuleType.GOOGLE_ADS:
-                            endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
-                        elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
-                            endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
-                        elif chat_request.module_type == ModuleType.META_ADS:
-                            endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
-                        elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
-                            endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
-                        elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
-                            endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
-
-                        logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
-                        # Execute endpoints with status callback
-                        endpoint_data = await self.agent_execute_endpoints(
-                            selected_endpoints,
-                            endpoint_params,
-                            user_email,
-                            session_id=session_id,
-                            status_callback=self.send_status_update_to_frontend
+                        country_keyword_result = await self.agent_extract_country_and_keywords(
+                            message=chat_request.message,
+                            module_type=module_type,
+                            context=agent_35_context
                         )
                         
-                        # ===== AGENT 6: Analyze Data =====
-                        await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
+                        # Check if we need clarification
+                        if country_keyword_result.get("needs_country_clarification"):
+                            return ChatResponse(
+                                response="🌍 Which country or region would you like to analyze? Please specify a country name (e.g., 'United States', 'United Kingdom', 'World Wide').",
+                                session_id=session_id,
+                                module_type=ModuleType(module_type),
+                                triggered_endpoint=None,
+                                endpoint_data={"needs_clarification": True, "clarification_type": "country"}
+                            )
                         
-                        analysis = await self.agent_analyze_data(
+                        if country_keyword_result.get("needs_keyword_clarification"):
+                            return ChatResponse(
+                                response="🔑 Please provide the keywords you'd like to analyze. You can mention them in your message or I can use the keywords from your current filter.",
+                                session_id=session_id,
+                                module_type=ModuleType(module_type),
+                                triggered_endpoint=None,
+                                endpoint_data={"needs_clarification": True, "clarification_type": "keywords"}
+                            )
+                        
+                        # Add country and keywords to endpoint_params
+                        endpoint_params["country"] = country_keyword_result.get("country", "World Wide")
+                        endpoint_params["keywords"] = country_keyword_result.get("keywords", [])
+                        
+                        logger.info(f"🌍 Country set to: {endpoint_params['country']}")
+                        logger.info(f"🔑 Keywords set to: {endpoint_params['keywords']}")
+
+                    else:
+                            
+                        # ===== AGENT 4: Select Endpoints =====
+                        await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
+                        
+                        selected_endpoints = await self.agent_select_endpoints(
                             chat_request.message,
-                            endpoint_data,
                             chat_request.module_type,
+                            account_info,
                             conversation_history
                         )
                         
-                        # ===== AGENT 7: Format Response =====
-                        await self.send_status_update_to_frontend("Formatting response", "Finalizing answer...")
-                        
-                        ai_response = await self.agent_format_response(analysis)
+                        if not selected_endpoints:
+                            ai_response = "I couldn't determine which data sources to use. Please try rephrasing your question."
+                        else:
+                            # ===== AGENT 5: Execute Endpoints =====
+                            await self.send_status_update_to_frontend("Fetching data", f"Calling {len(selected_endpoints)} data sources...")
+
+                            # Build endpoint parameters with proper period conversion
+                            raw_period = time_period.get('period') or chat_request.period or 'LAST_7_DAYS'
+                            raw_start_date = time_period.get('start_date')
+                            raw_end_date = time_period.get('end_date')
+
+                            logger.info(f"\n{'='*60}")
+                            logger.info(f"⏰ TIME PERIOD HANDLING")
+                            logger.info(f"Raw period from Agent 2: {raw_period}")
+                            logger.info(f"Raw start_date: {raw_start_date}")
+                            logger.info(f"Raw end_date: {raw_end_date}")
+                            logger.info(f"Period source: {time_period.get('extracted_from', 'unknown')}")
+
+                            # Convert period format based on module type
+                            converted_period, converted_start_date, converted_end_date = self._convert_period_for_module(
+                                period=raw_period,
+                                module_type=chat_request.module_type,
+                                start_date=raw_start_date,
+                                end_date=raw_end_date
+                            )
+
+                            logger.info(f"✅ CONVERTED - Period: {converted_period}")
+
+                            # ✅ SPECIAL: Convert period to dates for Intent Insights
+                            if chat_request.module_type.value == 'intent_insights':
+                                if converted_period and not converted_start_date and not converted_end_date:
+                                    end_date_obj = datetime.utcnow().date()
+                                    
+                                    if converted_period == '7d':
+                                        start_date_obj = end_date_obj - timedelta(days=7)
+                                    elif converted_period == '30d':
+                                        start_date_obj = end_date_obj - timedelta(days=30)
+                                    elif converted_period == '90d':
+                                        start_date_obj = end_date_obj - timedelta(days=90)
+                                    elif converted_period == '365d':
+                                        start_date_obj = end_date_obj - timedelta(days=365)
+                                    else:
+                                        start_date_obj = end_date_obj - timedelta(days=30)
+                                    
+                                    converted_start_date = start_date_obj.strftime('%Y-%m-%d')
+                                    converted_end_date = end_date_obj.strftime('%Y-%m-%d')
+                                    
+                                    logger.info(f"🔍 Intent - Converted {converted_period} to dates: {converted_start_date} to {converted_end_date}")
+
+                            if converted_start_date and converted_end_date:
+                                logger.info(f"✅ CONVERTED - Custom dates: {converted_start_date} to {converted_end_date}")
+                            logger.info(f"{'='*60}\n")
+
+                            endpoint_params = {
+                                'token': chat_request.context.get('token', '') if chat_request.context else '',
+                                'period': converted_period,
+                                'start_date': converted_start_date,
+                                'end_date': converted_end_date,
+                                'module_type': chat_request.module_type 
+                            }
+
+                            # Map account_id to correct parameter
+                            resolved_account_id = account_info.get('account_id')
+
+                            if chat_request.module_type == ModuleType.GOOGLE_ADS:
+                                endpoint_params['customer_id'] = resolved_account_id or chat_request.customer_id
+                            elif chat_request.module_type == ModuleType.GOOGLE_ANALYTICS:
+                                endpoint_params['property_id'] = resolved_account_id or chat_request.property_id
+                            elif chat_request.module_type == ModuleType.META_ADS:
+                                endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                            elif chat_request.module_type == ModuleType.FACEBOOK_ANALYTICS:
+                                endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
+                            elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
+                                endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+
+                            logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
+                            # Execute endpoints with status callback
+                            endpoint_data = await self.agent_execute_endpoints(
+                                selected_endpoints,
+                                endpoint_params,
+                                user_email,
+                                session_id=session_id,
+                                status_callback=self.send_status_update_to_frontend
+                            )
+                            
+                            # ===== AGENT 6: Analyze Data =====
+                            await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
+                            
+                            analysis = await self.agent_analyze_data(
+                                chat_request.message,
+                                endpoint_data,
+                                chat_request.module_type,
+                                conversation_history
+                            )
+                            
+                            # ===== AGENT 7: Format Response =====
+                            await self.send_status_update_to_frontend("Formatting response", "Finalizing answer...")
+                            
+                            ai_response = await self.agent_format_response(analysis)
             
         except Exception as e:
             logger.error(f"❌ ERROR in process_chat_message: {str(e)}")
