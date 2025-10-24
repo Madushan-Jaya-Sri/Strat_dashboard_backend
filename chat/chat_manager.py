@@ -1086,10 +1086,10 @@ class ChatManager:
                 "error": str(e)
             }
 
-
     # =================
     # AGENT 4: Endpoint Selector
     # =================
+    
     async def agent_select_endpoints(
         self, 
         message: str, 
@@ -2039,6 +2039,9 @@ class ChatManager:
                 else:
 
                     module_type = chat_request.module_type.value
+                    # Initialize intent-specific variables
+                    country_for_intent = None
+                    keywords_for_intent = []
                     # After Agent 3 (Account Identifier)
                     if module_type == "intent_insights":
                         # Run Agent 3.5 for country and keyword extraction
@@ -2052,34 +2055,53 @@ class ChatManager:
                             module_type=module_type,
                             context=agent_35_context
                         )
-                        
+
+                        # Store country and keywords for later use
+                        country_for_intent = country_keyword_result.get("country", "World Wide")
+                        keywords_for_intent = country_keyword_result.get("keywords", [])
+
+                        logger.info(f"🌍 Country extracted: {country_for_intent}")
+                        logger.info(f"🔑 Keywords extracted: {keywords_for_intent}")
+
                         # Check if we need clarification
                         if country_keyword_result.get("needs_country_clarification"):
+                            ai_response = "🌍 Which country or region would you like to analyze? Please specify a country name (e.g., 'United States', 'United Kingdom', 'World Wide')."
+                            
+                            ai_message = ChatMessage(
+                                role=MessageRole.ASSISTANT,
+                                content=ai_response,
+                                timestamp=datetime.utcnow()
+                            )
+                            await self.add_message_to_simple_session(session_id, ai_message)
+                            
                             return ChatResponse(
-                                response="🌍 Which country or region would you like to analyze? Please specify a country name (e.g., 'United States', 'United Kingdom', 'World Wide').",
+                                response=ai_response,
                                 session_id=session_id,
                                 module_type=ModuleType(module_type),
                                 triggered_endpoint=None,
                                 endpoint_data={"needs_clarification": True, "clarification_type": "country"}
                             )
-                        
+
                         if country_keyword_result.get("needs_keyword_clarification"):
+                            ai_response = "🔑 Please provide the keywords you'd like to analyze. You can mention them in your message or I can use the keywords from your current filter."
+                            
+                            ai_message = ChatMessage(
+                                role=MessageRole.ASSISTANT,
+                                content=ai_response,
+                                timestamp=datetime.utcnow()
+                            )
+                            await self.add_message_to_simple_session(session_id, ai_message)
+                            
                             return ChatResponse(
-                                response="🔑 Please provide the keywords you'd like to analyze. You can mention them in your message or I can use the keywords from your current filter.",
+                                response=ai_response,
                                 session_id=session_id,
                                 module_type=ModuleType(module_type),
                                 triggered_endpoint=None,
                                 endpoint_data={"needs_clarification": True, "clarification_type": "keywords"}
                             )
                         
-                        # Add country and keywords to endpoint_params
-                        endpoint_params["country"] = country_keyword_result.get("country", "World Wide")
-                        endpoint_params["keywords"] = country_keyword_result.get("keywords", [])
-                        
-                        logger.info(f"🌍 Country set to: {endpoint_params['country']}")
-                        logger.info(f"🔑 Keywords set to: {endpoint_params['keywords']}")
 
-                    else:
+              
                             
                         # ===== AGENT 4: Select Endpoints =====
                         await self.send_status_update_to_frontend("Selecting data sources", "Determining relevant data...")
@@ -2165,6 +2187,12 @@ class ChatManager:
                                 endpoint_params['page_id'] = resolved_account_id or chat_request.context.get('page_id')
                             elif chat_request.module_type == ModuleType.INTENT_INSIGHTS:
                                 endpoint_params['account_id'] = resolved_account_id or chat_request.context.get('account_id')
+                            # Add Intent-specific parameters
+                            if chat_request.module_type == ModuleType.INTENT_INSIGHTS:
+                                endpoint_params['country'] = country_for_intent or "World Wide"
+                                endpoint_params['keywords'] = keywords_for_intent or []
+                                logger.info(f"🌍 Country set to: {endpoint_params['country']}")
+                                logger.info(f"🔑 Keywords set to: {endpoint_params['keywords']}")
 
                             logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
                             # Execute endpoints with status callback
