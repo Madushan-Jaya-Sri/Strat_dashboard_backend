@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
+from fastapi import HTTPException
 
 from chat.graphs.graph_orchestrator import get_orchestrator, process_message, continue_message
 from chat.states.chat_states import ModuleType
@@ -264,36 +265,40 @@ class ChatManager:
     # ========================================================================
     # HELPER METHODS
     # ========================================================================
-    
+        
     def _get_auth_token(self, module_type: str, current_user: Dict[str, Any]) -> str:
-        """
-        Get appropriate auth token based on module type
+        """Get appropriate auth token based on module type"""
+        user_email = current_user.get("email", "")
         
-        Args:
-            module_type: Module type
-            current_user: Current user object
-            
-        Returns:
-            Auth token
-        """
-        # Google modules use Google auth token
-        if module_type in [
-            ModuleType.GOOGLE_ADS.value,
-            ModuleType.GOOGLE_ANALYTICS.value,
-            ModuleType.INTENT_INSIGHTS.value
-        ]:
-            return current_user.get("google_token", "")
+        # Meta modules use Facebook token
+        if module_type in [ModuleType.META_ADS.value, ModuleType.FACEBOOK.value, ModuleType.INSTAGRAM.value]:
+            try:
+                # Try to get Facebook token from auth manager
+                from auth.auth_manager import get_auth_manager
+                auth_manager = get_auth_manager()
+                fb_token = auth_manager.get_facebook_access_token(user_email)
+                logger.info(f"✅ Retrieved Facebook token for {user_email}")
+                return fb_token
+            except Exception as e:
+                logger.error(f"❌ Failed to get Facebook token: {e}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Facebook authentication required. Please reconnect your Facebook account."
+                )
         
-        # Meta modules use Meta auth token
-        elif module_type in [
-            ModuleType.META_ADS.value,
-            ModuleType.FACEBOOK.value,
-            ModuleType.INSTAGRAM.value
-        ]:
-            return current_user.get("meta_token", "")
-        
-        return ""
-    
+        # Google modules use Google credentials token
+        else:
+            try:
+                from auth.auth_manager import get_auth_manager
+                auth_manager = get_auth_manager()
+                creds = auth_manager.get_user_credentials(user_email)
+                return creds.token
+            except Exception as e:
+                logger.error(f"❌ Failed to get Google token: {e}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Google authentication required. Please reconnect your Google account."
+                ) 
     def _prepare_context(
         self,
         request: ChatRequest,

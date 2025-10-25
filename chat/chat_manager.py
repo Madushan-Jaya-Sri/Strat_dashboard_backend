@@ -2214,7 +2214,7 @@ class ChatManager:
                         endpoints=endpoint_names,
                         endpoint_params=endpoint_params,
                         module_type=chat_request.module_type.value,
-                        account_result=account_info,
+                        # account_result=account_info,
                         session_id=session_id,
                         status_callback=self.send_status_update_to_frontend
                     )
