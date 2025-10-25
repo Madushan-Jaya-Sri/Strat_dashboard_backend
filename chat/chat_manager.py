@@ -1777,7 +1777,11 @@ class ChatManager:
         """Analyze data and generate insights with conversation awareness"""
         
         # Check for errors
-        errors = [result['error'] for endpoint, result in data.items() if 'error' in result]
+        errors = []
+        if isinstance(data, dict):
+            for endpoint, result in data.items():
+                if isinstance(result, dict) and 'error' in result:
+                    errors.append(result['error'])
         if errors:
             return f"I encountered an issue retrieving the data: {', '.join(errors)}. Please try rephrasing your question."
         
@@ -2197,14 +2201,23 @@ class ChatManager:
 
                     logger.info(f"📦 Final endpoint_params: {json.dumps(endpoint_params, default=str, indent=2)}")
                     # Execute endpoints with status callback
+                    # Extract endpoint names from Agent 4 result
+                    if isinstance(selected_endpoints, dict):
+                        # Agent 4 returned a dict with selected_endpoints key
+                        endpoint_names = selected_endpoints.get('selected_endpoints', [])
+                        logger.info(f"📋 Extracted endpoint names: {endpoint_names}")
+                    else:
+                        # Agent 4 returned a list directly
+                        endpoint_names = selected_endpoints
+
                     endpoint_data = await self.agent_execute_endpoints(
-                        selected_endpoints,
-                        endpoint_params,
-                        user_email,
+                        endpoints=endpoint_names,
+                        endpoint_params=endpoint_params,
+                        module_type=chat_request.module_type.value,
+                        account_result=account_info,
                         session_id=session_id,
                         status_callback=self.send_status_update_to_frontend
                     )
-                    
                     # ===== AGENT 6: Analyze Data =====
                     await self.send_status_update_to_frontend("Analyzing data", "Generating insights...")
                     
