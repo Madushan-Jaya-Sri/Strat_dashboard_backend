@@ -1,21 +1,12 @@
 version: 1.0
-runtime: python3.9
+runtime: python3
 
 build:
   commands:
     build:
-      - echo "Building the marketing dashboard backend..."
-      - pip install --upgrade pip setuptools wheel
-      - pip install -r requirements.txt
+      - docker build -t strat-backend .
 
 run:
   command: uvicorn main:app --host 0.0.0.0 --port 8000
   network:
     port: 8000
-  env:
-    # These will be set in App Runner configuration
-    - name: GOOGLE_CLIENT_ID
-    - name: GOOGLE_CLIENT_SECRET
-    - name: GOOGLE_ADS_DEVELOPER_TOKEN
-    - name: JWT_SECRET
-    - name: REDIRECT_URI
