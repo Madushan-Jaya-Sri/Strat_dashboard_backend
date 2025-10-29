@@ -424,7 +424,7 @@ class ChatManager:
             raise HTTPException(status_code=400, detail=f"Module type {module_type.value} not supported for account listing")
 
         endpoint_config = endpoint_mapping[module_type]
-        url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{endpoint_config['path']}"
+        url = f"https://3ixmj4hf2a.us-east-2.awsapprunner.com{endpoint_config['path']}"
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -1303,7 +1303,7 @@ class ChatManager:
                         logger.info(f"📋 Fetching campaigns for account {account_id} first...")
                         
                         # Build URL for get_campaigns_all
-                        campaigns_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com/api/meta/ad-accounts/{account_id}/campaigns/all"
+                        campaigns_url = f"https://3ixmj4hf2a.us-east-2.awsapprunner.com/api/meta/ad-accounts/{account_id}/campaigns/all"
                         campaigns_params = {}
                         
                         if params.get('start_date') and params.get('end_date'):
@@ -1369,7 +1369,7 @@ class ChatManager:
                         'Authorization': f'Bearer {token}',
                         'Content-Type': 'application/json'
                     }
-                    full_url = f"https://eyqi6vd53z.us-east-2.awsapprunner.com{url}"
+                    full_url = f"https://3ixmj4hf2a.us-east-2.awsapprunner.com{url}"
                     
                     # Make appropriate HTTP request
                     if http_method == 'POST':

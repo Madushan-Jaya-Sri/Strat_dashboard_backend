@@ -115,6 +115,91 @@ class MongoManager:
             logger.error(f"Error saving/updating MongoDB document: {e}")
             return None
     
+    async def save_chat_session(
+        self,
+        session_id: str,
+        user_email: str,
+        module_type: str,
+        user_message: str,
+        assistant_message: str,
+        customer_id: Optional[str] = None,
+        property_id: Optional[str] = None,
+        account_id: Optional[str] = None,
+        page_id: Optional[str] = None,
+        triggered_endpoints: List[Dict[str, Any]] = None,
+        visualizations: Optional[Dict[str, Any]] = None
+    ):
+        """Save or update a chat session in MongoDB"""
+        try:
+            collection_name = f"chat_{module_type}"
+            collection = self.db[collection_name]
+            
+            current_time = datetime.utcnow()
+            
+            # Check if session exists
+            existing_session = collection.find_one({"session_id": session_id})
+            
+            if existing_session:
+                # Update existing session - append messages
+                collection.update_one(
+                    {"session_id": session_id},
+                    {
+                        "$push": {
+                            "messages": {
+                                "$each": [
+                                    {
+                                        "role": "user",
+                                        "content": user_message,
+                                        "timestamp": current_time
+                                    },
+                                    {
+                                        "role": "assistant",
+                                        "content": assistant_message,
+                                        "timestamp": current_time
+                                    }
+                                ]
+                            }
+                        },
+                        "$set": {
+                            "last_activity": current_time
+                        }
+                    }
+                )
+                logger.info(f"✅ Updated existing chat session: {session_id}")
+            else:
+                # Create new session
+                session_doc = {
+                    "session_id": session_id,
+                    "user_email": user_email,
+                    "module_type": module_type,
+                    "customer_id": customer_id,
+                    "property_id": property_id,
+                    "account_id": account_id,
+                    "page_id": page_id,
+                    "created_at": current_time,
+                    "last_activity": current_time,
+                    "is_active": True,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": user_message,
+                            "timestamp": current_time
+                        },
+                        {
+                            "role": "assistant",
+                            "content": assistant_message,
+                            "timestamp": current_time
+                        }
+                    ]
+                }
+                
+                collection.insert_one(session_doc)
+                logger.info(f"✅ Created new chat session: {session_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving chat session: {e}", exc_info=True)
+            raise
+    
     def _get_collection_name(self, endpoint: str, request_params: Dict[str, Any] = None) -> str:
         """Get meaningful collection name based on endpoint and optional request parameters"""
         collection_mapping = {

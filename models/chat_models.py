@@ -8,9 +8,9 @@ class ModuleType(str, Enum):
     GOOGLE_ADS = "google_ads"
     GOOGLE_ANALYTICS = "google_analytics" 
     INTENT_INSIGHTS = "intent_insights"
-    META_ADS = "meta_ads"  # Add this
-    FACEBOOK_ANALYTICS = "facebook_analytics"
-    INSTAGRAM_ANALYTICS = "instagram_analytics"
+    META_ADS = "meta_ads"
+    FACEBOOK = "facebook_analytics"  # Changed
+    INSTAGRAM = "instagram_analytics"  # Changed
     COMBINED = "combined"
 
 class MessageRole(str, Enum):
@@ -30,8 +30,11 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
-    account_id: Optional[str] = None 
-    period: Optional[str] = None  # ✅ Make sure this exists
+    account_id: Optional[str] = None
+    page_id: Optional[str] = None  # Add this
+    period: Optional[str] = None
+    start_date: Optional[str] = None  # Add this
+    end_date: Optional[str] = None    # Add this
     context: Optional[Dict[str, Any]] = {}
 
 class ChatResponse(BaseModel):

@@ -41,6 +41,7 @@ aiohttp
 
 
 # New LangGraph dependencies
-# langgraph
-# langchain
-# langchain-core
+langgraph
+langchain
+langchain-core
+nest_asyncio

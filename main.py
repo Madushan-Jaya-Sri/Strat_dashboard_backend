@@ -30,6 +30,10 @@ from models.response_models import EnhancedAdCampaign, FunnelRequest
 from utils.charts_helper import ChartsDataTransformer
 from database.mongo_manager import MongoManager
 from models.meta_response_models import CampaignWithInsights
+from typing import List
+from fastapi import Query
+from models.chat_models import ChatRequest, ChatResponse
+from chat.new_chat_manager import get_chat_manager
 
 
 
@@ -40,10 +44,11 @@ from models.meta_response_models import (
 )
 
 
-from chat.chat_manager import chat_manager
+from chat.chat_manager_old import chat_manager
 from models.chat_models import *
 
 mongo_manager = MongoManager()
+chat_manager = get_chat_manager(mongo_manager)
 
 import sys
 import os
@@ -67,15 +72,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# Add CORS middleware - MUST be before any routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://strategy-dashboard.momentro.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://*.momentro.com",  # Allow all momentro subdomains
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
-
 # Initialize managers
 auth_manager = AuthManager()
 security = HTTPBearer()
@@ -140,10 +150,11 @@ def save_response(endpoint_name: str, cache_minutes: int = 0):
 
 # Dependency to get current user
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """Get current authenticated user"""
-    return auth_manager.verify_jwt_token(credentials.credentials)
-
-
+    """Get current authenticated user with auth token"""
+    user_info = auth_manager.verify_jwt_token(credentials.credentials)
+    # Add the actual JWT token to the user info
+    user_info['auth_token'] = credentials.credentials
+    return user_info
 
 
 # Authentication Routes
@@ -2142,548 +2153,206 @@ async def debug_meta_permissions(current_user: dict = Depends(get_current_user))
         return {"error": str(e)}
 
 
-# # ============================================================================
-# # UPDATED CHAT ROUTES FOR MAIN.PY - LangGraph Implementation
-# # Replace your existing chat routes with these
-# # ============================================================================
-
-# from fastapi import HTTPException, Depends
-# from chat.new_chat_manager import get_chat_manager
-# from chat.states.chat_states import ModuleType
-# from models.chat_models import ChatRequest, ChatResponse, DeleteChatRequest
-
-# # Initialize chat manager (add this at the top of main.py with other initializations)
-# chat_manager = get_chat_manager(mongo_manager)
-
-
-# # ============================================================================
-# # MAIN CHAT MESSAGE ENDPOINT
-# # ============================================================================
-
-# @app.post("/api/chat/message", response_model=ChatResponse)
-# async def send_chat_message(
-#     chat_request: ChatRequest,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Main chat message endpoint - processes user questions using LangGraph
-    
-#     This endpoint:
-#     1. Routes to appropriate module graph (Google Ads, GA4, Meta, etc.)
-#     2. Handles intent classification (chitchat vs analytical)
-#     3. Extracts parameters and selects endpoints
-#     4. Executes APIs and generates insights
-#     5. Returns formatted response with visualizations
-#     """
-#     try:
-#         logger.info(f"📨 Received chat message for module: {chat_request.module_type}")
-#         logger.info(f"👤 User: {current_user['email']}")
-#         logger.info(f"💬 Message: {chat_request.message[:100]}...")
-        
-#         # Process the chat request using LangGraph orchestrator
-#         response = await chat_manager.process_chat_request(
-#             request=chat_request,
-#             current_user=current_user
-#         )
-        
-#         logger.info(f"✅ Chat processing complete. Session: {response.session_id}")
-        
-#         return response
-        
-#     except ValueError as e:
-#         logger.error(f"❌ Validation error: {e}")
-#         raise HTTPException(status_code=400, detail=str(e))
-        
-#     except Exception as e:
-#         logger.error(f"❌ Error processing chat message: {e}", exc_info=True)
-#         raise HTTPException(
-#             status_code=500, 
-#             detail=f"An error occurred while processing your message: {str(e)}"
-#         )
-
-
-# # ============================================================================
-# # CHAT HISTORY ENDPOINTS
-# # ============================================================================
-
-# @app.get("/api/chat/history/{module_type}")
-# async def get_chat_history(
-#     module_type: ModuleType,
-#     limit: int = Query(50, ge=1, le=100),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Get chat history for a specific module
-    
-#     Returns list of previous conversations with messages
-#     """
-#     try:
-#         logger.info(f"📚 Fetching chat history for {module_type.value}")
-        
-#         sessions = chat_manager.get_chat_history(
-#             module_type=module_type.value,
-#             user_email=current_user["email"],
-#             limit=limit
-#         )
-        
-#         logger.info(f"✅ Found {len(sessions)} chat sessions")
-        
-#         return {
-#             "sessions": [
-#                 {
-#                     "session_id": session.session_id,
-#                     "module_type": session.module_type,
-#                     "messages": [
-#                         {
-#                             "role": msg.role.value,
-#                             "content": msg.content,
-#                             "timestamp": msg.timestamp.isoformat()
-#                         }
-#                         for msg in session.messages
-#                     ],
-#                     "created_at": session.created_at.isoformat(),
-#                     "last_activity": session.last_activity.isoformat(),
-#                     "is_active": session.is_active
-#                 }
-#                 for session in sessions
-#             ],
-#             "total": len(sessions)
-#         }
-        
-#     except Exception as e:
-#         logger.error(f"❌ Error fetching chat history: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @app.get("/api/chat/sessions/{module_type}")
-# async def get_chat_sessions_list(
-#     module_type: ModuleType,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Get list of chat sessions (summary view)
-    
-#     Returns session metadata without full message content
-#     """
-#     try:
-#         logger.info(f"📋 Fetching session list for {module_type.value}")
-        
-#         if not chat_manager.mongo_manager:
-#             return {"sessions": [], "total_sessions": 0}
-        
-#         collection_name = f"chat_{module_type.value}"
-#         collection = chat_manager.mongo_manager.db[collection_name]
-        
-#         # Get unique sessions (latest message per session)
-#         pipeline = [
-#             {
-#                 "$match": {
-#                     "user_email": current_user["email"],
-#                     "is_active": True
-#                 }
-#             },
-#             {
-#                 "$sort": {"timestamp": -1}
-#             },
-#             {
-#                 "$group": {
-#                     "_id": "$session_id",
-#                     "latest_message": {"$first": "$$ROOT"}
-#                 }
-#             },
-#             {
-#                 "$sort": {"latest_message.timestamp": -1}
-#             },
-#             {
-#                 "$limit": 50
-#             }
-#         ]
-        
-#         sessions = await collection.aggregate(pipeline).to_list(length=50)
-        
-#         formatted_sessions = []
-#         for session_group in sessions:
-#             session = session_group["latest_message"]
-#             formatted_sessions.append({
-#                 "session_id": session["session_id"],
-#                 "user_question": session["user_question"],
-#                 "preview": session["user_question"][:100] + "..." if len(session["user_question"]) > 100 else session["user_question"],
-#                 "timestamp": session["timestamp"].isoformat() if hasattr(session["timestamp"], "isoformat") else str(session["timestamp"]),
-#                 "last_activity": session.get("last_activity", session["timestamp"]).isoformat() if hasattr(session.get("last_activity", session["timestamp"]), "isoformat") else str(session.get("last_activity", session["timestamp"]))
-#             })
-        
-#         logger.info(f"✅ Found {len(formatted_sessions)} sessions")
-        
-#         return {
-#             "sessions": formatted_sessions,
-#             "total_sessions": len(formatted_sessions),
-#             "module_type": module_type.value
-#         }
-        
-#     except Exception as e:
-#         logger.error(f"❌ Error getting sessions list: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @app.get("/api/chat/conversation/{session_id}")
-# async def get_conversation(
-#     session_id: str,
-#     module_type: ModuleType = Query(...),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Get full conversation for a specific session
-    
-#     Returns all messages in the conversation
-#     """
-#     try:
-#         logger.info(f"🔍 Getting conversation: session={session_id}, module={module_type.value}")
-        
-#         if not chat_manager.mongo_manager:
-#             raise HTTPException(status_code=404, detail="Chat history not available")
-        
-#         collection_name = f"chat_{module_type.value}"
-#         collection = chat_manager.mongo_manager.db[collection_name]
-        
-#         # Get all messages for this session
-#         messages = await collection.find({
-#             "session_id": session_id,
-#             "user_email": current_user["email"]
-#         }).sort("timestamp", 1).to_list(length=None)
-        
-#         if not messages:
-#             raise HTTPException(status_code=404, detail=f"Conversation not found: {session_id}")
-        
-#         logger.info(f"✅ Found {len(messages)} messages in conversation")
-        
-#         # Format conversation
-#         conversation = {
-#             "session_id": session_id,
-#             "module_type": module_type.value,
-#             "messages": []
-#         }
-        
-#         for msg in messages:
-#             # Add user message
-#             conversation["messages"].append({
-#                 "role": "user",
-#                 "content": msg["user_question"],
-#                 "timestamp": msg["timestamp"].isoformat() if hasattr(msg["timestamp"], "isoformat") else str(msg["timestamp"])
-#             })
-            
-#             # Add assistant response
-#             conversation["messages"].append({
-#                 "role": "assistant",
-#                 "content": msg["formatted_response"],
-#                 "timestamp": msg["timestamp"].isoformat() if hasattr(msg["timestamp"], "isoformat") else str(msg["timestamp"]),
-#                 "visualizations": msg.get("visualizations"),
-#                 "triggered_endpoints": msg.get("triggered_endpoints", [])
-#             })
-        
-#         return conversation
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"❌ Error getting conversation: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # ============================================================================
-# # CHAT MANAGEMENT ENDPOINTS
-# # ============================================================================
-
-# @app.post("/api/chat/delete")
-# async def delete_chat_sessions(
-#     delete_request: DeleteChatRequest,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Delete one or more chat sessions
-#     """
-#     try:
-#         logger.info(f"🗑️  Deleting {len(delete_request.session_ids)} sessions")
-        
-#         if not delete_request.session_ids:
-#             raise HTTPException(status_code=400, detail="No session IDs provided")
-        
-#         # Delete from all possible module collections
-#         deleted_count = 0
-        
-#         for module in ModuleType:
-#             success = chat_manager.delete_chat_sessions(
-#                 session_ids=delete_request.session_ids,
-#                 module_type=module.value,
-#                 user_email=current_user["email"]
-#             )
-            
-#             if success:
-#                 deleted_count += 1
-        
-#         logger.info(f"✅ Deleted sessions from {deleted_count} modules")
-        
-#         return {
-#             "success": True,
-#             "message": f"Successfully deleted {len(delete_request.session_ids)} session(s)",
-#             "deleted_session_ids": delete_request.session_ids
-#         }
-        
-#     except Exception as e:
-#         logger.error(f"❌ Error deleting sessions: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @app.post("/api/chat/continue/{session_id}")
-# async def continue_chat_session(
-#     session_id: str,
-#     module_type: ModuleType,
-#     user_response: str = Body(...),
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Continue an existing chat session after user provides additional input
-    
-#     This is used when the LangGraph workflow needs clarification:
-#     - Time period not specified
-#     - Campaign/adset/ad selection needed (Meta Ads)
-#     - Other missing parameters
-#     """
-#     try:
-#         logger.info(f"🔄 Continuing session: {session_id}")
-        
-#         response = await chat_manager.continue_chat_session(
-#             session_id=session_id,
-#             user_response=user_response,
-#             module_type=module_type.value,
-#             current_user=current_user
-#         )
-        
-#         logger.info(f"✅ Session continued successfully")
-        
-#         return response
-        
-#     except Exception as e:
-#         logger.error(f"❌ Error continuing session: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # ============================================================================
-# # DEBUG ENDPOINT (Optional - for development)
-# # ============================================================================
-
-# @app.get("/api/chat/debug/{module_type}")
-# async def debug_chat_sessions(
-#     module_type: ModuleType,
-#     current_user: dict = Depends(get_current_user)
-# ):
-#     """
-#     Debug endpoint to inspect chat session structure
-    
-#     Useful for development and troubleshooting
-#     """
-#     try:
-#         if not chat_manager.mongo_manager:
-#             return {"error": "MongoDB not available"}
-        
-#         collection_name = f"chat_{module_type.value}"
-#         collection = chat_manager.mongo_manager.db[collection_name]
-        
-#         # Get sample sessions
-#         sessions = await collection.find({
-#             "user_email": current_user["email"]
-#         }).sort("timestamp", -1).limit(5).to_list(length=5)
-        
-#         debug_info = {
-#             "user_email": current_user["email"],
-#             "module_type": module_type.value,
-#             "collection_name": collection_name,
-#             "total_sessions": await collection.count_documents({"user_email": current_user["email"]}),
-#             "sample_sessions": []
-#         }
-        
-#         for session in sessions:
-#             debug_info["sample_sessions"].append({
-#                 "session_id": session["session_id"],
-#                 "question": session["user_question"][:100] + "...",
-#                 "has_response": bool(session.get("formatted_response")),
-#                 "timestamp": str(session["timestamp"]),
-#                 "triggered_endpoints": [ep.get("endpoint") for ep in session.get("triggered_endpoints", [])],
-#                 "processing_time": session.get("processing_metadata", {}).get("total_processing_time")
-#             })
-        
-#         return debug_info
-        
-#     except Exception as e:
-#         logger.error(f"Error in debug endpoint: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# # ============================================================================
-# # HELPER ENDPOINT - Get Module Info
-# # ============================================================================
-
-# @app.get("/api/chat/modules")
-# async def get_available_modules():
-#     """
-#     Get information about available chat modules
-    
-#     Returns capabilities and descriptions for each module
-#     """
-#     try:
-#         from chat.graphs.graph_orchestrator import get_available_modules
-        
-#         modules = get_available_modules()
-        
-#         return {
-#             "modules": modules,
-#             "total": len(modules)
-#         }
-        
-#     except Exception as e:
-#         logger.error(f"Error getting modules: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-# if __name__ == "__main__":
-#     logger.info("🚀 Starting Unified Marketing Dashboard API...")
-#     logger.info("📊 Available services: Google Ads + Google Analytics + Intent Insights")
-#     logger.info("🌐 Server will be available at: http://localhost:8000")
-#     logger.info("📚 API docs available at: http://localhost:8000/docs")
-    
-#     uvicorn.run(
-#         "main:app",
-#         host="0.0.0.0",
-#         port=8000,
-#         reload=True,
-#         log_level="info"
-#     )
-
-
 
 
 # Chat endpoints
-@app.post("/api/chat/message", response_model=ChatResponse)
-async def send_chat_message(
-    chat_request: ChatRequest,
+@app.post("/api/chat/message")
+async def chat_message(
+    request: ChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Chat message endpoint"""
+    """Process a chat message"""
     try:
-        response = await chat_manager.process_chat_message(
-            chat_request=chat_request,
-            user_email=current_user["email"]
+        logger.info(f"📨 Received chat message from {current_user['email']}")
+        logger.info(f"Module: {request.module_type}, Message: {request.message[:100]}")
+        
+        response = await chat_manager.process_chat_request(
+            request=request,
+            current_user=current_user
         )
+        
+        logger.info(f"✅ Chat response generated for session: {response.session_id}")
         
         return response
         
     except Exception as e:
-        logger.error(f"Error processing chat message: {e}")
+        logger.error(f"❌ Error processing chat message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.get("/api/chat/sessions/{module_type}")
+async def get_chat_sessions(
+    module_type: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get chat session history for a module"""
+    try:
+        logger.info(f"📚 Getting chat sessions for user: {current_user['email']}, module: {module_type}")
+        
+        sessions = chat_manager.get_chat_history(
+            module_type=module_type,
+            user_email=current_user["email"],
+            limit=50
+        )
+        
+        logger.info(f"✅ Found {len(sessions)} sessions")
+        
+        # Convert to dict format for JSON response
+        sessions_dict = []
+        for session in sessions:
+            sessions_dict.append({
+                "session_id": session.session_id,
+                "user_email": session.user_email,
+                "module_type": session.module_type,
+                "customer_id": session.customer_id,
+                "property_id": session.property_id,
+                "messages": [
+                    {
+                        "role": msg.role.value,
+                        "content": msg.content,
+                        "timestamp": msg.timestamp.isoformat()
+                    }
+                    for msg in session.messages
+                ],
+                "created_at": session.created_at.isoformat(),
+                "last_activity": session.last_activity.isoformat(),
+                "is_active": session.is_active
+            })
+        
+        return {
+            "sessions": sessions_dict,
+            "total": len(sessions_dict),
+            "module_type": module_type
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting chat sessions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/chat/conversation/{session_id}")
 async def get_conversation(
     session_id: str,
-    module_type: ModuleType = Query(...),
+    module_type: str = Query(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get specific conversation by session ID"""
+    """Get a specific conversation by session ID"""
     try:
-        logger.info(f"Getting conversation: session_id={session_id}, user={current_user['email']}, module={module_type.value}")
+        logger.info(f"📖 Loading conversation: {session_id} for module: {module_type}")
         
-        # Use the chat_manager method
-        conversation = await chat_manager.get_conversation_by_session_id(
-            user_email=current_user["email"],
-            session_id=session_id,
-            module_type=module_type
-        )
+        # Get from MongoDB
+        if not chat_manager.mongo_manager:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        collection_name = f"chat_{module_type}"
+        collection = chat_manager.mongo_manager.db[collection_name]
+        
+        conversation = collection.find_one({
+            "session_id": session_id,
+            "user_email": current_user["email"]
+        })
         
         if not conversation:
-            logger.error(f"Conversation not found in database")
-            # Let's also check what sessions exist for debugging
-            collection = chat_manager.db.chat_sessions
-            existing_sessions = await collection.find({
-                "user_email": current_user["email"],
-                "module_type": module_type.value
-            }).to_list(length=10)
-            
-            logger.error(f"Available sessions for user: {[s['session_id'] for s in existing_sessions]}")
-            raise HTTPException(status_code=404, detail=f"Conversation {session_id} not found")
+            raise HTTPException(status_code=404, detail="Conversation not found")
         
-        logger.info(f"Found conversation with {len(conversation.get('messages', []))} messages")
+        logger.info(f"✅ Found conversation with {len(conversation.get('messages', []))} messages")
         
-        return conversation
+        # Format the conversation
+        messages = []
+        for msg in conversation.get("messages", []):
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"],
+                "timestamp": msg["timestamp"].isoformat() if hasattr(msg["timestamp"], 'isoformat') else msg["timestamp"]
+            })
+        
+        return {
+            "session_id": session_id,
+            "module_type": module_type,
+            "messages": messages,
+            "created_at": conversation["created_at"].isoformat() if hasattr(conversation["created_at"], 'isoformat') else conversation["created_at"],
+            "last_activity": conversation.get("last_activity", conversation["created_at"]).isoformat() if hasattr(conversation.get("last_activity", conversation["created_at"]), 'isoformat') else conversation.get("last_activity", conversation["created_at"])
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting conversation: {e}")
+        logger.error(f"❌ Error loading conversation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/chat/sessions/{module_type}")
-async def get_chat_sessions_list(
-    module_type: ModuleType,
-    current_user: dict = Depends(get_current_user)
-):
-    """Get list of chat sessions for a module"""
-    try:
-        collection = chat_manager.db.chat_sessions
-        
-        # Get sessions with messages
-        cursor = collection.find({
-            "user_email": current_user["email"],
-            "module_type": module_type.value,
-            "is_active": True
-        }).sort("last_activity", -1)
-        
-        sessions = await cursor.to_list(length=50)
-        
-        logger.info(f"Found {len(sessions)} sessions for user {current_user['email']} and module {module_type.value}")
-        
-        # Format sessions and include debug info
-        formatted_sessions = []
-        for session in sessions:
-            messages = session.get("messages", [])
-            
-            # Only include sessions that have messages
-            if len(messages) > 0:
-                formatted_sessions.append({
-                    "session_id": session["session_id"],
-                    "user_email": session["user_email"],
-                    "module_type": session["module_type"],
-                    "customer_id": session.get("customer_id"),
-                    "property_id": session.get("property_id"),
-                    "created_at": session["created_at"],
-                    "last_activity": session["last_activity"],
-                    "is_active": session.get("is_active", True),
-                    "messages": messages
-                })
-        
-        logger.info(f"Returning {len(formatted_sessions)} sessions with messages")
-        
-        return {
-            "sessions": formatted_sessions,
-            "total_sessions": len(formatted_sessions),
-            "module_type": module_type.value
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting chat sessions list: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat/delete")
 async def delete_chat_sessions(
-    delete_request: DeleteChatRequest,
+    request: Dict[str, Any] = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
     """Delete chat sessions"""
     try:
-        result = await chat_manager.delete_chat_sessions(
-            user_email=current_user["email"],
-            session_ids=delete_request.session_ids
-        )
-        return result
+        session_ids = request if isinstance(request, list) else request.get("session_ids", [])
+        
+        logger.info(f"🗑️ Deleting {len(session_ids)} chat sessions for user: {current_user['email']}")
+        
+        if not chat_manager.mongo_manager:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Delete from all module collections
+        deleted_count = 0
+        for module in ["google_ads", "google_analytics", "intent_insights", "meta_ads", "facebook_analytics", "instagram_analytics"]:
+            collection_name = f"chat_{module}"
+            collection = chat_manager.mongo_manager.db[collection_name]
+            
+            result = collection.delete_many({
+                "session_id": {"$in": session_ids},
+                "user_email": current_user["email"]
+            })
+            deleted_count += result.deleted_count
+        
+        logger.info(f"✅ Deleted {deleted_count} conversations")
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"Deleted {deleted_count} conversations"
+        }
         
     except Exception as e:
-        logger.error(f"Error deleting chat sessions: {e}")
+        logger.error(f"❌ Error deleting chat sessions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chat/continue/{session_id}")
+async def continue_conversation(
+    session_id: str,
+    user_response: str = Query(...),
+    module_type: str = Query(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Continue a conversation after user provides additional input"""
+    try:
+        logger.info(f"Continuing conversation: {session_id}")
+        
+        # Get previous state from MongoDB
+        previous_state = chat_manager._get_session_state(session_id, module_type)
+        
+        if not previous_state:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Continue the conversation
+        response = await chat_manager.continue_chat_session(
+            session_id=session_id,
+            user_response=user_response,
+            module_type=module_type,
+            current_user=current_user
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error continuing conversation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @app.get("/api/chat/history/{module_type}", response_model=ChatHistoryResponse)
 async def get_chat_history(
@@ -2704,44 +2373,43 @@ async def get_chat_history(
         logger.error(f"Error getting chat history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Debug endpoint to help troubleshoot
 @app.get("/api/chat/debug/{module_type}")
-async def debug_chat_sessions(
-    module_type: ModuleType,
+async def debug_chat_data(
+    module_type: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Debug endpoint to check chat sessions"""
+    """Debug endpoint to check what's in MongoDB"""
     try:
-        collection = chat_manager.db.chat_sessions
+        if not chat_manager.mongo_manager:
+            return {"error": "MongoDB not available"}
         
-        # Get all sessions for this user and module
-        sessions = await collection.find({
-            "user_email": current_user["email"],
-            "module_type": module_type.value
-        }).to_list(length=100)
+        collection_name = f"chat_{module_type}"
+        collection = chat_manager.mongo_manager.db[collection_name]
         
-        debug_info = {
-            "user_email": current_user["email"],
-            "module_type": module_type.value,
+        # Get all sessions for this user
+        sessions = list(collection.find({
+            "user_email": current_user["email"]
+        }).limit(10))
+        
+        # Convert ObjectId to string for JSON serialization
+        for session in sessions:
+            session['_id'] = str(session['_id'])
+            if 'created_at' in session:
+                session['created_at'] = session['created_at'].isoformat() if hasattr(session['created_at'], 'isoformat') else str(session['created_at'])
+            if 'last_activity' in session:
+                session['last_activity'] = session['last_activity'].isoformat() if hasattr(session['last_activity'], 'isoformat') else str(session['last_activity'])
+        
+        return {
+            "collection": collection_name,
+            "user": current_user["email"],
             "total_sessions": len(sessions),
-            "sessions_summary": []
+            "sessions": sessions
         }
         
-        for session in sessions:
-            debug_info["sessions_summary"].append({
-                "session_id": session["session_id"],
-                "message_count": len(session.get("messages", [])),
-                "is_active": session.get("is_active", True),
-                "created_at": session["created_at"],
-                "last_activity": session["last_activity"],
-                "first_message": session["messages"][0]["content"][:50] + "..." if session.get("messages") else "No messages"
-            })
-        
-        return debug_info
-        
     except Exception as e:
-        logger.error(f"Error in debug endpoint: {e}")
-        raise HTTPException(status_code=500, detail=str(e))   
+        logger.error(f"Debug error: {e}", exc_info=True)
+        return {"error": str(e)}
+    
 
 if __name__ == "__main__":
     logger.info("🚀 Starting Unified Marketing Dashboard API...")
