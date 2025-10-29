@@ -131,6 +131,7 @@ class GraphOrchestrator:
                 raise ValueError(f"Unsupported module type: {module_type}")
             
             # Save conversation to MongoDB if completed successfully
+            logger.info(f"🔍 Checking MongoDB save conditions - mongo_manager exists: {self.mongo_manager is not None}, is_complete: {final_state.get('is_complete')}")
             if self.mongo_manager and final_state.get("is_complete"):
                 try:
                     await self._save_conversation_to_mongodb(
@@ -145,6 +146,11 @@ class GraphOrchestrator:
                 except Exception as e:
                     logger.error(f"❌ Failed to save to MongoDB: {e}", exc_info=True)
                     # Don't fail the whole request if MongoDB save fails
+            else:
+                if not self.mongo_manager:
+                    logger.warning("⚠️ MongoDB manager is None - conversation not saved")
+                if not final_state.get("is_complete"):
+                    logger.warning("⚠️ is_complete flag is False/missing - conversation not saved")
             
             logger.info(f"✅ Chat processing completed for module: {module_type}")
             

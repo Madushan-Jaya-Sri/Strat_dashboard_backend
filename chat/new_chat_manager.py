@@ -159,32 +159,55 @@ class ChatManager:
                 timestamp=datetime.utcnow()
             )
         
-    def get_chat_history(
+    async def get_chat_history(
         self,
         module_type: str,
         user_email: str,
         limit: int = 50
     ) -> List[ChatSession]:
         """Get chat history for a user in a specific module"""
-        logger.info(f"Fetching chat history for {user_email} in {module_type}")
-        
+        logger.info(f"📚 Fetching chat history for {user_email} in {module_type}")
+
         try:
             if not self.mongo_manager:
+                logger.warning("⚠️ MongoDB manager is None")
                 return []
-            
-            collection_name = f"chat_{module_type}"
+
+            collection_name = self.mongo_manager._get_chat_collection_name(module_type)
+            logger.info(f"🔍 Querying collection: {collection_name}")
+            logger.info(f"   Module type: {module_type}")
+
             collection = self.mongo_manager.db[collection_name]
-            
+
+            # First, check if collection exists and has any documents
+            total_count = await collection.count_documents({})
+            logger.info(f"📊 Total documents in {collection_name}: {total_count}")
+
+            # Check documents for this user
+            user_count = await collection.count_documents({"user_email": user_email})
+            logger.info(f"📊 Documents for user {user_email}: {user_count}")
+
+            # Check active documents for this user
+            active_count = await collection.count_documents({
+                "user_email": user_email,
+                "is_active": True
+            })
+            logger.info(f"📊 Active documents for user {user_email}: {active_count}")
+
             # Query sessions with updated fields matching new schema
-            sessions = list(collection.find(
-                {
-                    "user_email": user_email,
-                    "is_active": True
-                }
-            ).sort("last_activity", -1).limit(limit))
-            
+            query_filter = {
+                "user_email": user_email,
+                "is_active": True
+            }
+            logger.info(f"🔍 Query filter: {query_filter}")
+
+            sessions = await collection.find(query_filter).sort("last_activity", -1).limit(limit).to_list(length=limit)
+
+            logger.info(f"✅ Found {len(sessions)} sessions from MongoDB")
+
             chat_sessions = []
             for session_doc in sessions:
+                logger.info(f"📝 Processing session: {session_doc.get('session_id')}")
                 messages = []
                 for msg in session_doc.get("messages", []):
                     messages.append(ChatMessage(
@@ -192,7 +215,7 @@ class ChatManager:
                         content=msg["content"],
                         timestamp=msg["timestamp"]
                     ))
-                
+
                 chat_session = ChatSession(
                     session_id=session_doc["session_id"],
                     user_email=session_doc["user_email"],
@@ -205,15 +228,16 @@ class ChatManager:
                     is_active=session_doc.get("is_active", True)
                 )
                 chat_sessions.append(chat_session)
-            
-            logger.info(f"Found {len(chat_sessions)} chat sessions")
+                logger.info(f"✅ Converted session {session_doc.get('session_id')} with {len(messages)} messages")
+
+            logger.info(f"✅ Returning {len(chat_sessions)} chat sessions")
             return chat_sessions
-            
+
         except Exception as e:
-            logger.error(f"Error fetching chat history: {e}", exc_info=True)
+            logger.error(f"❌ Error fetching chat history: {e}", exc_info=True)
             return []
         
-    def delete_chat_sessions(
+    async def delete_chat_sessions(
         self,
         session_ids: List[str],
         module_type: str,
@@ -221,34 +245,34 @@ class ChatManager:
     ) -> bool:
         """
         Delete chat sessions
-        
+
         Args:
             session_ids: List of session IDs to delete
             module_type: Module type
             user_email: User's email
-            
+
         Returns:
             True if successful
         """
         logger.info(f"Deleting {len(session_ids)} chat sessions")
-        
+
         try:
             if not self.mongo_manager:
                 return False
-            
-            collection_name = f"chat_{module_type}"
+
+            collection_name = self.mongo_manager._get_chat_collection_name(module_type)
             collection = self.mongo_manager.db[collection_name]
-            
+
             # Delete sessions
-            result = collection.delete_many({
+            result = await collection.delete_many({
                 "session_id": {"$in": session_ids},
                 "user_email": user_email
             })
-            
+
             logger.info(f"Deleted {result.deleted_count} sessions")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error deleting chat sessions: {e}")
             return False
@@ -366,37 +390,37 @@ class ChatManager:
             module_type=module_type
         )
     
-    def _get_session_state(
+    async def _get_session_state(
         self,
         session_id: str,
         module_type: str
     ) -> Optional[Dict[str, Any]]:
         """
         Get previous state for a session from MongoDB
-        
+
         Args:
             session_id: Session ID
             module_type: Module type
-            
+
         Returns:
             Previous state or None
         """
         try:
             if not self.mongo_manager:
                 return None
-            
-            collection_name = f"chat_{module_type}"
+
+            collection_name = self.mongo_manager._get_chat_collection_name(module_type)
             collection = self.mongo_manager.db[collection_name]
-            
+
             # Find latest session document
-            session_doc = collection.find_one(
+            session_doc = await collection.find_one(
                 {"session_id": session_id},
-                sort=[("timestamp", -1)]
+                sort=[("last_activity", -1)]
             )
-            
+
             if not session_doc:
                 return None
-            
+
             # Reconstruct state from session document
             state = {
                 "session_id": session_id,
@@ -404,9 +428,9 @@ class ChatManager:
                 "module_type": module_type,
                 "parameters": session_doc.get("parameters", {})
             }
-            
+
             return state
-            
+
         except Exception as e:
             logger.error(f"Error getting session state: {e}")
             return None
@@ -422,20 +446,24 @@ _chat_manager_instance = None
 def get_chat_manager(mongo_manager=None) -> ChatManager:
     """
     Get singleton instance of ChatManager
-    
+
     Args:
         mongo_manager: MongoManager instance
-        
+
     Returns:
         ChatManager instance
     """
     global _chat_manager_instance
-    
+
     if _chat_manager_instance is None:
         _chat_manager_instance = ChatManager(mongo_manager)
-    
+    elif mongo_manager and _chat_manager_instance.mongo_manager is None:
+        # Update with mongo_manager if it was None before
+        _chat_manager_instance.mongo_manager = mongo_manager
+        _chat_manager_instance.orchestrator.mongo_manager = mongo_manager
+
     return _chat_manager_instance
 
 
-# Create default instance
+# Create default instance (will be updated with mongo_manager from main.py)
 chat_manager = get_chat_manager()

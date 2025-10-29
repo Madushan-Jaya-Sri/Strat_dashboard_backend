@@ -2161,18 +2161,23 @@ async def chat_message(
     request: ChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """Process a chat message"""
+    """Process a chat message and auto-save the conversation"""
     try:
         logger.info(f"📨 Received chat message from {current_user['email']}")
         logger.info(f"Module: {request.module_type}, Message: {request.message[:100]}")
         
+        # 1️⃣ Generate response using chat_manager
         response = await chat_manager.process_chat_request(
             request=request,
             current_user=current_user
         )
         
         logger.info(f"✅ Chat response generated for session: {response.session_id}")
-        
+
+        # Note: Conversation is already saved by graph_orchestrator._save_conversation_to_mongodb()
+        # No need to duplicate the save here
+
+        # Return response to client
         return response
         
     except Exception as e:
@@ -2188,13 +2193,13 @@ async def get_chat_sessions(
     """Get chat session history for a module"""
     try:
         logger.info(f"📚 Getting chat sessions for user: {current_user['email']}, module: {module_type}")
-        
-        sessions = chat_manager.get_chat_history(
+
+        sessions = await chat_manager.get_chat_history(
             module_type=module_type,
             user_email=current_user["email"],
             limit=50
         )
-        
+
         logger.info(f"✅ Found {len(sessions)} sessions")
         
         # Convert to dict format for JSON response
@@ -2246,12 +2251,12 @@ async def get_conversation(
         
         collection_name = f"chat_{module_type}"
         collection = chat_manager.mongo_manager.db[collection_name]
-        
-        conversation = collection.find_one({
+
+        conversation = await collection.find_one({
             "session_id": session_id,
             "user_email": current_user["email"]
         })
-        
+
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
         
@@ -2297,11 +2302,11 @@ async def delete_chat_sessions(
         
         # Delete from all module collections
         deleted_count = 0
-        for module in ["google_ads", "google_analytics", "intent_insights", "meta_ads", "facebook_analytics", "instagram_analytics"]:
+        for module in ["google_ads", "google_analytics", "intent_insights", "meta_ads", "facebook", "instagram"]:
             collection_name = f"chat_{module}"
             collection = chat_manager.mongo_manager.db[collection_name]
-            
-            result = collection.delete_many({
+
+            result = await collection.delete_many({
                 "session_id": {"$in": session_ids},
                 "user_email": current_user["email"]
             })
@@ -2329,10 +2334,10 @@ async def continue_conversation(
     """Continue a conversation after user provides additional input"""
     try:
         logger.info(f"Continuing conversation: {session_id}")
-        
+
         # Get previous state from MongoDB
-        previous_state = chat_manager._get_session_state(session_id, module_type)
-        
+        previous_state = await chat_manager._get_session_state(session_id, module_type)
+
         if not previous_state:
             raise HTTPException(status_code=404, detail="Session not found")
         
@@ -2385,11 +2390,11 @@ async def debug_chat_data(
         
         collection_name = f"chat_{module_type}"
         collection = chat_manager.mongo_manager.db[collection_name]
-        
+
         # Get all sessions for this user
-        sessions = list(collection.find({
+        sessions = await collection.find({
             "user_email": current_user["email"]
-        }).limit(10))
+        }).limit(10).to_list(length=10)
         
         # Convert ObjectId to string for JSON serialization
         for session in sessions:

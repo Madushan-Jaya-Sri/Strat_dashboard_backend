@@ -10,12 +10,20 @@ logger = logging.getLogger(__name__)
 
 class MongoManager:
     def __init__(self):
-        self.connection_string = os.getenv('MONGODB_CONNECTION_STRING')
-        if not self.connection_string:
-            raise ValueError("MONGODB_CONNECTION_STRING not found in environment variables")
-        
-        self.client = motor.motor_asyncio.AsyncIOMotorClient(self.connection_string)
-        self.db = self.client.internal_dashboard
+        try:
+            self.connection_string = os.getenv('MONGODB_CONNECTION_STRING')
+            if not self.connection_string:
+                raise ValueError("MONGODB_CONNECTION_STRING not found in environment variables")
+            
+            self.client = motor.motor_asyncio.AsyncIOMotorClient(
+                self.connection_string,
+                serverSelectionTimeoutMS=5000  # 5 second timeout
+            )
+            # Verify connection
+            self.client.server_info()
+            self.db = self.client.internal_dashboard
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to MongoDB: {str(e)}")
         
     def _serialize_response_data(self, data: Any) -> Any:
         """Convert Pydantic models and other objects to MongoDB-compatible format"""
@@ -131,17 +139,26 @@ class MongoManager:
     ):
         """Save or update a chat session in MongoDB"""
         try:
-            collection_name = f"chat_{module_type}"
+            # Get the collection name - this will handle both formats
+            collection_name = self._get_chat_collection_name(module_type)
+            logger.info(f"💾 Saving chat session to collection: {collection_name}")
+            logger.info(f"   Session ID: {session_id}")
+            logger.info(f"   User: {user_email}")
+            logger.info(f"   Module: {module_type}")
+            logger.info(f"   User message length: {len(user_message) if user_message else 0}")
+            logger.info(f"   Assistant message length: {len(assistant_message) if assistant_message else 0}")
+
             collection = self.db[collection_name]
-            
+
             current_time = datetime.utcnow()
-            
+
             # Check if session exists
-            existing_session = collection.find_one({"session_id": session_id})
-            
+            existing_session = await collection.find_one({"session_id": session_id})
+
             if existing_session:
+                logger.info(f"📝 Found existing session {session_id}, appending messages")
                 # Update existing session - append messages
-                collection.update_one(
+                result = await collection.update_one(
                     {"session_id": session_id},
                     {
                         "$push": {
@@ -165,8 +182,9 @@ class MongoManager:
                         }
                     }
                 )
-                logger.info(f"✅ Updated existing chat session: {session_id}")
+                logger.info(f"✅ Updated existing chat session: {session_id} (matched: {result.matched_count}, modified: {result.modified_count})")
             else:
+                logger.info(f"🆕 Creating new session {session_id}")
                 # Create new session
                 session_doc = {
                     "session_id": session_id,
@@ -192,10 +210,18 @@ class MongoManager:
                         }
                     ]
                 }
-                
-                collection.insert_one(session_doc)
-                logger.info(f"✅ Created new chat session: {session_id}")
-            
+
+                logger.info(f"📄 Session document structure: session_id={session_id}, user_email={user_email}, is_active=True, messages_count=2")
+                result = await collection.insert_one(session_doc)
+                logger.info(f"✅ Created new chat session: {session_id} (inserted_id: {result.inserted_id})")
+
+                # Verify it was saved correctly
+                verification = await collection.find_one({"session_id": session_id})
+                if verification:
+                    logger.info(f"✅ Verification: Session {session_id} exists in DB with {len(verification.get('messages', []))} messages")
+                else:
+                    logger.error(f"❌ Verification failed: Session {session_id} not found after insert!")
+
         except Exception as e:
             logger.error(f"❌ Error saving chat session: {e}", exc_info=True)
             raise
@@ -334,6 +360,33 @@ class MongoManager:
             return 1
         else:
             return 1 if data is not None else 0
+
+    def _get_chat_collection_name(self, module_type: str) -> str:
+        """
+        Get the correct chat collection name, handling both formats:
+        - New format: "google_ads" → "chat_google_ads"
+        - Old format: "ModuleType.GOOGLE_ADS" → "chat_ModuleType.GOOGLE_ADS"
+
+        Returns the collection name that exists in the database
+        """
+        # Map lowercase module types to their enum equivalents (which are used in existing collections)
+        module_type_map = {
+            "google_ads": "ModuleType.GOOGLE_ADS",
+            "google_analytics": "ModuleType.GOOGLE_ANALYTICS",
+            "meta_ads": "ModuleType.META_ADS",
+            "facebook_analytics": "ModuleType.FACEBOOK",
+            "instagram_analytics": "ModuleType.INSTAGRAM",
+            "intent_insights": "ModuleType.INTENT_INSIGHTS"
+        }
+
+        # If module_type is in lowercase format, convert to enum format for backward compatibility
+        if module_type and module_type.lower() in module_type_map:
+            enum_format = module_type_map[module_type.lower()]
+            logger.info(f"🔄 Converted module type: {module_type} → {enum_format}")
+            return f"chat_{enum_format}"
+
+        # Otherwise, use as-is (already in enum format)
+        return f"chat_{module_type}"
     
     async def get_cached_response(
         self,
