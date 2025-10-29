@@ -34,6 +34,27 @@ class MetaManager:
         self.auth_manager = auth_manager
         self.access_token = self._get_access_token()
         self.last_request_time = 0
+
+    @staticmethod
+    def _normalize_account_id(account_id: str) -> str:
+        """
+        Normalize account ID to include act_ prefix if not present
+
+        Args:
+            account_id: Account ID (with or without act_ prefix)
+
+        Returns:
+            Account ID with act_ prefix
+        """
+        if not account_id:
+            return account_id
+
+        # If it already has act_ prefix, return as-is
+        if account_id.startswith('act_'):
+            return account_id
+
+        # Otherwise, add the prefix
+        return f"act_{account_id}"
     
     def _rate_limited_request(self, endpoint: str, params: Dict = None, retry_count: int = 0) -> Dict:
         """
@@ -249,12 +270,16 @@ class MetaManager:
         """
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
-        
+
         since, until = self._period_to_dates(period, start_date, end_date)
-        
+
+        # Normalize account ID to include act_ prefix
+        normalized_account_id = self._normalize_account_id(account_id)
+        logger.info(f"📊 Getting account insights for: {normalized_account_id} (original: {account_id})")
+
         try:
             # Get account-level insights in one request
-            data = self._rate_limited_request(f"{account_id}/insights", {
+            data = self._rate_limited_request(f"{normalized_account_id}/insights", {
                 'time_range': json.dumps({"since": since, "until": until}),
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                 'level': 'account',
@@ -517,16 +542,18 @@ class MetaManager:
                     {'field': 'status', 'operator': 'IN', 'value': include_status}
                 ])
             
-            logger.info(f"Fetching campaigns for account: {account_id}")
-            
+            # Normalize account ID
+            normalized_account_id = self._normalize_account_id(account_id)
+            logger.info(f"Fetching campaigns for account: {normalized_account_id} (original: {account_id})")
+
             # Pagination
             next_url = None
             page_count = 0
-            
+
             while True:
                 page_count += 1
                 logger.info(f"Fetching page {page_count}...")
-                
+
                 if next_url:
                     response = requests.get(next_url)
                     if response.status_code != 200:
@@ -534,7 +561,7 @@ class MetaManager:
                         break
                     data = response.json()
                 else:
-                    data = self._make_request(f"{account_id}/campaigns", params)
+                    data = self._make_request(f"{normalized_account_id}/campaigns", params)
                 
                 campaign_batch = data.get('data', [])
                 logger.info(f"Retrieved {len(campaign_batch)} campaigns in page {page_count}")
@@ -567,10 +594,10 @@ class MetaManager:
             raise
     
     def get_campaigns_paginated(
-        self, 
-        account_id: str, 
-        period: str = None, 
-        start_date: str = None, 
+        self,
+        account_id: str,
+        period: str = None,
+        start_date: str = None,
         end_date: str = None,
         limit: int = 5,
         offset: int = 0
@@ -578,7 +605,7 @@ class MetaManager:
         """
         Get campaigns with pagination and individual insights.
         Returns only the requested page of campaigns.
-        
+
         Args:
             account_id: The ad account ID
             period: Time period
@@ -589,11 +616,13 @@ class MetaManager:
         """
         if start_date and end_date:
             self._validate_date_range(start_date, end_date)
-        
+
         since, until = self._period_to_dates(period, start_date, end_date)
-        
-        logger.info(f"Fetching campaigns page: offset={offset}, limit={limit}")
-        
+
+        # Normalize account ID
+        normalized_account_id = self._normalize_account_id(account_id)
+        logger.info(f"Fetching campaigns page for account: {normalized_account_id} (original: {account_id}), offset={offset}, limit={limit}")
+
         try:
             # Step 1: Get ALL campaign IDs first (lightweight query)
             all_campaign_ids = []
@@ -601,7 +630,7 @@ class MetaManager:
                 'fields': 'id,name,status',
                 'limit': 500,
             }
-            
+
             next_url = None
             while True:
                 if next_url:
@@ -611,7 +640,7 @@ class MetaManager:
                         break
                     data = response.json()
                 else:
-                    data = self._rate_limited_request(f"{account_id}/campaigns", params)
+                    data = self._rate_limited_request(f"{normalized_account_id}/campaigns", params)
                 
                 campaigns_batch = data.get('data', [])
                 all_campaign_ids.extend(campaigns_batch)
@@ -785,13 +814,13 @@ class MetaManager:
             logger.exception(e)
             raise
         
-    def get_campaigns_with_totals(self, account_id: str, period: str = None, 
+    def get_campaigns_with_totals(self, account_id: str, period: str = None,
                                     start_date: str = None, end_date: str = None,
                                     max_workers: int = 2) -> Dict:
             """
             Get ALL campaigns with individual metrics and grand totals for an ad account.
             Uses reduced concurrency (max 2 workers) to avoid rate limiting.
-            
+
             Args:
                 account_id: The ad account ID
                 period: Time period (e.g., '7d', '30d', '90d', '365d')
@@ -801,15 +830,18 @@ class MetaManager:
             """
             if start_date and end_date:
                 self._validate_date_range(start_date, end_date)
-            
+
             since, until = self._period_to_dates(period, start_date, end_date)
-            
+
+            # Normalize account ID
+            normalized_account_id = self._normalize_account_id(account_id)
+
             # FORCE max_workers to be 2 or less to avoid rate limiting
             max_workers = min(max_workers, 2)
-            
-            logger.info(f"Fetching campaigns for {account_id} from {since} to {until}")
+
+            logger.info(f"Fetching campaigns for {normalized_account_id} (original: {account_id}) from {since} to {until}")
             logger.info(f"Using {max_workers} concurrent workers (rate limit safe mode)")
-            
+
             try:
                 # Step 1: Get all campaigns first (fast, no insights)
                 all_campaigns = []
@@ -817,10 +849,10 @@ class MetaManager:
                     'fields': 'id,name,status,objective,created_time,updated_time',
                     'limit': 500,
                 }
-                
+
                 next_url = None
                 page_count = 0
-                
+
                 while True:
                     page_count += 1
                     if next_url:
@@ -832,7 +864,7 @@ class MetaManager:
                             break
                         data = response.json()
                     else:
-                        data = self._rate_limited_request(f"{account_id}/campaigns", params)
+                        data = self._rate_limited_request(f"{normalized_account_id}/campaigns", params)
                     
                     campaign_batch = data.get('data', [])
                     all_campaigns.extend(campaign_batch)
