@@ -2248,14 +2248,17 @@ async def get_conversation(
         # Get from MongoDB
         if not chat_manager.mongo_manager:
             raise HTTPException(status_code=500, detail="Database not available")
-        
-        collection_name = f"chat_{module_type}"
+
+        collection_name = chat_manager.mongo_manager._get_chat_collection_name(module_type)
+        logger.info(f"🔍 Using collection: {collection_name}")
         collection = chat_manager.mongo_manager.db[collection_name]
 
         conversation = await collection.find_one({
             "session_id": session_id,
             "user_email": current_user["email"]
         })
+
+        logger.info(f"🔍 Query: session_id={session_id}, user_email={current_user['email']}")
 
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -2288,14 +2291,21 @@ async def get_conversation(
 
 @app.post("/api/chat/delete")
 async def delete_chat_sessions(
-    request: Dict[str, Any] = Body(...),
+    request: Any = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
     """Delete chat sessions"""
     try:
-        session_ids = request if isinstance(request, list) else request.get("session_ids", [])
-        
+        # Handle both formats: array directly or object with session_ids
+        if isinstance(request, list):
+            session_ids = request
+        elif isinstance(request, dict):
+            session_ids = request.get("session_ids", [])
+        else:
+            raise HTTPException(status_code=422, detail="Invalid request format. Expected array or object with session_ids")
+
         logger.info(f"🗑️ Deleting {len(session_ids)} chat sessions for user: {current_user['email']}")
+        logger.info(f"   Session IDs: {session_ids}")
         
         if not chat_manager.mongo_manager:
             raise HTTPException(status_code=500, detail="Database not available")
@@ -2303,7 +2313,7 @@ async def delete_chat_sessions(
         # Delete from all module collections
         deleted_count = 0
         for module in ["google_ads", "google_analytics", "intent_insights", "meta_ads", "facebook", "instagram"]:
-            collection_name = f"chat_{module}"
+            collection_name = chat_manager.mongo_manager._get_chat_collection_name(module)
             collection = chat_manager.mongo_manager.db[collection_name]
 
             result = await collection.delete_many({
@@ -2387,8 +2397,8 @@ async def debug_chat_data(
     try:
         if not chat_manager.mongo_manager:
             return {"error": "MongoDB not available"}
-        
-        collection_name = f"chat_{module_type}"
+
+        collection_name = chat_manager.mongo_manager._get_chat_collection_name(module_type)
         collection = chat_manager.mongo_manager.db[collection_name]
 
         # Get all sessions for this user
