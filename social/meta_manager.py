@@ -344,12 +344,7 @@ class MetaManager:
                 logger.error(f"Date range {delta.days} days exceeds Meta API limit")
                 raise ValueError("Date range exceeds Meta API limit of ~3 years")
             
-            # Normalize account ID to include act_ prefix
-            normalized_account_id = self._normalize_account_id(account_id)
-            logger.info(f"📊 Getting account insights for: {normalized_account_id} (original: {account_id})")
-
-
-            data = self._make_request(f"{normalized_account_id}/insights", {
+            data = self._make_request(f"{account_id}/insights", {
                 'time_range': f'{{"since":"{since}","until":"{until}"}}',
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                 'level': 'account',

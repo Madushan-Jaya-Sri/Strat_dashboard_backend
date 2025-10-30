@@ -142,22 +142,28 @@ def meta_agent_4_campaign_selection(state: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Loading campaigns for account: {account_id}")
         
         # Load all campaigns (this can take 3-5 minutes)
+        logger.info(f"📞 Calling handle_meta_campaigns_loading for account: {account_id}")
         response = handle_meta_campaigns_loading(
             account_id=account_id,
             auth_token=auth_token,
             status_filter=state.get("status_filter")
         )
-        
+
+        logger.info(f"📥 Response received from campaigns loading: success={response.get('success')}")
         state["campaigns_loading"] = False
-        
+
         if not response.get("success"):
-            logger.error(f"Failed to load campaigns: {response.get('error')}")
-            state["errors"].append("Failed to load campaigns from Meta")
+            error_msg = response.get('error', 'Unknown error')
+            logger.error(f"❌ Failed to load campaigns: {error_msg}")
+            logger.error(f"Full response: {response}")
+            state["errors"].append(f"Failed to load campaigns from Meta: {error_msg}")
             return state
-        
+
         # Extract campaigns data
         data = response.get("data", {})
+        logger.info(f"📊 Data structure: {list(data.keys()) if data else 'None'}")
         campaigns = data.get("campaigns", [])
+        logger.info(f"🎯 Extracted {len(campaigns)} campaigns from response")
         
         if not campaigns:
             logger.warning("No campaigns found for this account")
@@ -185,8 +191,11 @@ def meta_agent_4_campaign_selection(state: Dict[str, Any]) -> Dict[str, Any]:
             f"I found {len(campaigns)} campaigns in your account. "
             "Please select the campaign(s) you'd like to analyze."
         )
-        
-        logger.info(f"Loaded {len(campaigns)} campaigns successfully")
+
+        logger.info(f"✅ Loaded {len(campaigns)} campaigns successfully")
+        logger.info(f"✅ Set campaign_selection_options with {len(campaign_options)} options")
+        logger.info(f"✅ Set needs_user_input=True, needs_campaign_selection=True")
+        logger.info(f"Sample campaign: {campaign_options[0] if campaign_options else 'None'}")
         
         # Add to triggered endpoints for MongoDB
         if "triggered_endpoints" not in state:

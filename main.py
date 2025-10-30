@@ -86,6 +86,29 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Add lifecycle management for MongoDB connection
+@app.on_event("startup")
+async def startup_event():
+    """Initialize MongoDB connection on startup"""
+    try:
+        logger.info("Starting application and connecting to MongoDB...")
+        await mongo_manager.connect()
+        logger.info("Application startup complete")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB during startup: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close MongoDB connection on shutdown"""
+    try:
+        logger.info("Shutting down application...")
+        await mongo_manager.close()
+        logger.info("Application shutdown complete")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+
 # Initialize managers
 auth_manager = AuthManager()
 security = HTTPBearer()
@@ -110,8 +133,11 @@ def save_response(endpoint_name: str, cache_minutes: int = 0):
             property_id = kwargs.get('property_id')
             request_params = {k: v for k, v in kwargs.items() if k != 'current_user'}
             
-            # Try to get cached response if caching is enabled
-            if cache_minutes > 0:
+            # Check MongoDB connection health before attempting operations
+            connection_healthy = await mongo_manager.ensure_connection()
+
+            # Try to get cached response if caching is enabled and connection is healthy
+            if cache_minutes > 0 and connection_healthy:
                 try:
                     cached_response = await mongo_manager.get_cached_response(
                         endpoint=endpoint_name,
@@ -121,28 +147,33 @@ def save_response(endpoint_name: str, cache_minutes: int = 0):
                         property_id=property_id,
                         max_age_minutes=cache_minutes
                     )
-                    
+
                     if cached_response:
                         logger.info(f"Returning cached response for {endpoint_name}")
                         return cached_response
                 except Exception as e:
                     logger.warning(f"Cache lookup failed for {endpoint_name}: {e}")
+            elif not connection_healthy:
+                logger.warning(f"MongoDB connection unhealthy, skipping cache lookup for {endpoint_name}")
             
             # Execute the original function
             response_data = await func(*args, **kwargs)
-            
-            # Save/update in MongoDB
-            try:
-                await mongo_manager.save_endpoint_response(
-                    endpoint=endpoint_name,
-                    user_email=user_email,
-                    request_params=request_params,
-                    response_data=response_data,
-                    customer_id=customer_id,
-                    property_id=property_id
-                )
-            except Exception as e:
-                logger.warning(f"Failed to save response for {endpoint_name}: {e}")
+
+            # Save/update in MongoDB only if connection is healthy
+            if connection_healthy:
+                try:
+                    await mongo_manager.save_endpoint_response(
+                        endpoint=endpoint_name,
+                        user_email=user_email,
+                        request_params=request_params,
+                        response_data=response_data,
+                        customer_id=customer_id,
+                        property_id=property_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save response for {endpoint_name}: {e}")
+            else:
+                logger.warning(f"MongoDB connection unhealthy, skipping save for {endpoint_name}")
             
             return response_data
         return wrapper

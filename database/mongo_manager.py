@@ -10,20 +10,65 @@ logger = logging.getLogger(__name__)
 
 class MongoManager:
     def __init__(self):
+        """Initialize MongoDB manager with proper connection pooling for AWS App Runner"""
         try:
             self.connection_string = os.getenv('MONGODB_CONNECTION_STRING')
             if not self.connection_string:
                 raise ValueError("MONGODB_CONNECTION_STRING not found in environment variables")
-            
+
+            # Create client with optimized settings for AWS App Runner
+            # These aggressive timeouts ensure fast failure and quick recovery
             self.client = motor.motor_asyncio.AsyncIOMotorClient(
                 self.connection_string,
-                serverSelectionTimeoutMS=5000  # 5 second timeout
+                serverSelectionTimeoutMS=3000,  # 3 second timeout for server selection (reduced from 5s)
+                connectTimeoutMS=5000,  # 5 second connection timeout (reduced from 10s)
+                socketTimeoutMS=10000,  # 10 second socket timeout (reduced from 45s) - fail fast!
+                maxPoolSize=50,  # Maximum connections in pool
+                minPoolSize=5,  # Minimum connections to maintain (reduced from 10)
+                maxIdleTimeMS=30000,  # Close connections idle for 30 seconds (reduced from 45s)
+                retryWrites=True,  # Retry failed writes
+                retryReads=True,  # Retry failed reads
+                heartbeatFrequencyMS=10000,  # Check connection health every 10 seconds
+                waitQueueTimeoutMS=3000,  # Wait max 3 seconds for connection from pool
             )
-            # Verify connection
-            self.client.server_info()
             self.db = self.client.internal_dashboard
+            logger.info("MongoDB client initialized with connection pooling")
+
         except Exception as e:
+            logger.error(f"Failed to initialize MongoDB client: {str(e)}")
             raise ConnectionError(f"Failed to connect to MongoDB: {str(e)}")
+
+    async def connect(self):
+        """Async method to verify connection - called during FastAPI startup"""
+        try:
+            # Ping database to verify connection
+            await self.client.admin.command('ping')
+            logger.info("Successfully connected to MongoDB")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {str(e)}")
+            raise ConnectionError(f"Failed to verify MongoDB connection: {str(e)}")
+
+    async def close(self):
+        """Close MongoDB connection - called during FastAPI shutdown"""
+        try:
+            if self.client:
+                self.client.close()
+                logger.info("MongoDB connection closed")
+        except Exception as e:
+            logger.error(f"Error closing MongoDB connection: {str(e)}")
+
+    async def ensure_connection(self):
+        """
+        Verify MongoDB connection is alive before using it.
+        Call this before critical operations to fail fast on dead connections.
+        """
+        try:
+            await self.client.admin.command('ping', maxTimeMS=2000)
+            return True
+        except Exception as e:
+            logger.warning(f"MongoDB connection check failed: {e}")
+            return False
         
     def _serialize_response_data(self, data: Any) -> Any:
         """Convert Pydantic models and other objects to MongoDB-compatible format"""

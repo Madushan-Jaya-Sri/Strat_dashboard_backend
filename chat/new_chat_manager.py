@@ -358,20 +358,28 @@ class ChatManager:
         
         # Handle cases where user input is needed
         if state.get("needs_user_input"):
+            logger.info(f"🔍 needs_user_input is True")
             # For Meta Ads dropdown selections
             if state.get("campaign_selection_options"):
+                num_options = len(state["campaign_selection_options"])
+                logger.info(f"✅ Setting requires_selection for campaigns with {num_options} options")
                 endpoint_data["requires_selection"] = {
                     "type": "campaigns",
                     "options": state["campaign_selection_options"],
                     "prompt": state.get("user_clarification_prompt")
                 }
+                logger.info(f"📤 requires_selection set: {endpoint_data['requires_selection']['type']}")
             elif state.get("adset_selection_options"):
+                num_options = len(state["adset_selection_options"])
+                logger.info(f"✅ Setting requires_selection for adsets with {num_options} options")
                 endpoint_data["requires_selection"] = {
                     "type": "adsets",
                     "options": state["adset_selection_options"],
                     "prompt": state.get("user_clarification_prompt")
                 }
             elif state.get("ad_selection_options"):
+                num_options = len(state["ad_selection_options"])
+                logger.info(f"✅ Setting requires_selection for ads with {num_options} options")
                 endpoint_data["requires_selection"] = {
                     "type": "ads",
                     "options": state["ad_selection_options"],
@@ -379,6 +387,7 @@ class ChatManager:
                 }
             else:
                 # General clarification needed
+                logger.info(f"⚠️ needs_user_input=True but no selection_options found")
                 response_text = state.get("user_clarification_prompt", response_text)
         
         return ChatResponse(

@@ -17,11 +17,14 @@ import os
 logger = logging.getLogger(__name__)
 
 # Configuration
-# API_BASE_URL = os.getenv("API_BASE_URL", "https://3ixmj4hf2a.us-east-2.awsapprunner.com")
-API_BASE_URL= "http://localhost:8000"
-REQUEST_TIMEOUT = 240  # seconds
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+# Use environment variable if set, otherwise detect if running locally or on AWS
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+# For AWS deployment, set environment variable: API_BASE_URL=https://3ixmj4hf2a.us-east-2.awsapprunner.com
+logger.info(f"🌐 API Client using base URL: {API_BASE_URL}")
+
+REQUEST_TIMEOUT = 30  # seconds (reduced from 240s = 4 minutes!)
+MAX_RETRIES = 2  # retries (reduced from 3)
+RETRY_DELAY = 1  # seconds (reduced from 2s)
 
 
 # ============================================================================
@@ -60,16 +63,18 @@ class APIClient:
         self,
         endpoint: Dict[str, Any],
         params: Dict[str, Any],
-        retry: bool = True
+        retry: bool = True,
+        timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Call a single endpoint with parameters
-        
+
         Args:
             endpoint: Endpoint definition dict with 'path', 'method', 'params', etc.
             params: Parameters to pass (path params, query params, body)
             retry: Whether to retry on failure
-            
+            timeout: Custom timeout in seconds (defaults to REQUEST_TIMEOUT)
+
         Returns:
             Dict with endpoint response data and metadata
         """
@@ -107,8 +112,10 @@ class APIClient:
                     full_url = f"{url}?{urlencode(query_params)}"
                     logger.info(f"🔗 Complete URL with params: {full_url}")
 
+                request_timeout = timeout if timeout is not None else REQUEST_TIMEOUT
+
                 if method == 'GET':
-                    response = self.session.get(url, params=query_params, timeout=REQUEST_TIMEOUT)
+                    response = self.session.get(url, params=query_params, timeout=request_timeout)
                     logger.info(f"✅ Actual request URL: {response.url}")
 
                 elif method == 'POST':
@@ -116,7 +123,7 @@ class APIClient:
                         url,
                         params=query_params,
                         json=body,
-                        timeout=REQUEST_TIMEOUT
+                        timeout=request_timeout
                     )
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
@@ -650,35 +657,38 @@ def handle_meta_campaigns_loading(
     """
     Special handler for Meta campaigns list endpoint
     This endpoint can take several minutes due to pagination
-    
+
     Args:
-        account_id: Meta ad account ID
+        account_id: Meta ad account ID (will be normalized to include act_ prefix)
         auth_token: Meta auth token
         status_filter: Optional status filter
-        
+
     Returns:
         Response with all campaigns
     """
     logger.info("=== LOADING ALL META CAMPAIGNS (This may take several minutes) ===")
-    
+
+    # Normalize account ID to ensure it has act_ prefix
+    normalized_account_id = account_id if account_id.startswith('act_') else f'act_{account_id}'
+    logger.info(f"📋 Normalized account ID: {normalized_account_id} (original: {account_id})")
+
     endpoint = {
         'name': 'get_meta_campaigns_list',
-        'path': f'/api/meta/ad-accounts/{account_id}/campaigns/list',
+        'path': f'/api/meta/ad-accounts/{normalized_account_id}/campaigns/list',
         'method': 'GET',
-        'params': ['account_id']
+        'params': []  # account_id is in path, not query params
     }
-    
-    params = {
-        'account_id': account_id
-    }
-    
+
+    params = {}  # No params needed - account_id is in the path
+
     if status_filter:
         params['status'] = ','.join(status_filter)
-    
+
     client = APIClient(base_url=API_BASE_URL, auth_token=auth_token)
-    
-    # This call may take 3-5 minutes
-    response = client.call_endpoint(endpoint, params, retry=True)
+
+    # This call may take longer for accounts with many campaigns (249 campaigns in this case)
+    # Use extended timeout of 120 seconds (2 minutes) for this specific endpoint
+    response = client.call_endpoint(endpoint, params, retry=True, timeout=120)
     
     if response.get('success'):
         campaigns = response.get('data', {}).get('campaigns', [])
