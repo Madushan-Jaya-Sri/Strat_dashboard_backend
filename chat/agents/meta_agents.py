@@ -144,26 +144,33 @@ def meta_agent_4_campaign_selection(state: Dict[str, Any]) -> Dict[str, Any]:
         # Load all campaigns using internal API (fast, no HTTP timeout)
         logger.info(f"📞 Calling handle_meta_campaigns_loading for account: {account_id}")
 
-        # Import asyncio to handle the async call
+        # Use synchronous wrapper to call async function from sync context
         import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        import nest_asyncio
 
-        # Call async function
-        try:
-            loop = asyncio.get_running_loop()
-            response = loop.run_until_complete(handle_meta_campaigns_loading(
-                account_id=account_id,
-                auth_token=auth_token,
-                user_email=state.get("user_email"),
-                status_filter=state.get("status_filter")
-            ))
-        except RuntimeError:
-            # No running loop, use asyncio.run()
-            response = asyncio.run(handle_meta_campaigns_loading(
-                account_id=account_id,
-                auth_token=auth_token,
-                user_email=state.get("user_email"),
-                status_filter=state.get("status_filter")
-            ))
+        # Apply nest_asyncio to allow nested event loops
+        nest_asyncio.apply()
+
+        # Create new event loop in thread pool to avoid conflicts
+        def run_async_in_thread():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                from chat.utils.api_client import handle_meta_campaigns_loading
+                return new_loop.run_until_complete(handle_meta_campaigns_loading(
+                    account_id=account_id,
+                    auth_token=auth_token,
+                    user_email=state.get("user_email"),
+                    status_filter=state.get("status_filter")
+                ))
+            finally:
+                new_loop.close()
+
+        # Execute in thread pool
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_in_thread)
+            response = future.result(timeout=180)  # 3 minute timeout
 
         logger.info(f"📥 Response received from campaigns loading: success={response.get('success')}")
         state["campaigns_loading"] = False
@@ -221,9 +228,15 @@ def meta_agent_4_campaign_selection(state: Dict[str, Any]) -> Dict[str, Any]:
         return state
         
     except Exception as e:
-        logger.error(f"Error in campaign selection: {e}")
-        state["errors"].append(f"Campaign selection failed: {str(e)}")
+        logger.error(f"Error in campaign selection: {e}", exc_info=True)
+        error_msg = f"Failed to load campaigns: {str(e)}"
+        state["errors"].append(error_msg)
         state["campaigns_loading"] = False
+        state["formatted_response"] = (
+            f"⚠️ I encountered an error while loading your campaigns: {str(e)}\n\n"
+            "Please try again or contact support if the issue persists."
+        )
+        state["is_complete"] = True  # Mark as complete so error is shown
         return state
 
 
