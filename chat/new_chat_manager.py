@@ -457,13 +457,24 @@ class ChatManager:
             if not session_doc:
                 return None
 
-            # Reconstruct state from session document
-            state = {
-                "session_id": session_id,
-                "user_email": session_doc.get("user_email"),
-                "module_type": module_type,
-                "parameters": session_doc.get("parameters", {})
-            }
+            # Retrieve the full saved state
+            saved_state = session_doc.get("state")
+
+            if saved_state:
+                # Use the saved state and add session info
+                state = dict(saved_state)  # Create a copy
+                state["session_id"] = session_id
+                state["user_email"] = session_doc.get("user_email")
+                logger.info(f"✅ Retrieved full state with {len(state)} fields for session {session_id}")
+            else:
+                # Fallback to minimal state if no saved state
+                logger.warning(f"⚠️ No saved state found for session {session_id}, using minimal state")
+                state = {
+                    "session_id": session_id,
+                    "user_email": session_doc.get("user_email"),
+                    "module_type": module_type,
+                    "parameters": session_doc.get("parameters", {})
+                }
 
             return state
 

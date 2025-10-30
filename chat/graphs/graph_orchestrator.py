@@ -332,7 +332,8 @@ class GraphOrchestrator:
         """Save conversation to MongoDB in the correct format"""
         try:
             # Extract response and metadata
-            assistant_message = final_state.get("formatted_response", "No response generated")
+            # Use user_clarification_prompt if formatted_response is None (waiting for user input)
+            assistant_message = final_state.get("formatted_response") or final_state.get("user_clarification_prompt") or "Processing your request..."
             triggered_endpoints = final_state.get("triggered_endpoints", [])
             visualizations = final_state.get("visualizations")
             
@@ -344,7 +345,10 @@ class GraphOrchestrator:
             
             logger.info(f"💾 Saving to MongoDB - Session: {session_id}, Module: {module_type}")
             logger.info(f"📝 User: {user_question[:50]}...")
-            logger.info(f"🤖 Assistant: {assistant_message[:50]}...")
+            if assistant_message:
+                logger.info(f"🤖 Assistant: {assistant_message[:50]}...")
+            else:
+                logger.info(f"🤖 Assistant: [Waiting for user input]")
             
             # Use the mongo_manager's save method
             await self.mongo_manager.save_chat_session(
@@ -358,7 +362,8 @@ class GraphOrchestrator:
                 account_id=account_id,
                 page_id=page_id,
                 triggered_endpoints=triggered_endpoints,
-                visualizations=visualizations
+                visualizations=visualizations,
+                state=final_state  # Save full state for resumption
             )
             
             logger.info(f"✅ Successfully saved conversation to MongoDB")

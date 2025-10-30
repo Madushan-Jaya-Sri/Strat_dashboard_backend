@@ -180,7 +180,8 @@ class MongoManager:
         account_id: Optional[str] = None,
         page_id: Optional[str] = None,
         triggered_endpoints: List[Dict[str, Any]] = None,
-        visualizations: Optional[Dict[str, Any]] = None
+        visualizations: Optional[Dict[str, Any]] = None,
+        state: Optional[Dict[str, Any]] = None
     ):
         """Save or update a chat session in MongoDB"""
         try:
@@ -197,35 +198,46 @@ class MongoManager:
 
             current_time = datetime.utcnow()
 
+            # Clean state for storage (remove sensitive/non-serializable data)
+            cleaned_state = None
+            if state:
+                cleaned_state = {k: v for k, v in state.items() if k not in ['auth_token', 'llm_client']}
+                logger.info(f"   Saving state with {len(cleaned_state)} fields")
+
             # Check if session exists
             existing_session = await collection.find_one({"session_id": session_id})
 
             if existing_session:
                 logger.info(f"📝 Found existing session {session_id}, appending messages")
-                # Update existing session - append messages
+                # Update existing session - append messages and update state
+                update_ops = {
+                    "$push": {
+                        "messages": {
+                            "$each": [
+                                {
+                                    "role": "user",
+                                    "content": user_message,
+                                    "timestamp": current_time
+                                },
+                                {
+                                    "role": "assistant",
+                                    "content": assistant_message,
+                                    "timestamp": current_time
+                                }
+                            ]
+                        }
+                    },
+                    "$set": {
+                        "last_activity": current_time
+                    }
+                }
+                # Add state to $set if provided
+                if cleaned_state:
+                    update_ops["$set"]["state"] = cleaned_state
+
                 result = await collection.update_one(
                     {"session_id": session_id},
-                    {
-                        "$push": {
-                            "messages": {
-                                "$each": [
-                                    {
-                                        "role": "user",
-                                        "content": user_message,
-                                        "timestamp": current_time
-                                    },
-                                    {
-                                        "role": "assistant",
-                                        "content": assistant_message,
-                                        "timestamp": current_time
-                                    }
-                                ]
-                            }
-                        },
-                        "$set": {
-                            "last_activity": current_time
-                        }
-                    }
+                    update_ops
                 )
                 logger.info(f"✅ Updated existing chat session: {session_id} (matched: {result.matched_count}, modified: {result.modified_count})")
             else:
@@ -242,6 +254,9 @@ class MongoManager:
                     "created_at": current_time,
                     "last_activity": current_time,
                     "is_active": True,
+                    "triggered_endpoints": triggered_endpoints or [],
+                    "visualizations": visualizations,
+                    "state": cleaned_state,  # Save full state for resumption
                     "messages": [
                         {
                             "role": "user",
