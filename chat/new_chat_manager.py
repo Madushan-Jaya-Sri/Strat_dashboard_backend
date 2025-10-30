@@ -387,6 +387,8 @@ class ChatManager:
                     "options": campaign_opts,
                     "prompt": state.get("user_clarification_prompt", "Please select campaigns")
                 }
+                # Use clarification prompt as response text
+                response_text = state.get("user_clarification_prompt", "Please select campaign(s) to continue")
                 logger.info(f"📤 requires_selection set: {endpoint_data['requires_selection']['type']}")
             elif state.get("adset_selection_options") and len(state.get("adset_selection_options", [])) > 0:
                 adset_opts = state["adset_selection_options"]
@@ -396,6 +398,7 @@ class ChatManager:
                     "options": adset_opts,
                     "prompt": state.get("user_clarification_prompt", "Please select adsets")
                 }
+                response_text = state.get("user_clarification_prompt", "Please select adset(s) to continue")
             elif state.get("ad_selection_options") and len(state.get("ad_selection_options", [])) > 0:
                 ad_opts = state["ad_selection_options"]
                 logger.info(f"✅ Setting requires_selection for ads with {len(ad_opts)} options")
@@ -404,11 +407,16 @@ class ChatManager:
                     "options": state["ad_selection_options"],
                     "prompt": state.get("user_clarification_prompt")
                 }
+                response_text = state.get("user_clarification_prompt", "Please select ad(s) to continue")
             else:
                 # General clarification needed
                 logger.info(f"⚠️ needs_user_input=True but no selection_options found")
                 response_text = state.get("user_clarification_prompt", response_text)
-        
+
+        # Ensure response_text is never None
+        if response_text is None:
+            response_text = "Processing your request..."
+
         return ChatResponse(
             response=response_text,
             session_id=session_id,
