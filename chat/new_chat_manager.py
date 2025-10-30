@@ -331,15 +331,22 @@ class ChatManager:
     ) -> ChatResponse:
         """
         Convert final state to ChatResponse
-        
+
         Args:
             state: Final state from graph
             session_id: Session ID
             module_type: Module type
-            
+
         Returns:
             ChatResponse object
         """
+        logger.info(f"🔍 Converting state to response")
+        logger.info(f"🔍 State keys: {list(state.keys())}")
+        logger.info(f"🔍 needs_user_input: {state.get('needs_user_input')}")
+        logger.info(f"🔍 campaign_selection_options exists: {'campaign_selection_options' in state}")
+        if 'campaign_selection_options' in state:
+            logger.info(f"🔍 campaign_selection_options length: {len(state['campaign_selection_options'])}")
+
         # Extract response text
         response_text = state.get("formatted_response", "No response generated")
         
