@@ -267,8 +267,17 @@ def wait_for_user_input(state: MetaAdsState) -> MetaAdsState:
 def wait_for_campaign_selection(state: MetaAdsState) -> MetaAdsState:
     """Wait for user to select campaigns"""
     logger.info("=== WAIT FOR CAMPAIGN SELECTION ===")
+
+    campaign_opts = state.get("campaign_selection_options")
+    logger.info(f"📥 Received state with campaign_selection_options: {campaign_opts is not None}")
+    if campaign_opts:
+        logger.info(f"📥 campaign_selection_options has {len(campaign_opts)} items")
+
     state["current_agent"] = "wait_for_campaign_selection"
     state["needs_user_input"] = True
+    # Don't set is_complete=True - conversation is incomplete until user selects campaigns
+
+    logger.info(f"📤 Returning state - needs_user_input: True, needs_campaign_selection: {state.get('needs_campaign_selection')}")
     return state
 
 

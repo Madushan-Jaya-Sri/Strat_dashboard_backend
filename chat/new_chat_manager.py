@@ -341,11 +341,15 @@ class ChatManager:
             ChatResponse object
         """
         logger.info(f"🔍 Converting state to response")
-        logger.info(f"🔍 State keys: {list(state.keys())}")
         logger.info(f"🔍 needs_user_input: {state.get('needs_user_input')}")
-        logger.info(f"🔍 campaign_selection_options exists: {'campaign_selection_options' in state}")
-        if 'campaign_selection_options' in state:
-            logger.info(f"🔍 campaign_selection_options length: {len(state['campaign_selection_options'])}")
+        logger.info(f"🔍 needs_campaign_selection: {state.get('needs_campaign_selection')}")
+        logger.info(f"🔍 is_complete: {state.get('is_complete')}")
+
+        campaign_opts = state.get('campaign_selection_options')
+        if campaign_opts is not None:
+            logger.info(f"✅ campaign_selection_options has {len(campaign_opts)} options")
+        else:
+            logger.warning(f"⚠️ campaign_selection_options is None")
 
         # Extract response text
         response_text = state.get("formatted_response", "No response generated")
@@ -364,29 +368,37 @@ class ChatManager:
         }
         
         # Handle cases where user input is needed
-        if state.get("needs_user_input"):
-            logger.info(f"🔍 needs_user_input is True")
+        # Check both needs_user_input AND specific selection flags for Meta Ads
+        needs_selection = (
+            state.get("needs_user_input") or
+            state.get("needs_campaign_selection") or
+            state.get("needs_adset_selection") or
+            state.get("needs_ad_selection")
+        )
+
+        if needs_selection:
+            logger.info(f"🔍 User input/selection needed")
             # For Meta Ads dropdown selections
-            if state.get("campaign_selection_options"):
-                num_options = len(state["campaign_selection_options"])
-                logger.info(f"✅ Setting requires_selection for campaigns with {num_options} options")
+            campaign_opts = state.get("campaign_selection_options")
+            if campaign_opts and len(campaign_opts) > 0:
+                logger.info(f"✅ Setting requires_selection for campaigns with {len(campaign_opts)} options")
                 endpoint_data["requires_selection"] = {
                     "type": "campaigns",
-                    "options": state["campaign_selection_options"],
-                    "prompt": state.get("user_clarification_prompt")
+                    "options": campaign_opts,
+                    "prompt": state.get("user_clarification_prompt", "Please select campaigns")
                 }
                 logger.info(f"📤 requires_selection set: {endpoint_data['requires_selection']['type']}")
-            elif state.get("adset_selection_options"):
-                num_options = len(state["adset_selection_options"])
-                logger.info(f"✅ Setting requires_selection for adsets with {num_options} options")
+            elif state.get("adset_selection_options") and len(state.get("adset_selection_options", [])) > 0:
+                adset_opts = state["adset_selection_options"]
+                logger.info(f"✅ Setting requires_selection for adsets with {len(adset_opts)} options")
                 endpoint_data["requires_selection"] = {
                     "type": "adsets",
-                    "options": state["adset_selection_options"],
-                    "prompt": state.get("user_clarification_prompt")
+                    "options": adset_opts,
+                    "prompt": state.get("user_clarification_prompt", "Please select adsets")
                 }
-            elif state.get("ad_selection_options"):
-                num_options = len(state["ad_selection_options"])
-                logger.info(f"✅ Setting requires_selection for ads with {num_options} options")
+            elif state.get("ad_selection_options") and len(state.get("ad_selection_options", [])) > 0:
+                ad_opts = state["ad_selection_options"]
+                logger.info(f"✅ Setting requires_selection for ads with {len(ad_opts)} options")
                 endpoint_data["requires_selection"] = {
                     "type": "ads",
                     "options": state["ad_selection_options"],
