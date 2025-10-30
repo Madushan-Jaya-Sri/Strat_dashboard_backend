@@ -649,54 +649,78 @@ def calculate_processing_time(state: Dict[str, Any]) -> Optional[float]:
 # SPECIAL HANDLERS FOR SPECIFIC MODULES
 # ============================================================================
 
-def handle_meta_campaigns_loading(
+async def handle_meta_campaigns_loading(
     account_id: str,
     auth_token: str,
+    user_email: str,
     status_filter: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
-    Special handler for Meta campaigns list endpoint
-    This endpoint can take several minutes due to pagination
+    Special handler for Meta campaigns list endpoint using INTERNAL API calls.
+    Uses direct function calls instead of HTTP to avoid AWS App Runner timeouts.
 
     Args:
         account_id: Meta ad account ID (will be normalized to include act_ prefix)
         auth_token: Meta auth token
+        user_email: User's email for authentication
         status_filter: Optional status filter
 
     Returns:
         Response with all campaigns
     """
-    logger.info("=== LOADING ALL META CAMPAIGNS (This may take several minutes) ===")
+    logger.info("=== LOADING ALL META CAMPAIGNS (Using internal API call) ===")
 
     # Normalize account ID to ensure it has act_ prefix
     normalized_account_id = account_id if account_id.startswith('act_') else f'act_{account_id}'
     logger.info(f"📋 Normalized account ID: {normalized_account_id} (original: {account_id})")
 
-    endpoint = {
-        'name': 'get_meta_campaigns_list',
-        'path': f'/api/meta/ad-accounts/{normalized_account_id}/campaigns/list',
-        'method': 'GET',
-        'params': []  # account_id is in path, not query params
-    }
+    try:
+        # Import internal caller
+        from chat.utils.internal_api_caller import call_internal_endpoint
 
-    params = {}  # No params needed - account_id is in the path
+        # Build current_user dict
+        current_user = {
+            "email": user_email,
+            "auth_token": auth_token,
+            "auth_provider": "facebook"
+        }
 
-    if status_filter:
-        params['status'] = ','.join(status_filter)
+        # Prepare params
+        params = {
+            "account_id": normalized_account_id
+        }
 
-    client = APIClient(base_url=API_BASE_URL, auth_token=auth_token)
+        if status_filter:
+            params['status'] = ','.join(status_filter)
 
-    # This call may take longer for accounts with many campaigns (249 campaigns in this case)
-    # Use extended timeout of 120 seconds (2 minutes) for this specific endpoint
-    response = client.call_endpoint(endpoint, params, retry=True, timeout=120)
-    
-    if response.get('success'):
-        campaigns = response.get('data', {}).get('campaigns', [])
-        logger.info(f"Loaded {len(campaigns)} campaigns successfully")
-    else:
-        logger.error(f"Failed to load campaigns: {response.get('error')}")
-    
-    return response
+        # Call internal endpoint (bypasses HTTP timeout)
+        endpoint_path = f'/api/meta/ad-accounts/{normalized_account_id}/campaigns/list'
+
+        logger.info(f"🔧 Calling internal API: {endpoint_path}")
+        response = await call_internal_endpoint(
+            endpoint_name='get_meta_campaigns_list',
+            endpoint_path=endpoint_path,
+            method='GET',
+            params=params,
+            current_user=current_user
+        )
+
+        if response.get('success'):
+            campaigns = response.get('data', {}).get('campaigns', [])
+            logger.info(f"✅ Loaded {len(campaigns)} campaigns successfully (internal call)")
+        else:
+            logger.error(f"❌ Failed to load campaigns: {response.get('error')}")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"❌ Error in internal campaigns loading: {e}", exc_info=True)
+        return {
+            "success": False,
+            "endpoint": "get_meta_campaigns_list",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 def handle_meta_adsets_loading(

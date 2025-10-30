@@ -141,13 +141,29 @@ def meta_agent_4_campaign_selection(state: Dict[str, Any]) -> Dict[str, Any]:
         
         logger.info(f"Loading campaigns for account: {account_id}")
         
-        # Load all campaigns (this can take 3-5 minutes)
+        # Load all campaigns using internal API (fast, no HTTP timeout)
         logger.info(f"📞 Calling handle_meta_campaigns_loading for account: {account_id}")
-        response = handle_meta_campaigns_loading(
-            account_id=account_id,
-            auth_token=auth_token,
-            status_filter=state.get("status_filter")
-        )
+
+        # Import asyncio to handle the async call
+        import asyncio
+
+        # Call async function
+        try:
+            loop = asyncio.get_running_loop()
+            response = loop.run_until_complete(handle_meta_campaigns_loading(
+                account_id=account_id,
+                auth_token=auth_token,
+                user_email=state.get("user_email"),
+                status_filter=state.get("status_filter")
+            ))
+        except RuntimeError:
+            # No running loop, use asyncio.run()
+            response = asyncio.run(handle_meta_campaigns_loading(
+                account_id=account_id,
+                auth_token=auth_token,
+                user_email=state.get("user_email"),
+                status_filter=state.get("status_filter")
+            ))
 
         logger.info(f"📥 Response received from campaigns loading: success={response.get('success')}")
         state["campaigns_loading"] = False

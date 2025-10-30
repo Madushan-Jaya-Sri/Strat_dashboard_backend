@@ -79,13 +79,41 @@ app.add_middleware(
         "https://strategy-dashboard.momentro.com",
         "http://localhost:3000",
         "http://localhost:5173",
-        "https://*.momentro.com",  # Allow all momentro subdomains
+        # Note: Wildcard patterns don't work, must list explicitly
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+# Add global exception handler to ensure CORS headers on errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler that ensures CORS headers are included"""
+    logger.error(f"Global exception handler caught: {exc}", exc_info=True)
+
+    # Get origin from request
+    origin = request.headers.get("origin", "")
+
+    # Create error response
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)}
+    )
+
+    # Add CORS headers
+    if origin in [
+        "https://strategy-dashboard.momentro.com",
+        "http://localhost:3000",
+        "http://localhost:5173"
+    ]:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+
+    return response
 
 # Add lifecycle management for MongoDB connection
 @app.on_event("startup")
