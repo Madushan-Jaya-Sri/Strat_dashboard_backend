@@ -165,7 +165,12 @@ class MetaAdsState(BaseChatState):
     available_campaigns: Optional[List[Dict[str, Any]]]
     available_adsets: Optional[List[Dict[str, Any]]]
     available_ads: Optional[List[Dict[str, Any]]]
-    
+
+    # Formatted selection options for frontend dropdowns
+    campaign_selection_options: Optional[List[Dict[str, Any]]]
+    adset_selection_options: Optional[List[Dict[str, Any]]]
+    ad_selection_options: Optional[List[Dict[str, Any]]]
+
     # Flags
     is_account_level: bool
     is_campaign_level: bool
@@ -316,6 +321,9 @@ def create_initial_state(
             "available_campaigns": None,
             "available_adsets": None,
             "available_ads": None,
+            "campaign_selection_options": None,
+            "adset_selection_options": None,
+            "ad_selection_options": None,
             "is_account_level": False,
             "is_campaign_level": False,
             "is_adset_level": False,
