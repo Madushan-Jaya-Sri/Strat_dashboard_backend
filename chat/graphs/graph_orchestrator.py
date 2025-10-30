@@ -130,9 +130,11 @@ class GraphOrchestrator:
             else:
                 raise ValueError(f"Unsupported module type: {module_type}")
             
-            # Save conversation to MongoDB if completed successfully
-            logger.info(f"🔍 Checking MongoDB save conditions - mongo_manager exists: {self.mongo_manager is not None}, is_complete: {final_state.get('is_complete')}")
-            if self.mongo_manager and final_state.get("is_complete"):
+            # Save conversation to MongoDB if completed OR if waiting for user input (for resumption)
+            logger.info(f"🔍 Checking MongoDB save conditions - mongo_manager exists: {self.mongo_manager is not None}, is_complete: {final_state.get('is_complete')}, needs_user_input: {final_state.get('needs_user_input')}")
+            should_save = final_state.get("is_complete") or final_state.get("needs_user_input")
+
+            if self.mongo_manager and should_save:
                 try:
                     await self._save_conversation_to_mongodb(
                         session_id=session_id,
@@ -142,15 +144,15 @@ class GraphOrchestrator:
                         final_state=final_state,
                         context=prepared_context
                     )
-                    logger.info(f"✅ Conversation saved to MongoDB: {session_id}")
+                    logger.info(f"✅ Conversation saved to MongoDB: {session_id} (is_complete: {final_state.get('is_complete')}, needs_user_input: {final_state.get('needs_user_input')})")
                 except Exception as e:
                     logger.error(f"❌ Failed to save to MongoDB: {e}", exc_info=True)
                     # Don't fail the whole request if MongoDB save fails
             else:
                 if not self.mongo_manager:
                     logger.warning("⚠️ MongoDB manager is None - conversation not saved")
-                if not final_state.get("is_complete"):
-                    logger.warning("⚠️ is_complete flag is False/missing - conversation not saved")
+                if not should_save:
+                    logger.warning("⚠️ Neither is_complete nor needs_user_input is True - conversation not saved")
             
             logger.info(f"✅ Chat processing completed for module: {module_type}")
             
