@@ -424,27 +424,46 @@ async def run_meta_ads_chat(
     session_id: str,
     user_email: str,
     auth_token: str,
-    context: Dict[str, Any]
+    context: Dict[str, Any],
+    continue_from_state: Dict[str, Any] = None
 ) -> Dict[str, Any]:
-    """Run the complete Meta Ads chat workflow"""
+    """Run the complete Meta Ads chat workflow
+
+    Args:
+        user_question: User's question
+        session_id: Session identifier
+        user_email: User's email
+        auth_token: Meta authentication token
+        context: Additional context
+        continue_from_state: Optional previous state to continue from
+
+    Returns:
+        Final state with response
+    """
     logger.info(f"Starting Meta Ads chat for user: {user_email}")
-    
+
     try:
-        initial_state = create_initial_state(
-            user_question=user_question,
-            module_type="meta_ads",
-            session_id=session_id,
-            user_email=user_email,
-            auth_token=auth_token,
-            context=context
-        )
-        
+        # Use continue_from_state if provided, otherwise create initial state
+        if continue_from_state:
+            logger.info("Continuing from previous state")
+            initial_state = continue_from_state
+        else:
+            logger.info("Creating new initial state")
+            initial_state = create_initial_state(
+                user_question=user_question,
+                module_type="meta_ads",
+                session_id=session_id,
+                user_email=user_email,
+                auth_token=auth_token,
+                context=context
+            )
+
         app = create_meta_ads_graph()
         final_state = app.invoke(initial_state)
-        
+
         logger.info("Meta Ads chat completed successfully")
         return final_state
-        
+
     except Exception as e:
         logger.error(f"Error running Meta Ads chat: {e}")
         return {

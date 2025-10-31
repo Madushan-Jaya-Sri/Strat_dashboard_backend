@@ -125,8 +125,8 @@ class ChatManager:
         
         try:
             # Get previous state from MongoDB
-            previous_state = self._get_session_state(session_id, module_type)
-            
+            previous_state = await self._get_session_state(session_id, module_type)
+
             if not previous_state:
                 raise ValueError(f"Session {session_id} not found")
             
