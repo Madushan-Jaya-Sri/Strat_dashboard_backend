@@ -11,7 +11,6 @@ from chat.graphs.google_ads_graph import run_google_ads_chat
 from chat.graphs.ga4_graph import run_ga4_chat
 from chat.graphs.intent_graph import run_intent_chat
 from chat.graphs.meta_ads_graph import run_meta_ads_chat
-from chat.graphs.facebook_instagram_graphs import run_facebook_chat, run_instagram_chat
 from chat.states.chat_states import ModuleType
 
 # Initialize logger
@@ -48,7 +47,7 @@ class GraphOrchestrator:
     ) -> Dict[str, Any]:
         """
         Process a chat message by routing to appropriate module graph
-        
+
         Args:
             user_question: User's question
             module_type: Module type (google_ads, ga4, intent_insights, etc.)
@@ -56,24 +55,39 @@ class GraphOrchestrator:
             user_email: User's email
             auth_token: Authentication token (Google or Meta depending on module)
             context: Additional context from frontend (includes IDs, period, etc.)
-            
+
         Returns:
             Final state with response
         """
-        logger.info(f"🚀 Processing chat message for module: {module_type}")
-        logger.info(f"👤 User: {user_email}, Session: {session_id}")
-        logger.info(f"📦 Context: {context}")
-        
+        logger.info("=" * 80)
+        logger.info(f"🚀 GRAPH ORCHESTRATOR: Processing chat message")
+        logger.info(f"   Module: {module_type}")
+        logger.info(f"   User: {user_email}")
+        logger.info(f"   Session: {session_id}")
+        logger.info(f"   Question length: {len(user_question)} chars")
+        logger.info(f"   Question preview: {user_question[:100]}...")
+        logger.info(f"   Context: {context}")
+        logger.info(f"   Auth token present: {'Yes' if auth_token else 'No'}")
+
         try:
             # Validate module type
+            logger.info(f"🔍 GRAPH ORCHESTRATOR: Validating module type: {module_type}")
             if module_type not in [e.value for e in ModuleType]:
+                logger.error(f"❌ GRAPH ORCHESTRATOR: Invalid module type: {module_type}")
+                logger.error(f"   Valid module types: {[e.value for e in ModuleType]}")
                 raise ValueError(f"Invalid module type: {module_type}")
-            
+            logger.info(f"✅ GRAPH ORCHESTRATOR: Module type is valid")
+
             # Prepare context with module-specific parameters
+            logger.info(f"📦 GRAPH ORCHESTRATOR: Preparing module-specific context")
             prepared_context = self._prepare_module_context(module_type, context)
+            logger.info(f"📦 GRAPH ORCHESTRATOR: Context prepared: {prepared_context}")
             
             # Route to appropriate graph
+            logger.info(f"🎯 GRAPH ORCHESTRATOR: Routing to {module_type} graph")
+
             if module_type == ModuleType.GOOGLE_ADS.value:
+                logger.info(f"📞 GRAPH ORCHESTRATOR: Calling run_google_ads_chat()")
                 final_state = await run_google_ads_chat(
                     user_question=user_question,
                     session_id=session_id,
@@ -81,8 +95,10 @@ class GraphOrchestrator:
                     auth_token=auth_token,
                     context=prepared_context
                 )
-            
+                logger.info(f"✅ GRAPH ORCHESTRATOR: Google Ads chat completed")
+
             elif module_type == ModuleType.GOOGLE_ANALYTICS.value:
+                logger.info(f"📞 GRAPH ORCHESTRATOR: Calling run_ga4_chat()")
                 final_state = await run_ga4_chat(
                     user_question=user_question,
                     session_id=session_id,
@@ -90,8 +106,10 @@ class GraphOrchestrator:
                     auth_token=auth_token,
                     context=prepared_context
                 )
-            
+                logger.info(f"✅ GRAPH ORCHESTRATOR: Google Analytics chat completed")
+
             elif module_type == ModuleType.INTENT_INSIGHTS.value:
+                logger.info(f"📞 GRAPH ORCHESTRATOR: Calling run_intent_chat()")
                 final_state = await run_intent_chat(
                     user_question=user_question,
                     session_id=session_id,
@@ -99,8 +117,10 @@ class GraphOrchestrator:
                     auth_token=auth_token,
                     context=prepared_context
                 )
-            
+                logger.info(f"✅ GRAPH ORCHESTRATOR: Intent Insights chat completed")
+
             elif module_type == ModuleType.META_ADS.value:
+                logger.info(f"📞 GRAPH ORCHESTRATOR: Calling run_meta_ads_chat()")
                 final_state = await run_meta_ads_chat(
                     user_question=user_question,
                     session_id=session_id,
@@ -108,27 +128,16 @@ class GraphOrchestrator:
                     auth_token=auth_token,
                     context=prepared_context
                 )
-            
-            elif module_type == ModuleType.FACEBOOK.value:
-                final_state = await run_facebook_chat(
-                    user_question=user_question,
-                    session_id=session_id,
-                    user_email=user_email,
-                    auth_token=auth_token,
-                    context=prepared_context
-                )
-            
-            elif module_type == ModuleType.INSTAGRAM.value:
-                final_state = await run_instagram_chat(
-                    user_question=user_question,
-                    session_id=session_id,
-                    user_email=user_email,
-                    auth_token=auth_token,
-                    context=prepared_context
-                )
-            
+                logger.info(f"✅ GRAPH ORCHESTRATOR: Meta Ads chat completed")
+
             else:
+                logger.error(f"❌ GRAPH ORCHESTRATOR: Unsupported module type: {module_type}")
                 raise ValueError(f"Unsupported module type: {module_type}")
+
+            logger.info(f"📊 GRAPH ORCHESTRATOR: Final state keys: {list(final_state.keys())}")
+            logger.info(f"📊 GRAPH ORCHESTRATOR: Is complete: {final_state.get('is_complete')}")
+            logger.info(f"📊 GRAPH ORCHESTRATOR: Needs user input: {final_state.get('needs_user_input')}")
+            logger.info(f"📊 GRAPH ORCHESTRATOR: Triggered endpoints count: {len(final_state.get('triggered_endpoints', []))}")
             
             # Save conversation to MongoDB if completed OR if waiting for user input (for resumption)
             logger.info(f"🔍 Checking MongoDB save conditions - mongo_manager exists: {self.mongo_manager is not None}, is_complete: {final_state.get('is_complete')}, needs_user_input: {final_state.get('needs_user_input')}")
@@ -180,66 +189,104 @@ class GraphOrchestrator:
         """
         Continue a conversation after user provides additional input
         (Used for Meta Ads campaign/adset/ad selection flow)
-        
+
         Args:
             previous_state: Previous state that was waiting for input
             user_response: User's response (can be selection IDs or text)
             module_type: Module type
-            
+
         Returns:
             Updated state
         """
-        logger.info(f"🔄 Continuing conversation for module: {module_type}")
-        logger.info(f"💬 User response: {user_response}")
-        
+        logger.info("=" * 80)
+        logger.info(f"🔄 CONTINUE CONVERSATION")
+        logger.info(f"   Module: {module_type}")
+        logger.info(f"   User response: {user_response}")
+        logger.info(f"   Previous state has {len(previous_state)} keys")
+
         try:
+            import json
+
             # Update state with new user response
             state = previous_state.copy()
-            state["user_question"] = user_response
             state["needs_user_input"] = False
             state["user_clarification_prompt"] = None
-            
-            # For Meta Ads, handle selection responses
+
+            # For Meta Ads: Parse selection IDs from JSON
             if module_type == ModuleType.META_ADS.value:
-                current_agent = state.get("current_agent")
-                
-                # Parse user response as JSON array of IDs if it's a selection
+                logger.info("📋 Meta Ads module - parsing selection")
+
                 try:
-                    import json
+                    # Parse JSON array of selected IDs
                     selected_ids = json.loads(user_response)
-                    
-                    if current_agent == "wait_for_campaign_selection":
-                        state["selected_campaign_ids"] = selected_ids
-                        state["campaign_selection_options"] = None
-                        logger.info(f"✅ Campaign selection received: {len(selected_ids)} campaigns")
-                    
-                    elif current_agent == "wait_for_adset_selection":
-                        state["selected_adset_ids"] = selected_ids
-                        state["adset_selection_options"] = None
-                        logger.info(f"✅ AdSet selection received: {len(selected_ids)} adsets")
-                    
-                    elif current_agent == "wait_for_ad_selection":
-                        state["selected_ad_ids"] = selected_ids
-                        state["ad_selection_options"] = None
-                        logger.info(f"✅ Ad selection received: {len(selected_ids)} ads")
-                    
-                except json.JSONDecodeError:
-                    # Not a JSON array, treat as regular text question
-                    logger.info("User response is text, not selection")
+                    logger.info(f"✅ Parsed {len(selected_ids)} selected IDs: {selected_ids}")
+
+                    # Log all awaiting flags for debugging
+                    logger.info("=" * 80)
+                    logger.info("🔍 CHECKING SELECTION FLAGS:")
+                    logger.info(f"   awaiting_campaign_selection: {state.get('awaiting_campaign_selection')}")
+                    logger.info(f"   awaiting_adset_selection: {state.get('awaiting_adset_selection')}")
+                    logger.info(f"   awaiting_ad_selection: {state.get('awaiting_ad_selection')}")
+                    logger.info(f"   Current campaign_ids: {state.get('campaign_ids')}")
+                    logger.info(f"   Current adset_ids: {state.get('adset_ids')}")
+                    logger.info(f"   Current ad_ids: {state.get('ad_ids')}")
+                    logger.info(f"   Current granularity_level: {state.get('granularity_level')}")
+                    logger.info("=" * 80)
+
+                    # Determine what type of selection this is
+                    if state.get("awaiting_campaign_selection"):
+                        logger.info("📊 Storing selected campaign IDs")
+                        state["campaign_ids"] = selected_ids
+                        state["awaiting_campaign_selection"] = False
+                        logger.info(f"✅ Stored campaign_ids: {state['campaign_ids']}")
+
+                    elif state.get("awaiting_adset_selection"):
+                        logger.info("📊 Storing selected adset IDs")
+                        state["adset_ids"] = selected_ids
+                        state["awaiting_adset_selection"] = False
+                        # Keep campaign_ids for context (needed to know which campaigns these adsets belong to)
+                        logger.info(f"✅ Stored adset_ids: {state['adset_ids']}")
+                        logger.info(f"   Campaign IDs (preserved): {state.get('campaign_ids')}")
+
+                    elif state.get("awaiting_ad_selection"):
+                        logger.info("📊 Storing selected ad IDs")
+                        state["ad_ids"] = selected_ids
+                        state["awaiting_ad_selection"] = False
+                        # Keep campaign_ids and adset_ids for context
+                        logger.info(f"✅ Stored ad_ids: {state['ad_ids']}")
+                        logger.info(f"   Campaign IDs (preserved): {state.get('campaign_ids')}")
+                        logger.info(f"   Adset IDs (preserved): {state.get('adset_ids')}")
+
+                    else:
+                        logger.warning("⚠️ No selection flag set, treating as campaign selection")
+                        logger.warning(f"   This might indicate the awaiting flag was not preserved from MongoDB")
+                        state["campaign_ids"] = selected_ids
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Failed to parse user_response as JSON: {e}")
+                    logger.error(f"   Raw user_response: {user_response}")
+                    # Fall back to treating it as text
                     pass
-            
-            # Re-run the appropriate graph from continuation point
-            if module_type == ModuleType.META_ADS.value:
+
+                # Update user_question to reflect the selection for logging
+                original_question = state.get("user_question", "")
+                state["user_question"] = f"Selected: {user_response}"
+
+                # Continue with Meta Ads graph
+                logger.info("🚀 Re-running Meta Ads graph with selected IDs")
+                from chat.graphs.meta_ads_graph import run_meta_ads_chat
+
                 final_state = await run_meta_ads_chat(
-                    user_question=state.get("user_question"),
+                    user_question=original_question,  # Use original question
                     session_id=state.get("session_id"),
                     user_email=state.get("user_email"),
                     auth_token=state.get("auth_token"),
-                    context=state,
-                    continue_from_state=state  # Pass previous state for continuation
+                    context=state  # Pass full state with campaign_ids
                 )
+
             else:
-                # For other modules, just restart with the new question
+                # For other modules: treat as regular text continuation
+                logger.info("📝 Other module - treating as text question")
                 final_state = await self.process_chat_message(
                     user_question=user_response,
                     module_type=module_type,
@@ -249,9 +296,21 @@ class GraphOrchestrator:
                     context=state
                 )
             
-            # Save continuation to MongoDB
-            if self.mongo_manager and final_state.get("is_complete"):
+            # Save continuation to MongoDB (save when complete OR when waiting for user input)
+            # This ensures multi-step selection states (e.g., awaiting_adset_selection) are persisted
+            if self.mongo_manager and (final_state.get("is_complete") or final_state.get("needs_user_input")):
                 try:
+                    logger.info("=" * 80)
+                    logger.info("💾 SAVING STATE TO MONGODB")
+                    logger.info(f"   is_complete: {final_state.get('is_complete')}")
+                    logger.info(f"   needs_user_input: {final_state.get('needs_user_input')}")
+                    if module_type == "meta_ads":
+                        logger.info(f"   awaiting_campaign_selection: {final_state.get('awaiting_campaign_selection')}")
+                        logger.info(f"   awaiting_adset_selection: {final_state.get('awaiting_adset_selection')}")
+                        logger.info(f"   awaiting_ad_selection: {final_state.get('awaiting_ad_selection')}")
+                        logger.info(f"   granularity_level: {final_state.get('granularity_level')}")
+                    logger.info("=" * 80)
+
                     await self._save_conversation_to_mongodb(
                         session_id=state.get("session_id"),
                         user_email=state.get("user_email"),
@@ -260,8 +319,10 @@ class GraphOrchestrator:
                         final_state=final_state,
                         context=state
                     )
+
+                    logger.info("✅ State saved successfully to MongoDB")
                 except Exception as e:
-                    logger.error(f"Failed to save continuation: {e}")
+                    logger.error(f"❌ Failed to save continuation: {e}")
             
             return final_state
             
@@ -303,16 +364,13 @@ class GraphOrchestrator:
             prepared.setdefault("seed_keywords", [])
             prepared.setdefault("country", None)
             prepared.setdefault("include_zero_volume", False)
-            
+
         elif module_type == ModuleType.META_ADS.value:
             prepared.setdefault("account_id", None)
-            
-        elif module_type == ModuleType.FACEBOOK.value:
-            prepared.setdefault("page_id", None)
-            
-        elif module_type == ModuleType.INSTAGRAM.value:
-            prepared.setdefault("account_id", None)
-        
+            prepared.setdefault("campaign_ids", None)
+            prepared.setdefault("adset_ids", None)
+            prepared.setdefault("ad_ids", None)
+
         # Ensure time period fields exist
         prepared.setdefault("period", None)
         prepared.setdefault("start_date", None)
@@ -334,19 +392,25 @@ class GraphOrchestrator:
             # Extract response and metadata
             # Use user_clarification_prompt if formatted_response is None (waiting for user input)
             assistant_message = final_state.get("formatted_response") or final_state.get("user_clarification_prompt") or "Processing your request..."
+
+            # Handle case where assistant_message is a dict (Meta Ads selection)
+            if isinstance(assistant_message, dict):
+                # Extract the message string from the selection dict
+                assistant_message = assistant_message.get("message", "Please make a selection to continue.")
+
             triggered_endpoints = final_state.get("triggered_endpoints", [])
             visualizations = final_state.get("visualizations")
-            
+
             # Get module-specific IDs
             customer_id = context.get("customer_id")
             property_id = context.get("property_id")
             account_id = context.get("account_id")
             page_id = context.get("page_id")
-            
+
             logger.info(f"💾 Saving to MongoDB - Session: {session_id}, Module: {module_type}")
             logger.info(f"📝 User: {user_question[:50]}...")
             if assistant_message:
-                logger.info(f"🤖 Assistant: {assistant_message[:50]}...")
+                logger.info(f"🤖 Assistant: {assistant_message[:50] if isinstance(assistant_message, str) else str(assistant_message)[:50]}...")
             else:
                 logger.info(f"🤖 Assistant: [Waiting for user input]")
             
@@ -424,42 +488,18 @@ class GraphOrchestrator:
             },
             ModuleType.META_ADS.value: {
                 "name": "Meta Ads",
-                "description": "Facebook/Instagram ad campaigns",
+                "description": "Facebook and Instagram ads performance and analytics",
                 "required_context": ["account_id"],
-                "optional_context": ["period", "start_date", "end_date"],
+                "optional_context": ["period", "start_date", "end_date", "campaign_ids", "adset_ids", "ad_ids"],
                 "capabilities": [
-                    "Campaign performance",
-                    "Ad set analysis",
-                    "Ad creative insights",
-                    "Demographic breakdown",
-                    "Placement performance",
-                    "Hierarchical drilling (Campaign → AdSet → Ad)"
-                ]
-            },
-            ModuleType.FACEBOOK.value: {
-                "name": "Facebook Pages",
-                "description": "Page insights and engagement",
-                "required_context": ["page_id"],
-                "optional_context": ["period", "start_date", "end_date"],
-                "capabilities": [
-                    "Page metrics",
-                    "Post performance",
-                    "Audience demographics",
-                    "Engagement analysis",
-                    "Video insights"
-                ]
-            },
-            ModuleType.INSTAGRAM.value: {
-                "name": "Instagram",
-                "description": "Profile insights and content performance",
-                "required_context": ["account_id"],
-                "optional_context": ["period", "start_date", "end_date"],
-                "capabilities": [
-                    "Profile metrics",
-                    "Media performance",
-                    "Story insights",
-                    "Engagement tracking",
-                    "Audience growth"
+                    "Account-level insights",
+                    "Campaign performance analysis",
+                    "Adset performance tracking",
+                    "Individual ad analytics",
+                    "Demographics breakdown",
+                    "Placement analysis (Facebook, Instagram)",
+                    "Time-series trends",
+                    "Multi-level hierarchical analysis"
                 ]
             }
         }
@@ -539,7 +579,6 @@ async def process_message(
         auth_token=auth_token,
         context=context
     )
-
 
 async def continue_message(
     previous_state: Dict[str, Any],

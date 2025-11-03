@@ -49,31 +49,49 @@ class ChatManager:
     ) -> ChatResponse:
         """
         Process a chat request
-        
+
         Args:
             request: ChatRequest object
             current_user: Current authenticated user with auth_token from frontend
-            
+
         Returns:
             ChatResponse object
         """
-        logger.info(f"Processing chat request for module: {request.module_type}")
-        
+        logger.info("=" * 80)
+        logger.info(f"🔧 CHAT MANAGER: Processing chat request")
+        logger.info(f"   Module: {request.module_type}")
+        logger.info(f"   Message length: {len(request.message)} chars")
+
         try:
             # Generate session ID if not provided
             session_id = request.session_id or str(uuid.uuid4())
             user_email = current_user.get("email", "unknown")
-            
+
+            logger.info(f"   Session ID: {session_id}")
+            logger.info(f"   User Email: {user_email}")
+
             # Get auth token from current_user (passed from main.py via Authorization header)
             auth_token = current_user.get('auth_token', '')
-            
+
             if not auth_token:
-                logger.warning(f"⚠️ No auth token provided for {request.module_type}")
-            
+                logger.warning(f"⚠️ CHAT MANAGER: No auth token provided for {request.module_type}")
+            else:
+                logger.info(f"✅ CHAT MANAGER: Auth token present (length: {len(auth_token)})")
+
             # Prepare context
+            logger.info(f"📦 CHAT MANAGER: Preparing context...")
             context = self._prepare_context(request, current_user)
-            
+            logger.info(f"📦 CHAT MANAGER: Context prepared - {context}")
+
             # Process message using orchestrator
+            logger.info(f"🚀 CHAT MANAGER: Calling graph orchestrator process_message()")
+            logger.info(f"   Parameters:")
+            logger.info(f"     - user_question: {request.message[:100]}...")
+            logger.info(f"     - module_type: {request.module_type}")
+            logger.info(f"     - session_id: {session_id}")
+            logger.info(f"     - user_email: {user_email}")
+            logger.info(f"     - context keys: {list(context.keys())}")
+
             final_state = await process_message(
                 user_question=request.message,
                 module_type=request.module_type,
@@ -83,17 +101,32 @@ class ChatManager:
                 context=context,
                 mongo_manager=self.mongo_manager
             )
-            
+
+            logger.info(f"✅ CHAT MANAGER: Graph orchestrator returned final state")
+            logger.info(f"   State keys: {list(final_state.keys())}")
+            logger.info(f"   Is complete: {final_state.get('is_complete')}")
+            logger.info(f"   Needs user input: {final_state.get('needs_user_input')}")
+            logger.info(f"   Triggered endpoints: {len(final_state.get('triggered_endpoints', []))}")
+
             # Convert state to ChatResponse
+            logger.info(f"🔄 CHAT MANAGER: Converting state to ChatResponse")
             response = self._state_to_response(final_state, session_id, request.module_type)
-            
-            logger.info(f"Chat request processed successfully. Session: {session_id}")
-            
+
+            logger.info(f"✅ CHAT MANAGER: Chat request processed successfully")
+            logger.info(f"   Session: {session_id}")
+            logger.info(f"   Response length: {len(response.response)} chars")
+            logger.info("=" * 80)
+
             return response
-            
+
         except Exception as e:
-            logger.error(f"Error processing chat request: {e}", exc_info=True)
-            
+            logger.error("=" * 80)
+            logger.error(f"❌ CHAT MANAGER: Error processing chat request")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error message: {str(e)}")
+            logger.error("=" * 80)
+            logger.error(f"   Full traceback:", exc_info=True)
+
             # Return error response
             return ChatResponse(
                 response=f"I apologize, but I encountered an error: {str(e)}",
@@ -298,16 +331,7 @@ class ChatManager:
         
         elif request.module_type == ModuleType.INTENT_INSIGHTS.value:
             context["account_id"] = request.customer_id or context.get("account_id")
-        
-        elif request.module_type == ModuleType.META_ADS.value:
-            context["account_id"] = request.account_id or context.get("account_id") or context.get("ad_account_id")
-        
-        elif request.module_type == "facebook_analytics":
-            context["page_id"] = request.page_id or context.get("page_id")
-        
-        elif request.module_type == "instagram_analytics":
-            context["account_id"] = request.account_id or context.get("account_id") or context.get("instagram_account_id")
-        
+
         # Add time period with proper handling
         if request.period:
             context["period"] = request.period
@@ -353,11 +377,11 @@ class ChatManager:
 
         # Extract response text
         response_text = state.get("formatted_response", "No response generated")
-        
+
         # Extract triggered endpoints
         triggered_endpoints = state.get("triggered_endpoints", [])
         endpoint_names = [ep.get("endpoint") for ep in triggered_endpoints if ep.get("success")]
-        
+
         # Build endpoint_data for response
         endpoint_data = {
             "triggered_endpoints": endpoint_names,
@@ -366,56 +390,42 @@ class ChatManager:
             "processing_time": state.get("processing_metadata", {}).get("total_processing_time"),
             "visualizations": state.get("visualizations")
         }
-        
-        # Handle cases where user input is needed
-        # Check both needs_user_input AND specific selection flags for Meta Ads
-        needs_selection = (
-            state.get("needs_user_input") or
-            state.get("needs_campaign_selection") or
-            state.get("needs_adset_selection") or
-            state.get("needs_ad_selection")
-        )
 
-        if needs_selection:
-            logger.info(f"🔍 User input/selection needed")
-            # For Meta Ads dropdown selections
-            campaign_opts = state.get("campaign_selection_options")
-            if campaign_opts and len(campaign_opts) > 0:
-                logger.info(f"✅ Setting requires_selection for campaigns with {len(campaign_opts)} options")
+        # Handle cases where user input is needed (Meta Ads campaign/adset/ad selection)
+        if state.get("needs_user_input"):
+            logger.info(f"🔍 User input needed")
+
+            clarification = state.get("user_clarification_prompt", response_text)
+
+            # Check if clarification is a dict (Meta Ads selection)
+            if isinstance(clarification, dict):
+                logger.info(f"📋 Selection needed: {clarification.get('type')}")
+
+                # Extract message for response text
+                response_text = clarification.get("message", "Please make a selection to continue.")
+
+                # Add selection data to endpoint_data for frontend
                 endpoint_data["requires_selection"] = {
-                    "type": "campaigns",
-                    "options": campaign_opts,
-                    "prompt": state.get("user_clarification_prompt", "Please select campaigns")
+                    "type": clarification.get("type", "unknown"),
+                    "prompt": clarification.get("message", ""),
+                    "options": clarification.get("options", []),
+                    "selection_type": clarification.get("selection_type", "single")
                 }
-                # Use clarification prompt as response text
-                response_text = state.get("user_clarification_prompt", "Please select campaign(s) to continue")
-                logger.info(f"📤 requires_selection set: {endpoint_data['requires_selection']['type']}")
-            elif state.get("adset_selection_options") and len(state.get("adset_selection_options", [])) > 0:
-                adset_opts = state["adset_selection_options"]
-                logger.info(f"✅ Setting requires_selection for adsets with {len(adset_opts)} options")
-                endpoint_data["requires_selection"] = {
-                    "type": "adsets",
-                    "options": adset_opts,
-                    "prompt": state.get("user_clarification_prompt", "Please select adsets")
-                }
-                response_text = state.get("user_clarification_prompt", "Please select adset(s) to continue")
-            elif state.get("ad_selection_options") and len(state.get("ad_selection_options", [])) > 0:
-                ad_opts = state["ad_selection_options"]
-                logger.info(f"✅ Setting requires_selection for ads with {len(ad_opts)} options")
-                endpoint_data["requires_selection"] = {
-                    "type": "ads",
-                    "options": state["ad_selection_options"],
-                    "prompt": state.get("user_clarification_prompt")
-                }
-                response_text = state.get("user_clarification_prompt", "Please select ad(s) to continue")
+                logger.info(f"✅ Added selection data with {len(clarification.get('options', []))} options")
             else:
-                # General clarification needed
-                logger.info(f"⚠️ needs_user_input=True but no selection_options found")
-                response_text = state.get("user_clarification_prompt", response_text)
+                # Simple string clarification
+                response_text = clarification if isinstance(clarification, str) else str(clarification)
 
-        # Ensure response_text is never None
+        # Handle case where formatted_response is a dict (shouldn't happen, but be safe)
+        if isinstance(response_text, dict):
+            logger.warning(f"⚠️ formatted_response is a dict, extracting message")
+            response_text = response_text.get("message", "Processing your request...")
+
+        # Ensure response_text is never None and is always a string
         if response_text is None:
             response_text = "Processing your request..."
+        elif not isinstance(response_text, str):
+            response_text = str(response_text)
 
         return ChatResponse(
             response=response_text,
@@ -466,6 +476,19 @@ class ChatManager:
                 state["session_id"] = session_id
                 state["user_email"] = session_doc.get("user_email")
                 logger.info(f"✅ Retrieved full state with {len(state)} fields for session {session_id}")
+
+                # Log important Meta Ads state fields for debugging
+                if module_type == "meta_ads":
+                    logger.info("=" * 80)
+                    logger.info("📦 RETRIEVED STATE FROM MONGODB:")
+                    logger.info(f"   granularity_level: {state.get('granularity_level')}")
+                    logger.info(f"   awaiting_campaign_selection: {state.get('awaiting_campaign_selection')}")
+                    logger.info(f"   awaiting_adset_selection: {state.get('awaiting_adset_selection')}")
+                    logger.info(f"   awaiting_ad_selection: {state.get('awaiting_ad_selection')}")
+                    logger.info(f"   campaign_ids: {state.get('campaign_ids')}")
+                    logger.info(f"   adset_ids: {state.get('adset_ids')}")
+                    logger.info(f"   ad_ids: {state.get('ad_ids')}")
+                    logger.info("=" * 80)
             else:
                 # Fallback to minimal state if no saved state
                 logger.warning(f"⚠️ No saved state found for session {session_id}, using minimal state")

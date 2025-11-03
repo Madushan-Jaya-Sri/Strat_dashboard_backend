@@ -3,7 +3,7 @@ Response models for Meta Insights endpoints
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from typing import Union
 
@@ -427,6 +427,9 @@ class AccountInsightsSummary(BaseModel):
     avg_cpm: float
     avg_ctr: float
     avg_frequency: float
+    debug_raw_response: Optional[Dict] = None
+    debug_api_url: Optional[str] = None
+    debug_params: Optional[Dict] = None
 
 
 class PaginationInfo(BaseModel):

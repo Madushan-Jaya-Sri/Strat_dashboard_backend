@@ -191,29 +191,47 @@ class MetaManager:
 
     def _validate_date_range(self, start_date: str, end_date: str):
         """Validate date range"""
+        logger.info("=" * 80)
+        logger.info("📅 META MANAGER: Validating date range")
+        logger.info(f"   Start date: {start_date}")
+        logger.info(f"   End date: {end_date}")
+        logger.info(f"   Current date/time: {datetime.now()}")
+
         try:
             start = datetime.strptime(start_date, '%Y-%m-%d')
             end = datetime.strptime(end_date, '%Y-%m-%d')
-            
+
+            logger.info(f"   Parsed start: {start}")
+            logger.info(f"   Parsed end: {end}")
+
             if start > end:
+                logger.error(f"❌ Start date {start} is after end date {end}")
                 raise ValueError("Start date must be before end date")
-            
+
             # Check if date range is too large (Meta API limitation: ~37 months max)
             delta = end - start
+            logger.info(f"   Date range: {delta.days} days")
+
             if delta.days > 1100:  # Approximately 3 years
+                logger.error(f"❌ Date range too large: {delta.days} days (max: 1100)")
                 raise ValueError("Date range too large. Maximum allowed is approximately 3 years (1100 days)")
-            
+
             # Check if end date is in the future
             if end > datetime.now():
+                logger.error(f"❌ End date {end} is in the future (current: {datetime.now()})")
                 raise ValueError("End date cannot be in the future")
-            
+
             # Meta API has limited historical data (typically 37 months)
             max_historical_date = datetime.now() - timedelta(days=1100)
             if start < max_historical_date:
-                logger.warning(f"Start date {start_date} may be beyond Meta's historical data limit")
-            
+                logger.warning(f"⚠️ Start date {start_date} may be beyond Meta's historical data limit")
+
+            logger.info(f"✅ Date range validation passed")
+            logger.info("=" * 80)
+
         except ValueError as e:
-            logger.error(f"Date validation error: {e}")
+            logger.error(f"❌ Date validation error: {e}")
+            logger.error("=" * 80)
             raise
     # =========================================================================
     # AD ACCOUNTS
@@ -279,15 +297,25 @@ class MetaManager:
 
         try:
             # Get account-level insights in one request
-            data = self._rate_limited_request(f"{normalized_account_id}/insights", {
+            # Direct API call format matching Graph API Explorer for accurate metrics
+            # Removed 'default_summary' parameter as it causes aggregation differences
+            params = {
                 'time_range': json.dumps({"since": since, "until": until}),
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
-                'level': 'account',
-                'action_attribution_windows': ['7d_click', '1d_view'],
-                'use_account_attribution_setting': 'true'
-            })
-            
+                'level': 'account'
+            }
+
+            logger.info(f"🔍 META API REQUEST: {normalized_account_id}/insights")
+            logger.info(f"🔍 REQUEST PARAMS: {params}")
+            logger.info(f"🔍 DATE RANGE: {since} to {until}")
+
+            data = self._rate_limited_request(f"{normalized_account_id}/insights", params)
+
+            # Log the complete raw response for debugging
+            logger.info(f"🔍 RAW META API RESPONSE: {json.dumps(data, indent=2)}")
+
             if not data.get('data'):
+                logger.warning(f"⚠️ No data returned from Meta API for {normalized_account_id}")
                 return {
                     'total_spend': 0,
                     'total_impressions': 0,
@@ -297,20 +325,32 @@ class MetaManager:
                     'avg_cpc': 0,
                     'avg_cpm': 0,
                     'avg_ctr': 0,
-                    'avg_frequency': 0
+                    'avg_frequency': 0,
+                    'debug_raw_response': data,
+                    'debug_api_url': f"{normalized_account_id}/insights",
+                    'debug_params': params
                 }
-            
+
+            # Check if Meta API returned multiple data records
+            data_records = data.get('data', [])
+            logger.info(f"🔍 NUMBER OF DATA RECORDS RETURNED: {len(data_records)}")
+
+            if len(data_records) > 1:
+                logger.warning(f"⚠️ WARNING: Meta API returned {len(data_records)} data records! This might cause inflated values.")
+                logger.warning(f"⚠️ Only using the first record, but check if aggregation is needed.")
+
             insights = data['data'][0]
-            
+            logger.info(f"🔍 EXTRACTED INSIGHTS DATA (First Record): {json.dumps(insights, indent=2)}")
+
             # Extract conversions from actions
             conversions = 0
             actions = insights.get('actions', [])
             for action in actions:
-                if action.get('action_type') in ['purchase', 'lead', 'complete_registration', 
+                if action.get('action_type') in ['purchase', 'lead', 'complete_registration',
                                                 'omni_purchase', 'offsite_conversion.fb_pixel_purchase']:
                     conversions += int(action.get('value', 0))
-            
-            return {
+
+            result = {
                 'total_spend': float(insights.get('spend', 0)),
                 'total_impressions': int(insights.get('impressions', 0)),
                 'total_clicks': int(insights.get('clicks', 0)),
@@ -319,8 +359,15 @@ class MetaManager:
                 'avg_cpc': float(insights.get('cpc', 0)),
                 'avg_cpm': float(insights.get('cpm', 0)),
                 'avg_ctr': float(insights.get('ctr', 0)),
-                'avg_frequency': float(insights.get('frequency', 0))
+                'avg_frequency': float(insights.get('frequency', 0)),
+                'debug_raw_response': data,
+                'debug_api_url': f"{normalized_account_id}/insights",
+                'debug_params': params
             }
+
+            logger.info(f"🔍 FINAL COMPUTED RESULT: {json.dumps(result, indent=2)}")
+
+            return result
             
         except Exception as e:
             logger.error(f"Error fetching account insights summary: {e}")
@@ -347,9 +394,7 @@ class MetaManager:
             data = self._make_request(f"{account_id}/insights", {
                 'time_range': f'{{"since":"{since}","until":"{until}"}}',
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
-                'level': 'account',
-                'action_attribution_windows': ['7d_click', '1d_view'],
-                'use_account_attribution_setting': 'true'
+                'level': 'account'
             })
             
             if not data.get('data'):
@@ -411,17 +456,15 @@ class MetaManager:
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                 'time_increment': '1',
                 'level': 'account',
-                'action_attribution_windows': ['7d_click', '1d_view'],
-                'use_account_attribution_setting': 'true'
+                'default_summary': 'true'
             })
-            
+
             # Get summary totals (without time_increment for accurate reach)
             summary_data = self._make_request(f"{account_id}/insights", {
                 'time_range': f'{{"since":"{since}","until":"{until}"}}',
                 'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                 'level': 'account',
-                'action_attribution_windows': ['7d_click', '1d_view'],
-                'use_account_attribution_setting': 'true'
+                'default_summary': 'true'
             })
             
             if not daily_data.get('data'):
@@ -694,8 +737,7 @@ class MetaManager:
                     
                     insights = self._rate_limited_request(f"{campaign_id}/insights", {
                         'time_range': json.dumps({"since": since, "until": until}),
-                        'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
-                        'action_attribution_windows': ['7d_click', '1d_view']
+                        'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency'
                     })
                     
                     insights_data = insights.get('data', [])
@@ -923,8 +965,7 @@ class MetaManager:
                         insights = self._rate_limited_request(f"{campaign['id']}/insights", {
                             'time_range': json.dumps({"since": since, "until": until}),
                             'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
-                            'action_attribution_windows': ['7d_click', '1d_view']
-                        })
+                            })
                         
                         insights_data = insights.get('data', [])
                         
@@ -997,7 +1038,6 @@ class MetaManager:
                     account_insights = self._rate_limited_request(f"{account_id}/insights", {
                         'time_range': json.dumps({"since": since, "until": until}),
                         'fields': 'reach',
-                        'action_attribution_windows': ['7d_click', '1d_view']
                     })
                     totals['total_reach'] = int(account_insights.get('data', [{}])[0].get('reach', 0))
                 except Exception as e:
@@ -1032,7 +1072,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                     'time_increment': '1',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 timeseries = []
@@ -1079,7 +1118,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'age,gender',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 demographics = []
@@ -1122,7 +1160,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'publisher_platform',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 placements = []
@@ -1256,7 +1293,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                     'time_increment': '1',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 timeseries = []
@@ -1303,7 +1339,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'age,gender',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 demographics = []
@@ -1346,7 +1381,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'publisher_platform',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 placements = []
@@ -1448,7 +1482,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency',
                     'time_increment': '1',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 timeseries = []
@@ -1495,7 +1528,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'age,gender',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 demographics = []
@@ -1538,7 +1570,6 @@ class MetaManager:
                     'time_range': f'{{"since":"{since}","until":"{until}"}}',
                     'fields': 'spend,impressions,reach,actions',
                     'breakdowns': 'publisher_platform',
-                    'action_attribution_windows': ['7d_click', '1d_view']
                 })
                 
                 placements = []

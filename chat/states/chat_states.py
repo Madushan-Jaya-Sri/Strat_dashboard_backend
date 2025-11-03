@@ -14,23 +14,12 @@ class ModuleType(str, Enum):
     GOOGLE_ANALYTICS = "google_analytics"
     INTENT_INSIGHTS = "intent_insights"
     META_ADS = "meta_ads"
-    FACEBOOK = "facebook"
-    INSTAGRAM = "instagram"
 
 
 class IntentType(str, Enum):
     """User intent classification"""
     CHITCHAT = "chitchat"
     ANALYTICAL = "analytical"
-
-
-class GranularityLevel(str, Enum):
-    """Meta Ads granularity levels"""
-    ACCOUNT = "account"
-    CAMPAIGN = "campaign"
-    ADSET = "adset"
-    AD = "ad"
-    UNKNOWN = "unknown"
 
 
 # ============================================================================
@@ -132,92 +121,49 @@ class IntentInsightsState(BaseChatState):
     seed_keywords: Optional[List[str]]
     country: Optional[str]
     include_zero_volume: bool
-    
+
     # Timeframe specific to intent
     timeframe: Optional[str]  # e.g., 'LAST_7_DAYS', 'LAST_30_DAYS'
-    
+
     # Flags
     needs_api_call: bool  # Whether to call keyword insights endpoint
-    
+
     # Available endpoint (single endpoint for this module)
     available_endpoints: List[Dict[str, Any]]
 
 
 # ============================================================================
-# META ADS STATE (Most Complex)
+# META ADS STATE
 # ============================================================================
 
 class MetaAdsState(BaseChatState):
-    """State for Meta Ads module with hierarchical structure"""
+    """State for Meta Ads module"""
     # Meta Ads specific fields
-    account_id: Optional[str]  # Meta ad account ID (e.g., 'act_123456')
-    
-    # Hierarchical selections
-    granularity_level: Optional[str]  # GranularityLevel enum value
+    account_id: Optional[str]  # Meta ad account ID (e.g., act_303894480866908)
+
+    # Hierarchical entity IDs for selection workflow
     campaign_ids: Optional[List[str]]
-    campaign_names: Optional[List[str]]
     adset_ids: Optional[List[str]]
-    adset_names: Optional[List[str]]
     ad_ids: Optional[List[str]]
-    ad_names: Optional[List[str]]
-    
-    # Lists for dropdown selections
-    available_campaigns: Optional[List[Dict[str, Any]]]
-    available_adsets: Optional[List[Dict[str, Any]]]
-    available_ads: Optional[List[Dict[str, Any]]]
 
-    # Formatted selection options for frontend dropdowns
-    campaign_selection_options: Optional[List[Dict[str, Any]]]
-    adset_selection_options: Optional[List[Dict[str, Any]]]
-    ad_selection_options: Optional[List[Dict[str, Any]]]
+    # Granularity level detected from query
+    granularity_level: Optional[str]  # "account", "campaign", "adset", "ad"
 
-    # Flags
-    is_account_level: bool
-    is_campaign_level: bool
-    is_adset_level: bool
-    is_ad_level: bool
-    campaigns_loading: bool  # Special flag for long campaign list loading
-    needs_campaign_selection: bool
-    needs_adset_selection: bool
-    needs_ad_selection: bool
-    
-    # Status filter for campaigns
-    status_filter: Optional[List[str]]  # ['ACTIVE', 'PAUSED', 'ARCHIVED']
-    
-    # Available endpoints for this module
-    available_endpoints: List[Dict[str, Any]]
+    # Extracted parameters from query
+    extracted_entities: Optional[List[str]]  # Campaign names, adset names mentioned
+    extracted_metrics: Optional[List[str]]   # Metrics requested (spend, clicks, etc.)
+    extracted_filters: Optional[Dict[str, Any]]
 
+    # Frontend selections metadata
+    awaiting_campaign_selection: bool
+    awaiting_adset_selection: bool
+    awaiting_ad_selection: bool
 
-# ============================================================================
-# FACEBOOK PAGE STATE
-# ============================================================================
+    # Dropdown options to send to frontend
+    campaign_options: Optional[List[Dict[str, Any]]]
+    adset_options: Optional[List[Dict[str, Any]]]
+    ad_options: Optional[List[Dict[str, Any]]]
 
-class FacebookPageState(BaseChatState):
-    """State for Facebook Page Analytics module"""
-    # Facebook specific fields
-    page_id: Optional[str]  # Facebook page ID
-    
-    # Extracted parameters
-    metric_type: Optional[str]  # e.g., 'engagement', 'reach', 'impressions'
-    post_limit: Optional[int]   # Number of posts to analyze
-    
-    # Available endpoints for this module
-    available_endpoints: List[Dict[str, Any]]
-
-
-# ============================================================================
-# INSTAGRAM STATE
-# ============================================================================
-
-class InstagramState(BaseChatState):
-    """State for Instagram Analytics module"""
-    # Instagram specific fields
-    account_id: Optional[str]  # Instagram business account ID
-    
-    # Extracted parameters
-    media_type: Optional[str]  # e.g., 'IMAGE', 'VIDEO', 'CAROUSEL_ALBUM'
-    media_limit: Optional[int]  # Number of media to analyze
-    
     # Available endpoints for this module
     available_endpoints: List[Dict[str, Any]]
 
@@ -307,51 +253,26 @@ def create_initial_state(
             "needs_api_call": False,
             "available_endpoints": get_intent_endpoints()
         })
-    
+
     elif module_type == ModuleType.META_ADS.value:
         base_state.update({
             "account_id": context.get("account_id"),
-            "granularity_level": None,
-            "campaign_ids": None,
-            "campaign_names": None,
-            "adset_ids": None,
-            "adset_names": None,
-            "ad_ids": None,
-            "ad_names": None,
-            "available_campaigns": None,
-            "available_adsets": None,
-            "available_ads": None,
-            "campaign_selection_options": None,
-            "adset_selection_options": None,
-            "ad_selection_options": None,
-            "is_account_level": False,
-            "is_campaign_level": False,
-            "is_adset_level": False,
-            "is_ad_level": False,
-            "campaigns_loading": False,
-            "needs_campaign_selection": False,
-            "needs_adset_selection": False,
-            "needs_ad_selection": False,
-            "status_filter": None,
+            "campaign_ids": context.get("campaign_ids"),
+            "adset_ids": context.get("adset_ids"),
+            "ad_ids": context.get("ad_ids"),
+            "granularity_level": context.get("granularity_level"),  # Preserve from context (for multi-step flows)
+            "extracted_entities": context.get("extracted_entities"),
+            "extracted_metrics": context.get("extracted_metrics"),
+            "extracted_filters": context.get("extracted_filters"),
+            "awaiting_campaign_selection": context.get("awaiting_campaign_selection", False),
+            "awaiting_adset_selection": context.get("awaiting_adset_selection", False),
+            "awaiting_ad_selection": context.get("awaiting_ad_selection", False),
+            "campaign_options": context.get("campaign_options"),
+            "adset_options": context.get("adset_options"),
+            "ad_options": context.get("ad_options"),
             "available_endpoints": get_meta_ads_endpoints()
         })
-    
-    elif module_type == ModuleType.FACEBOOK.value:
-        base_state.update({
-            "page_id": context.get("page_id"),
-            "metric_type": None,
-            "post_limit": 10,
-            "available_endpoints": get_facebook_endpoints()
-        })
-    
-    elif module_type == ModuleType.INSTAGRAM.value:
-        base_state.update({
-            "account_id": context.get("account_id"),
-            "media_type": None,
-            "media_limit": 10,
-            "available_endpoints": get_instagram_endpoints()
-        })
-    
+
     return base_state
 
 
@@ -406,54 +327,31 @@ def get_meta_ads_endpoints() -> List[Dict[str, Any]]:
     """Get available Meta Ads endpoints"""
     return [
         # Account level
-        {'name': 'get_meta_ad_accounts', 'path': '/api/meta/ad-accounts', 'method': 'GET', 'params': []},
-        {'name': 'get_meta_account_insights', 'path': '/api/meta/ad-accounts/{account_id}/insights/summary', 'method': 'GET', 'params': ['account_id', 'period', 'start_date', 'end_date']},
-        
-        # Campaign level
-        {'name': 'get_meta_campaigns_list', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/list', 'method': 'GET', 'params': ['account_id'], 'optional_params': ['status']},
-        {'name': 'get_meta_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
-        {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
-        {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['campaign_ids']},
-        
-        # AdSet level
-        {'name': 'get_adsets_by_campaigns', 'path': '/api/meta/campaigns/adsets', 'method': 'POST', 'params': [], 'body_params': ['campaign_ids']},
-        {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
-        {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
-        {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['adset_ids']},
-        
-        # Ad level
-        {'name': 'get_ads_by_adsets', 'path': '/api/meta/adsets/ads', 'method': 'POST', 'params': [], 'body_params': ['adset_ids']},
-        {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
-        {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
-        {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['start_date', 'end_date'], 'optional_params': ['period'], 'body_params': ['ad_ids']},
-    ]
+        {'name': 'get_meta_account_insights', 'path': '/api/meta/ad-accounts/{account_id}/insights/summary', 'method': 'GET', 'params': ['account_id', 'period', 'start_date', 'end_date'], 'description': 'Get account-level insights summary'},
 
+        # Campaign level - list endpoints (no time params)
+        {'name': 'get_meta_campaigns_list', 'path': '/api/meta/ad-accounts/{account_id}/campaigns/list', 'method': 'GET', 'params': ['account_id', 'status'], 'description': 'Get list of all campaigns without insights'},
 
-def get_facebook_endpoints() -> List[Dict[str, Any]]:
-    """Get available Facebook Page endpoints"""
-    return [
-        {'name': 'get_facebook_pages', 'path': '/api/meta/pages', 'method': 'GET', 'params': []},
-        {'name': 'get_facebook_page_insights', 'path': '/api/meta/pages/{page_id}/insights', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_facebook_page_posts', 'path': '/api/meta/pages/{page_id}/posts', 'method': 'GET', 'params': ['page_id', 'limit', 'period', 'start_date', 'end_date']},
-        {'name': 'get_facebook_demographics', 'path': '/api/meta/pages/{page_id}/demographics', 'method': 'GET', 'params': ['page_id']},
-        {'name': 'get_facebook_engagement', 'path': '/api/meta/pages/{page_id}/engagement-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_page_insights_timeseries', 'path': '/api/meta/pages/{page_id}/insights/timeseries', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_page_posts_timeseries', 'path': '/api/meta/pages/{page_id}/posts/timeseries', 'method': 'GET', 'params': ['page_id', 'limit', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_video_views_breakdown', 'path': '/api/meta/pages/{page_id}/video-views-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_content_type_breakdown', 'path': '/api/meta/pages/{page_id}/content-type-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_follows_unfollows', 'path': '/api/meta/pages/{page_id}/follows-unfollows', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_organic_vs_paid', 'path': '/api/meta/pages/{page_id}/organic-vs-paid', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date']},
-    ]
+        # Campaign level - analytics endpoints (with time params)
+        {'name': 'get_campaigns_timeseries', 'path': '/api/meta/campaigns/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids'], 'description': 'Get campaign timeseries data'},
+        {'name': 'get_campaigns_demographics', 'path': '/api/meta/campaigns/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids'], 'description': 'Get campaign demographics'},
+        {'name': 'get_campaigns_placements', 'path': '/api/meta/campaigns/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['campaign_ids'], 'description': 'Get campaign placements'},
 
+        # Adset level - list endpoints (no time params)
+        {'name': 'get_campaigns_adsets', 'path': '/api/meta/campaigns/adsets', 'method': 'POST', 'params': [], 'body_params': ['campaign_ids'], 'description': 'Get adsets for campaigns'},
 
-def get_instagram_endpoints() -> List[Dict[str, Any]]:
-    """Get available Instagram endpoints"""
-    return [
-        {'name': 'get_meta_instagram_accounts', 'path': '/api/meta/instagram/accounts', 'method': 'GET', 'params': []},
-        {'name': 'get_meta_instagram_insights', 'path': '/api/meta/instagram/{account_id}/insights', 'method': 'GET', 'params': ['account_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_instagram_insights_timeseries', 'path': '/api/meta/instagram/{account_id}/insights/timeseries', 'method': 'GET', 'params': ['account_id', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_instagram_media', 'path': '/api/meta/instagram/{account_id}/media', 'method': 'GET', 'params': ['account_id', 'limit', 'period', 'start_date', 'end_date']},
-        {'name': 'get_meta_instagram_media_timeseries', 'path': '/api/meta/instagram/{account_id}/media/timeseries', 'method': 'GET', 'params': ['account_id', 'limit', 'period', 'start_date', 'end_date']},
+        # Adset level - analytics endpoints (with time params)
+        {'name': 'get_adsets_timeseries', 'path': '/api/meta/adsets/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids'], 'description': 'Get adset timeseries data'},
+        {'name': 'get_adsets_demographics', 'path': '/api/meta/adsets/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids'], 'description': 'Get adset demographics'},
+        {'name': 'get_adsets_placements', 'path': '/api/meta/adsets/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['adset_ids'], 'description': 'Get adset placements'},
+
+        # Ad level - list endpoints (no time params)
+        {'name': 'get_adsets_ads', 'path': '/api/meta/adsets/ads', 'method': 'POST', 'params': [], 'body_params': ['adset_ids'], 'description': 'Get ads for adsets'},
+
+        # Ad level - analytics endpoints (with time params)
+        {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad timeseries data'},
+        {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad demographics'},
+        {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad placements'},
     ]
 
 
@@ -488,23 +386,15 @@ def validate_state(state: Dict[str, Any], module_type: str) -> tuple[bool, List[
     if module_type == ModuleType.GOOGLE_ADS.value:
         if not state.get("customer_id"):
             errors.append("Missing customer_id for Google Ads")
-    
+
     elif module_type == ModuleType.GOOGLE_ANALYTICS.value:
         if not state.get("property_id"):
             errors.append("Missing property_id for Google Analytics")
-    
+
     elif module_type == ModuleType.META_ADS.value:
         if not state.get("account_id"):
             errors.append("Missing account_id for Meta Ads")
-    
-    elif module_type == ModuleType.FACEBOOK.value:
-        if not state.get("page_id"):
-            errors.append("Missing page_id for Facebook")
-    
-    elif module_type == ModuleType.INSTAGRAM.value:
-        if not state.get("account_id"):
-            errors.append("Missing account_id for Instagram")
-    
+
     return len(errors) == 0, errors
 
 

@@ -42,7 +42,7 @@ class APIClient:
         
         Args:
             base_url: Base URL of the FastAPI server
-            auth_token: Authentication token (Google or Meta)
+            auth_token: Authentication token
         """
         self.base_url = base_url.rstrip('/')
         self.auth_token = auth_token
@@ -333,27 +333,35 @@ def agent_4_api_execution(state: Dict[str, Any]) -> Dict[str, Any]:
     Agent 4: Execute selected API endpoints using INTERNAL calls
     Saves all responses to MongoDB via the triggered_endpoints list
     SYNCHRONOUS wrapper around async endpoint calls
-    
+
     Args:
         state: Current chat state
-        
+
     Returns:
         Updated state with endpoint_responses
     """
-    logger.info("=== AGENT 4: API Execution ===")
+    logger.info("=" * 80)
+    logger.info("🤖 AGENT 4: API Execution")
+    logger.info(f"   Session ID: {state.get('session_id')}")
+    logger.info(f"   Module Type: {state.get('module_type')}")
     state["current_agent"] = "agent_4_api_execution"
-    
+
     selected_endpoints = state.get("selected_endpoints", [])
-    
+
+    logger.info(f"   Selected endpoints count: {len(selected_endpoints)}")
+    for i, ep in enumerate(selected_endpoints):
+        logger.info(f"   Endpoint {i+1}: {ep.get('name')} ({ep.get('method')} {ep.get('path')})")
+
     if not selected_endpoints:
-        logger.warning("No endpoints selected for execution")
+        logger.warning("⚠️ AGENT 4: No endpoints selected for execution")
         state["warnings"].append("No endpoints were selected to call")
         return state
-    
+
     # Build parameters dict from state
     params = build_params_from_state(state)
-    
-    logger.info(f"Executing {len(selected_endpoints)} endpoints with params: {params}")
+
+    logger.info(f"📊 AGENT 4: Executing {len(selected_endpoints)} endpoints")
+    logger.info(f"   Parameters: {params}")
     
     try:
         # Build current_user dict from state
@@ -371,9 +379,28 @@ def agent_4_api_execution(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Call endpoints directly (no HTTP)
         responses = []
-        for endpoint in selected_endpoints:
-            logger.info(f"🔧 Calling internal endpoint: {endpoint.get('name')}")
-            
+        for idx, endpoint in enumerate(selected_endpoints, 1):
+            logger.info(f"🔧 AGENT 4: Calling endpoint {idx}/{len(selected_endpoints)}: {endpoint.get('name')}")
+            logger.info(f"   Method: {endpoint.get('method')}")
+            logger.info(f"   Path: {endpoint.get('path')}")
+
+            # Prepare params for this endpoint
+            endpoint_params = params.copy()
+
+            # Handle body_params for POST requests
+            body_params_list = endpoint.get('body_params', [])
+            if body_params_list and endpoint.get('method') == 'POST':
+                # Move specified params into body
+                body = {}
+                for body_param in body_params_list:
+                    if body_param in endpoint_params:
+                        body[body_param] = endpoint_params.pop(body_param)
+
+                # Wrap in body key for internal API caller
+                endpoint_params['body'] = body
+                logger.info(f"📦 AGENT 4: Moved {body_params_list} to request body")
+                logger.info(f"   Body: {body}")
+
             # Run async function synchronously
             try:
                 # Check if there's a running event loop
@@ -387,7 +414,7 @@ def agent_4_api_execution(state: Dict[str, Any]) -> Dict[str, Any]:
                         endpoint_name=endpoint.get("name"),
                         endpoint_path=endpoint.get("path"),
                         method=endpoint.get("method", "GET"),
-                        params=params,
+                        params=endpoint_params,
                         current_user=current_user
                     ))
                 except RuntimeError:
@@ -396,17 +423,28 @@ def agent_4_api_execution(state: Dict[str, Any]) -> Dict[str, Any]:
                         endpoint_name=endpoint.get("name"),
                         endpoint_path=endpoint.get("path"),
                         method=endpoint.get("method", "GET"),
-                        params=params,
+                        params=endpoint_params,
                         current_user=current_user
                     ))
             except Exception as call_error:
-                logger.error(f"Error calling {endpoint.get('name')}: {call_error}", exc_info=True)
+                logger.error(f"❌ AGENT 4: Error calling {endpoint.get('name')}")
+                logger.error(f"   Error type: {type(call_error).__name__}")
+                logger.error(f"   Error message: {str(call_error)}")
+                logger.error(f"   Full traceback:", exc_info=True)
                 response = {
                     "success": False,
                     "endpoint": endpoint.get("name"),
                     "error": str(call_error)
                 }
-            
+
+            # Log response
+            if response.get('success'):
+                logger.info(f"✅ AGENT 4: Endpoint {endpoint.get('name')} succeeded")
+                logger.info(f"   Response data size: {len(str(response.get('data', '')))} chars")
+            else:
+                logger.error(f"❌ AGENT 4: Endpoint {endpoint.get('name')} failed")
+                logger.error(f"   Error: {response.get('error', 'Unknown error')}")
+
             responses.append(response)
         
         # Separate successful and failed responses
@@ -424,22 +462,40 @@ def agent_4_api_execution(state: Dict[str, Any]) -> Dict[str, Any]:
         
         # Store all responses for MongoDB
         state["triggered_endpoints"] = responses
-        
+
         # Store only successful response data for LLM analysis
         state["endpoint_responses"] = successful_responses
-        
-        logger.info(
-            f"API execution completed: {len(successful_responses)} successful, "
-            f"{len(failed_responses)} failed"
-        )
-        
+
+        logger.info(f"✅ AGENT 4: API execution completed")
+        logger.info(f"   Total endpoints: {len(responses)}")
+        logger.info(f"   Successful: {len(successful_responses)}")
+        logger.info(f"   Failed: {len(failed_responses)}")
+
+        if successful_responses:
+            logger.info(f"   Successful endpoints:")
+            for resp in successful_responses:
+                logger.info(f"     - {resp.get('endpoint')}")
+
+        if failed_responses:
+            logger.info(f"   Failed endpoints:")
+            for resp in failed_responses:
+                logger.info(f"     - {resp.get('endpoint')}: {resp.get('error', 'Unknown error')}")
+
         if not successful_responses:
+            logger.warning("⚠️ AGENT 4: All API calls failed. Unable to retrieve data.")
             state["warnings"].append("All API calls failed. Unable to retrieve data.")
-        
+
+        logger.info("=" * 80)
+
         return state
-        
+
     except Exception as e:
-        logger.error(f"Error executing endpoints: {e}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"❌ AGENT 4: Error executing endpoints")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"   Full traceback:", exc_info=True)
         state["errors"].append(f"Endpoint execution failed: {str(e)}")
         return state
 
@@ -477,7 +533,7 @@ def build_params_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
             # Some other period value, include it
             params["period"] = period
     else:
-        # Other modules (GA4, Meta, etc.) - keep existing behavior
+        # Other modules (GA4, etc.) - keep existing behavior
         if start_date:
             params["start_date"] = start_date
         if end_date:
@@ -514,7 +570,7 @@ def build_params_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
         if state.get("timeframe"):
             params["timeframe"] = state["timeframe"]
         params["include_zero_volume"] = state.get("include_zero_volume", True)
-    
+
     elif module_type == "meta_ads":
         if state.get("account_id"):
             params["account_id"] = state["account_id"]
@@ -524,23 +580,48 @@ def build_params_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
             params["adset_ids"] = state["adset_ids"]
         if state.get("ad_ids"):
             params["ad_ids"] = state["ad_ids"]
-        if state.get("status_filter"):
-            params["status"] = state["status_filter"]
-    
-    elif module_type == "facebook":
-        if state.get("page_id"):
-            params["page_id"] = state["page_id"]
-        if state.get("post_limit"):
-            params["limit"] = state["post_limit"]
-    
-    elif module_type == "instagram":
-        if state.get("account_id"):
-            params["account_id"] = state["account_id"]
-        if state.get("media_limit"):
-            params["limit"] = state["media_limit"]
-        if state.get("media_type"):
-            params["media_type"] = state["media_type"]
-    
+        # Meta Ads uses period format like "7d", "30d", "90d"
+        # Keep the period and date params as is for Meta Ads
+
+    # ========================================================================
+    # FINAL DATE VALIDATION - Ensure no future dates are passed to endpoints
+    # ========================================================================
+    if params.get("start_date") and params.get("end_date"):
+        from datetime import datetime
+
+        logger.info("=" * 80)
+        logger.info("📅 BUILD_PARAMS: Final date validation before endpoint execution")
+        logger.info(f"   Original Start Date: {params['start_date']}")
+        logger.info(f"   Original End Date: {params['end_date']}")
+
+        try:
+            start_dt = datetime.strptime(params["start_date"], '%Y-%m-%d')
+            end_dt = datetime.strptime(params["end_date"], '%Y-%m-%d')
+            today = datetime.now()
+
+            logger.info(f"   Current Date: {today.strftime('%Y-%m-%d')}")
+
+            # If end date is in the future, replace it with today's date
+            if end_dt > today:
+                logger.warning(f"⚠️ BUILD_PARAMS: End date {params['end_date']} is in the future!")
+                logger.warning(f"   Replacing with current date: {today.strftime('%Y-%m-%d')}")
+                params["end_date"] = today.strftime('%Y-%m-%d')
+
+            # If start date is in the future, replace it with today as well
+            if start_dt > today:
+                logger.warning(f"⚠️ BUILD_PARAMS: Start date {params['start_date']} is in the future!")
+                logger.warning(f"   Replacing with current date: {today.strftime('%Y-%m-%d')}")
+                params["start_date"] = today.strftime('%Y-%m-%d')
+
+            logger.info(f"✅ BUILD_PARAMS: Final validated dates:")
+            logger.info(f"   Start Date: {params['start_date']}")
+            logger.info(f"   End Date: {params['end_date']}")
+            logger.info("=" * 80)
+
+        except Exception as date_err:
+            logger.error(f"❌ BUILD_PARAMS: Error validating dates: {date_err}")
+            logger.error("=" * 80)
+
     return params
 
 
@@ -643,162 +724,6 @@ def calculate_processing_time(state: Dict[str, Any]) -> Optional[float]:
             return (end - start).total_seconds()
     
     return None
-
-
-# ============================================================================
-# SPECIAL HANDLERS FOR SPECIFIC MODULES
-# ============================================================================
-
-async def handle_meta_campaigns_loading(
-    account_id: str,
-    auth_token: str,
-    user_email: str,
-    status_filter: Optional[List[str]] = None
-) -> Dict[str, Any]:
-    """
-    Special handler for Meta campaigns list endpoint using INTERNAL API calls.
-    Uses direct function calls instead of HTTP to avoid AWS App Runner timeouts.
-
-    Args:
-        account_id: Meta ad account ID (will be normalized to include act_ prefix)
-        auth_token: Meta auth token
-        user_email: User's email for authentication
-        status_filter: Optional status filter
-
-    Returns:
-        Response with all campaigns
-    """
-    logger.info("=== LOADING ALL META CAMPAIGNS (Using internal API call) ===")
-
-    # Normalize account ID to ensure it has act_ prefix
-    normalized_account_id = account_id if account_id.startswith('act_') else f'act_{account_id}'
-    logger.info(f"📋 Normalized account ID: {normalized_account_id} (original: {account_id})")
-
-    try:
-        # Import internal caller
-        from chat.utils.internal_api_caller import call_internal_endpoint
-
-        # Build current_user dict
-        current_user = {
-            "email": user_email,
-            "auth_token": auth_token,
-            "auth_provider": "facebook"
-        }
-
-        # Prepare params
-        params = {
-            "account_id": normalized_account_id
-        }
-
-        if status_filter:
-            params['status'] = ','.join(status_filter)
-
-        # Call internal endpoint (bypasses HTTP timeout)
-        endpoint_path = f'/api/meta/ad-accounts/{normalized_account_id}/campaigns/list'
-
-        logger.info(f"🔧 Calling internal API: {endpoint_path}")
-        response = await call_internal_endpoint(
-            endpoint_name='get_meta_campaigns_list',
-            endpoint_path=endpoint_path,
-            method='GET',
-            params=params,
-            current_user=current_user
-        )
-
-        if response.get('success'):
-            campaigns = response.get('data', {}).get('campaigns', [])
-            logger.info(f"✅ Loaded {len(campaigns)} campaigns successfully (internal call)")
-        else:
-            logger.error(f"❌ Failed to load campaigns: {response.get('error')}")
-
-        return response
-
-    except Exception as e:
-        logger.error(f"❌ Error in internal campaigns loading: {e}", exc_info=True)
-        return {
-            "success": False,
-            "endpoint": "get_meta_campaigns_list",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-
-def handle_meta_adsets_loading(
-    campaign_ids: List[str],
-    auth_token: str
-) -> Dict[str, Any]:
-    """
-    Special handler for Meta adsets by campaigns endpoint
-    
-    Args:
-        campaign_ids: List of campaign IDs
-        auth_token: Meta auth token
-        
-    Returns:
-        Response with all adsets
-    """
-    logger.info(f"=== LOADING ADSETS FOR {len(campaign_ids)} CAMPAIGNS ===")
-    
-    endpoint = {
-        'name': 'get_adsets_by_campaigns',
-        'path': '/api/meta/campaigns/adsets',
-        'method': 'POST',
-        'body_params': ['campaign_ids']
-    }
-    
-    params = {
-        'campaign_ids': campaign_ids
-    }
-    
-    client = APIClient(base_url=API_BASE_URL, auth_token=auth_token)
-    response = client.call_endpoint(endpoint, params)
-    
-    if response.get('success'):
-        adsets = response.get('data', [])
-        logger.info(f"Loaded {len(adsets)} adsets successfully")
-    else:
-        logger.error(f"Failed to load adsets: {response.get('error')}")
-    
-    return response
-
-
-def handle_meta_ads_loading(
-    adset_ids: List[str],
-    auth_token: str
-) -> Dict[str, Any]:
-    """
-    Special handler for Meta ads by adsets endpoint
-    
-    Args:
-        adset_ids: List of adset IDs
-        auth_token: Meta auth token
-        
-    Returns:
-        Response with all ads
-    """
-    logger.info(f"=== LOADING ADS FOR {len(adset_ids)} ADSETS ===")
-    
-    endpoint = {
-        'name': 'get_ads_by_adsets',
-        'path': '/api/meta/adsets/ads',
-        'method': 'POST',
-        'body_params': ['adset_ids']
-    }
-    
-    params = {
-        'adset_ids': adset_ids
-    }
-    
-    client = APIClient(base_url=API_BASE_URL, auth_token=auth_token)
-    response = client.call_endpoint(endpoint, params)
-    
-    if response.get('success'):
-        ads = response.get('data', [])
-        logger.info(f"Loaded {len(ads)} ads successfully")
-    else:
-        logger.error(f"Failed to load ads: {response.get('error')}")
-    
-    return response
 
 
 # ============================================================================

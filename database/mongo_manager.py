@@ -312,22 +312,6 @@ class MongoManager:
             'ga_roas_roi_time_series': 'google_analytics_roas_roi_time_series',
             'ga_funnel_data': 'ga_funnel_data',
 
-            # New mappings for Meta endpoints
-            'meta_account_insights_summary': 'meta_account_insights_summary',
-            'meta_campaigns_paginated': 'meta_campaigns_paginated',
-            'meta_campaigns_list': 'meta_campaigns_list',
-            'meta_campaigns_timeseries': 'meta_campaigns_timeseries',
-            'meta_campaigns_demographics': 'meta_campaigns_demographics',
-            'meta_campaigns_placements': 'meta_campaigns_placements',
-            'meta_adsets': 'meta_adsets',
-            'meta_adsets_timeseries': 'meta_adsets_timeseries',
-            'meta_adsets_demographics': 'meta_adsets_demographics',
-            'meta_adsets_placements': 'meta_adsets_placements',
-            'meta_ads': 'meta_ads',
-            'meta_ads_timeseries': 'meta_ads_timeseries',
-            'meta_ads_demographics': 'meta_ads_demographics',
-            'meta_ads_placements': 'meta_ads_placements',
-            
             # Combined endpoints
             'combined_overview': 'ads_ga_combined_overview_metrics',
             'combined_roas_roi_metrics': 'ga_combined_roas_roi_metrics',
@@ -347,47 +331,7 @@ class MongoManager:
             'ga_specific_channels_time_series': 'ga_specific_channels_time_series',
             
             # Intent insights
-            'intent_keyword_insights_raw': 'intent_keyword_insights',
-
-            # Meta Ads endpoints
-            'meta_ad_accounts': 'meta_ad_accounts',
-            'meta_key_stats': 'meta_key_stats', 
-            'meta_campaigns': 'meta_campaigns',
-            'meta_placement_performance': 'meta_placement_performance',
-            'meta_demographic_performance': 'meta_demographic_performance',
-            'meta_time_series': 'meta_time_series',
-
-            # Facebook Pages endpoints
-            'meta_pages': 'facebook_pages',
-            'meta_page_insights': 'facebook_page_insights',
-            'meta_page_insights_timeseries': 'facebook_page_insights_timeseries',
-            'meta_page_posts': 'facebook_page_posts',
-            'meta_page_posts_timeseries': 'facebook_page_posts_timeseries',
-            'meta_video_views_breakdown': 'facebook_video_views_breakdown',
-            'meta_content_type_breakdown': 'facebook_content_type_breakdown',
-            'meta_page_demographics': 'facebook_page_demographics',
-            'meta_follows_unfollows': 'facebook_follows_unfollows',
-            'meta_engagement_breakdown': 'facebook_engagement_breakdown',
-            'meta_organic_vs_paid': 'facebook_organic_vs_paid',
-            'facebook_post_insights': 'facebook_post_insights',
-            'facebook_audience_insights': 'facebook_audience_insights',
-            'facebook_performance_summary': 'facebook_performance_summary',
-
-            # Instagram endpoints
-            
-            'meta_instagram_accounts': 'instagram_accounts',
-            'meta_instagram_insights': 'instagram_account_insights',
-            'meta_instagram_insights_timeseries': 'instagram_insights_timeseries',
-            'meta_instagram_media': 'instagram_account_media',
-            'meta_instagram_media_timeseries': 'instagram_media_timeseries',
-            'instagram_stories': 'instagram_stories',
-            'instagram_audience_demographics': 'instagram_audience_demographics',
-            'instagram_hashtag_performance': 'instagram_hashtag_performance',
-            'instagram_performance_summary': 'instagram_performance_summary',
-
-            # Combined social media endpoints
-            'social_media_overview': 'social_media_overview',
-            'social_insights_summary': 'social_insights_summary'
+            'intent_keyword_insights_raw': 'intent_keyword_insights'
         }
 
         # Special handling for ga_audience_insights endpoint with dimension-based collections
@@ -429,24 +373,25 @@ class MongoManager:
 
         Returns the collection name that exists in the database
         """
-        # Map lowercase module types to their enum equivalents (which are used in existing collections)
-        module_type_map = {
-            "google_ads": "ModuleType.GOOGLE_ADS",
-            "google_analytics": "ModuleType.GOOGLE_ANALYTICS",
-            "meta_ads": "ModuleType.META_ADS",
-            "facebook_analytics": "ModuleType.FACEBOOK",
-            "instagram_analytics": "ModuleType.INSTAGRAM",
-            "intent_insights": "ModuleType.INTENT_INSIGHTS"
-        }
+        # Convert enum to string value if needed
+        if hasattr(module_type, 'value'):
+            # It's an enum, extract the value
+            module_type = module_type.value
+            logger.info(f"🔄 Converted enum to string: {module_type}")
 
-        # If module_type is in lowercase format, convert to enum format for backward compatibility
-        if module_type and module_type.lower() in module_type_map:
-            enum_format = module_type_map[module_type.lower()]
-            logger.info(f"🔄 Converted module type: {module_type} → {enum_format}")
-            return f"chat_{enum_format}"
+        # Convert to string if not already
+        module_type_str = str(module_type)
 
-        # Otherwise, use as-is (already in enum format)
-        return f"chat_{module_type}"
+        # Remove "ModuleType." prefix if present (from old enum format)
+        if module_type_str.startswith("ModuleType."):
+            module_type_str = module_type_str.replace("ModuleType.", "").lower()
+            logger.info(f"🔄 Cleaned module type: {module_type_str}")
+
+        # Now module_type_str should be in lowercase format (google_ads, meta_ads, etc.)
+        # Use this consistently
+        collection_name = f"chat_{module_type_str.lower()}"
+        logger.info(f"📁 Collection name: {collection_name}")
+        return collection_name
     
     async def get_cached_response(
         self,

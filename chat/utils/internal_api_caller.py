@@ -11,6 +11,136 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 
+class InternalAPICaller:
+    """
+    Wrapper class for making internal API calls within the same process.
+    Used by agents to call endpoints without HTTP overhead.
+    """
+    
+    def __init__(self, auth_token: str, user_email: str):
+        self.auth_token = auth_token
+        self.user_email = user_email
+        self.current_user = {
+            "email": user_email,
+            "token": auth_token
+        }
+    
+    async def call_get_endpoint(
+        self,
+        endpoint_path: str,
+        params: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Call a GET endpoint
+        
+        Args:
+            endpoint_path: The API path (e.g., "/api/ads/customers")
+            params: Query parameters
+            
+        Returns:
+            API response data
+        """
+        if params is None:
+            params = {}
+        
+        # Extract path parameters (e.g., {account_id})
+        import re
+        path_params = re.findall(r'\{(\w+)\}', endpoint_path)
+        
+        # Replace path parameters
+        for param in path_params:
+            if param in params:
+                endpoint_path = endpoint_path.replace(f"{{{param}}}", str(params[param]))
+        
+        result = await call_internal_endpoint(
+            endpoint_name=endpoint_path.split('/')[-1],
+            endpoint_path=endpoint_path,
+            method="GET",
+            params=params,
+            current_user=self.current_user
+        )
+        
+        if result.get("success"):
+            return result.get("data")
+        else:
+            raise Exception(result.get("error", "API call failed"))
+    
+    async def call_post_endpoint(
+        self,
+        endpoint_path: str,
+        body: Any = None,
+        params: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Call a POST endpoint
+        
+        Args:
+            endpoint_path: The API path
+            body: Request body (list or dict)
+            params: Query parameters
+            
+        Returns:
+            API response data
+        """
+        if params is None:
+            params = {}
+        
+        # Add body to params
+        params["body"] = body if body is not None else {}
+        
+        result = await call_internal_endpoint(
+            endpoint_name=endpoint_path.split('/')[-1],
+            endpoint_path=endpoint_path,
+            method="POST",
+            params=params,
+            current_user=self.current_user
+        )
+        
+        if result.get("success"):
+            return result.get("data")
+        else:
+            raise Exception(result.get("error", "API call failed"))
+    
+    def call_get_endpoint_sync(self, endpoint_path: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Synchronous version of call_get_endpoint (for non-async contexts)"""
+        import asyncio
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context but need sync behavior
+                # This shouldn't happen in production, but handle it gracefully
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self.call_get_endpoint(endpoint_path, params))
+                    return future.result()
+            else:
+                # No loop running, safe to use asyncio.run
+                return asyncio.run(self.call_get_endpoint(endpoint_path, params))
+        except RuntimeError:
+            # No event loop exists, create one
+            return asyncio.run(self.call_get_endpoint(endpoint_path, params))
+    
+    def call_post_endpoint_sync(self, endpoint_path: str, body: Any = None, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Synchronous version of call_post_endpoint (for non-async contexts)"""
+        import asyncio
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context but need sync behavior
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self.call_post_endpoint(endpoint_path, body, params))
+                    return future.result()
+            else:
+                # No loop running, safe to use asyncio.run
+                return asyncio.run(self.call_post_endpoint(endpoint_path, body, params))
+        except RuntimeError:
+            # No event loop exists, create one
+            return asyncio.run(self.call_post_endpoint(endpoint_path, body, params))
+
+
 async def call_internal_endpoint(
     endpoint_name: str,
     endpoint_path: str,
@@ -61,8 +191,7 @@ async def call_internal_endpoint(
             get_keyword_insights,         # the POST endpoint
 
             # Meta Ads
-            get_meta_ad_accounts,
-            get_account_insights_summary,   # renamed
+            get_account_insights_summary,
             get_campaigns_list,
             get_campaigns_timeseries,
             get_campaigns_demographics,
@@ -75,26 +204,6 @@ async def call_internal_endpoint(
             get_ads_timeseries,
             get_ads_demographics,
             get_ads_placements,
-
-            # Facebook Page
-            get_meta_pages,
-            get_meta_page_insights,
-            get_meta_page_insights_timeseries,
-            get_meta_page_posts,
-            get_meta_page_posts_timeseries,
-            get_meta_video_views_breakdown,
-            get_meta_content_type_breakdown,
-            get_meta_follows_unfollows,
-            get_meta_organic_vs_paid,
-            get_meta_page_demographics,
-            get_meta_engagement_breakdown,
-
-            # Instagram
-            get_meta_instagram_accounts,
-            get_meta_instagram_insights,
-            get_meta_instagram_insights_timeseries,
-            get_meta_instagram_media,
-            get_meta_instagram_media_timeseries,
         )
 
         result = None
@@ -312,10 +421,7 @@ async def call_internal_endpoint(
         # ================================================================== #
         # META ADS
         # ================================================================== #
-        elif endpoint_path == "/api/meta/ad-accounts":
-            result = await get_meta_ad_accounts(current_user=current_user)
-
-        elif "/ad-accounts/" in endpoint_path and "/insights/summary" in endpoint_path:
+        elif endpoint_path.startswith("/api/meta/ad-accounts/") and "/insights/summary" in endpoint_path:
             result = await get_account_insights_summary(
                 account_id=params["account_id"],
                 period=params.get("period"),
@@ -324,7 +430,7 @@ async def call_internal_endpoint(
                 current_user=current_user,
             )
 
-        elif "/ad-accounts/" in endpoint_path and "/campaigns/list" in endpoint_path:
+        elif endpoint_path.startswith("/api/meta/ad-accounts/") and "/campaigns/list" in endpoint_path:
             result = await get_campaigns_list(
                 account_id=params["account_id"],
                 status=params.get("status"),
@@ -332,6 +438,15 @@ async def call_internal_endpoint(
             )
 
         elif endpoint_path == "/api/meta/campaigns/timeseries":
+            logger.info("=" * 80)
+            logger.info("📊 INTERNAL CALLER: Calling get_campaigns_timeseries")
+            logger.info(f"   Campaign IDs: {body.get('campaign_ids', [])}")
+            logger.info(f"   Period: {params.get('period')}")
+            logger.info(f"   Start Date: {params.get('start_date')}")
+            logger.info(f"   End Date: {params.get('end_date')}")
+            logger.info(f"   User: {current_user.get('email')}")
+            logger.info("=" * 80)
+
             result = await get_campaigns_timeseries(
                 campaign_ids=body.get("campaign_ids", []),
                 period=params.get("period"),
@@ -339,6 +454,12 @@ async def call_internal_endpoint(
                 end_date=params.get("end_date"),
                 current_user=current_user,
             )
+
+            logger.info("=" * 80)
+            logger.info("✅ INTERNAL CALLER: get_campaigns_timeseries completed")
+            logger.info(f"   Result type: {type(result).__name__}")
+            logger.info(f"   Result size: {len(str(result))} chars")
+            logger.info("=" * 80)
 
         elif endpoint_path == "/api/meta/campaigns/demographics":
             result = await get_campaigns_demographics(
@@ -359,6 +480,12 @@ async def call_internal_endpoint(
             )
 
         elif endpoint_path == "/api/meta/campaigns/adsets":
+            logger.info("=" * 80)
+            logger.info("📊 INTERNAL CALLER: Calling get_adsets_by_campaigns")
+            logger.info(f"   Campaign IDs: {body.get('campaign_ids', [])}")
+            logger.info(f"   User: {current_user.get('email')}")
+            logger.info("=" * 80)
+
             result = await get_adsets_by_campaigns(
                 campaign_ids=body.get("campaign_ids", []),
                 period=params.get("period"),
@@ -367,7 +494,23 @@ async def call_internal_endpoint(
                 current_user=current_user,
             )
 
+            logger.info("=" * 80)
+            logger.info("✅ INTERNAL CALLER: get_adsets_by_campaigns completed")
+            logger.info(f"   Result type: {type(result).__name__}")
+            if isinstance(result, list):
+                logger.info(f"   Adsets returned: {len(result)}")
+            logger.info("=" * 80)
+
         elif endpoint_path == "/api/meta/adsets/timeseries":
+            logger.info("=" * 80)
+            logger.info("📊 INTERNAL CALLER: Calling get_adsets_timeseries")
+            logger.info(f"   Adset IDs: {body.get('adset_ids', [])}")
+            logger.info(f"   Period: {params.get('period')}")
+            logger.info(f"   Start Date: {params.get('start_date')}")
+            logger.info(f"   End Date: {params.get('end_date')}")
+            logger.info(f"   User: {current_user.get('email')}")
+            logger.info("=" * 80)
+
             result = await get_adsets_timeseries(
                 adset_ids=body.get("adset_ids", []),
                 period=params.get("period"),
@@ -375,6 +518,12 @@ async def call_internal_endpoint(
                 end_date=params.get("end_date"),
                 current_user=current_user,
             )
+
+            logger.info("=" * 80)
+            logger.info("✅ INTERNAL CALLER: get_adsets_timeseries completed")
+            logger.info(f"   Result type: {type(result).__name__}")
+            logger.info(f"   Result size: {len(str(result))} chars")
+            logger.info("=" * 80)
 
         elif endpoint_path == "/api/meta/adsets/demographics":
             result = await get_adsets_demographics(
@@ -428,145 +577,6 @@ async def call_internal_endpoint(
             )
 
         # ================================================================== #
-        # FACEBOOK PAGE
-        # ================================================================== #
-        elif endpoint_path == "/api/meta/pages":
-            result = await get_meta_pages(current_user=current_user)
-
-        elif "/pages/" in endpoint_path and "/insights/timeseries" in endpoint_path:
-            result = await get_meta_page_insights_timeseries(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/pages/" in endpoint_path and "/insights" in endpoint_path and "/timeseries" not in endpoint_path:
-            result = await get_meta_page_insights(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/pages/" in endpoint_path and "/posts/timeseries" in endpoint_path:
-            result = await get_meta_page_posts_timeseries(
-                page_id=params["page_id"],
-                limit=params.get("limit", 10),
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/pages/" in endpoint_path and "/posts" in endpoint_path and "/timeseries" not in endpoint_path:
-            result = await get_meta_page_posts(
-                page_id=params["page_id"],
-                limit=params.get("limit", 10),
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/video-views-breakdown" in endpoint_path:
-            result = await get_meta_video_views_breakdown(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/content-type-breakdown" in endpoint_path:
-            result = await get_meta_content_type_breakdown(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/follows-unfollows" in endpoint_path:
-            result = await get_meta_follows_unfollows(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/organic-vs-paid" in endpoint_path:
-            result = await get_meta_organic_vs_paid(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/pages/" in endpoint_path and "/demographics" in endpoint_path:
-            result = await get_meta_page_demographics(
-                page_id=params["page_id"],
-                current_user=current_user,
-            )
-
-        elif "/pages/" in endpoint_path and "/engagement-breakdown" in endpoint_path:
-            result = await get_meta_engagement_breakdown(
-                page_id=params["page_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        # ================================================================== #
-        # INSTAGRAM
-        # ================================================================== #
-        elif endpoint_path == "/api/meta/instagram/accounts":
-            result = await get_meta_instagram_accounts(current_user=current_user)
-
-        elif "/instagram/" in endpoint_path and "/insights/timeseries" in endpoint_path:
-            result = await get_meta_instagram_insights_timeseries(
-                account_id=params["account_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/instagram/" in endpoint_path and "/insights" in endpoint_path and "/timeseries" not in endpoint_path:
-            result = await get_meta_instagram_insights(
-                account_id=params["account_id"],
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/instagram/" in endpoint_path and "/media/timeseries" in endpoint_path:
-            result = await get_meta_instagram_media_timeseries(
-                account_id=params["account_id"],
-                limit=params.get("limit", 10),
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        elif "/instagram/" in endpoint_path and "/media" in endpoint_path and "/timeseries" not in endpoint_path:
-            result = await get_meta_instagram_media(
-                account_id=params["account_id"],
-                limit=params.get("limit", 10),
-                period=params.get("period"),
-                start_date=params.get("start_date"),
-                end_date=params.get("end_date"),
-                current_user=current_user,
-            )
-
-        # ================================================================== #
         # FALLBACK
         # ================================================================== #
         else:
@@ -608,7 +618,17 @@ async def call_internal_endpoint(
 
     except Exception as exc:
         elapsed = (datetime.utcnow() - start).total_seconds()
-        logger.error("Internal call % %s failed: %s", endpoint_name, exc, exc_info=True)
+
+        logger.error("=" * 80)
+        logger.error(f"❌ INTERNAL CALLER: Call to {endpoint_name} failed")
+        logger.error(f"   Endpoint path: {endpoint_path}")
+        logger.error(f"   Method: {method}")
+        logger.error(f"   Error type: {type(exc).__name__}")
+        logger.error(f"   Error message: {str(exc)}")
+        logger.error(f"   Params: {params}")
+        logger.error(f"   Response time: {elapsed:.2f}s")
+        logger.error("=" * 80)
+        logger.error("   Full traceback:", exc_info=True)
 
         return {
             "success": False,

@@ -8,8 +8,6 @@ from fastapi import FastAPI, HTTPException, Query, Depends, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
 import uvicorn
 import requests
 import time
@@ -89,40 +87,6 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# Add request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all incoming requests for debugging"""
-    import time
-    start_time = time.time()
-
-    # Log incoming request
-    logger.info("=" * 80)
-    logger.info(f"🌐 INCOMING REQUEST: {request.method} {request.url.path}")
-    logger.info(f"   Client: {request.client.host if request.client else 'unknown'}")
-    logger.info(f"   Content-Type: {request.headers.get('content-type', 'N/A')}")
-    logger.info(f"   Content-Length: {request.headers.get('content-length', 'N/A')}")
-    logger.info(f"   User-Agent: {request.headers.get('user-agent', 'N/A')[:100]}")
-
-    # Process request
-    try:
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        logger.info(f"✅ RESPONSE: {request.method} {request.url.path}")
-        logger.info(f"   Status: {response.status_code}")
-        logger.info(f"   Processing time: {process_time:.2f}s")
-        logger.info("=" * 80)
-
-        return response
-    except Exception as e:
-        process_time = time.time() - start_time
-        logger.error(f"❌ REQUEST FAILED: {request.method} {request.url.path}")
-        logger.error(f"   Error: {str(e)}")
-        logger.error(f"   Processing time: {process_time:.2f}s")
-        logger.error("=" * 80)
-        raise
-
 # Add global exception handler to ensure CORS headers on errors
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -136,60 +100,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     response = JSONResponse(
         status_code=500,
         content={"detail": str(exc)}
-    )
-
-    # Add CORS headers
-    if origin in [
-        "https://strategy-dashboard.momentro.com",
-        "http://localhost:3000",
-        "http://localhost:5173"
-    ]:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*"
-
-    return response
-
-# Add validation error handler for debugging 422 errors
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors with detailed logging"""
-    logger.error("=" * 80)
-    logger.error(f"🚨 VALIDATION ERROR on {request.method} {request.url.path}")
-    logger.error(f"📋 Request headers: {dict(request.headers)}")
-
-    # Get request body from exception object (body is already consumed by FastAPI)
-    if hasattr(exc, 'body'):
-        try:
-            body_str = exc.body.decode('utf-8') if isinstance(exc.body, bytes) else str(exc.body)
-            logger.error(f"📥 Request body: {body_str}")
-        except Exception as e:
-            logger.error(f"⚠️ Could not decode body: {e}")
-            logger.error(f"📥 Raw body: {exc.body}")
-
-    # Log all validation errors
-    logger.error(f"❌ Validation errors ({len(exc.errors())} error(s)):")
-    for i, error in enumerate(exc.errors(), 1):
-        logger.error(f"   Error {i}:")
-        logger.error(f"      Field/Location: {error.get('loc')}")
-        logger.error(f"      Error Type: {error.get('type')}")
-        logger.error(f"      Message: {error.get('msg')}")
-        if error.get('ctx'):
-            logger.error(f"      Context: {error.get('ctx')}")
-    logger.error("=" * 80)
-
-    # Get origin from request
-    origin = request.headers.get("origin", "")
-
-    # Create detailed error response
-    response = JSONResponse(
-        status_code=422,
-        content={
-            "detail": exc.errors(),
-            "body": str(exc.body) if hasattr(exc, 'body') else None,
-            "message": "Request validation failed. Check the 'detail' field for specific errors."
-        }
     )
 
     # Add CORS headers
@@ -1446,17 +1356,11 @@ async def get_account_insights_summary(
     try:
         from social.meta_manager import MetaManager
         meta_manager = MetaManager(current_user["email"], auth_manager)
-
-        logger.info(f"🔍 ENDPOINT CALLED: /api/meta/ad-accounts/{account_id}/insights/summary")
-        logger.info(f"🔍 ENDPOINT PARAMS: period={period}, start_date={start_date}, end_date={end_date}")
-        logger.info(f"🔍 USER: {current_user['email']}")
-
+        
         summary = meta_manager.get_account_insights_summary(
             account_id, period, start_date, end_date
         )
-
-        logger.info(f"🔍 ENDPOINT RESPONSE TO FRONTEND: {json.dumps(summary, indent=2, default=str)}")
-
+        
         return summary
     except Exception as e:
         logger.error(f"Error fetching account insights summary: {e}")
@@ -2318,95 +2222,27 @@ async def chat_message(
 ):
     """Process a chat message and auto-save the conversation"""
     try:
-        logger.info("=" * 80)
-        logger.info(f"📨 CHAT MESSAGE REQUEST RECEIVED")
-        logger.info(f"👤 User: {current_user.get('email', 'unknown')}")
-        logger.info(f"🔧 Module: {request.module_type}")
-        logger.info(f"💬 Message: {request.message[:200]}{'...' if len(request.message) > 200 else ''}")
-        logger.info(f"🆔 Session ID: {request.session_id or 'NEW'}")
-        logger.info(f"📊 Customer ID: {request.customer_id}")
-        logger.info(f"📊 Property ID: {request.property_id}")
-        logger.info(f"📊 Account ID: {request.account_id}")
-        logger.info(f"📅 Period: {request.period}")
-        logger.info(f"📅 Start Date: {request.start_date}")
-        logger.info(f"📅 End Date: {request.end_date}")
-        logger.info(f"📦 Context: {request.context}")
-        logger.info(f"🔑 Auth Token Present: {'Yes' if current_user.get('auth_token') else 'No'}")
-        logger.info("=" * 80)
-
+        logger.info(f"📨 Received chat message from {current_user['email']}")
+        logger.info(f"Module: {request.module_type}, Message: {request.message[:100]}")
+        
         # 1️⃣ Generate response using chat_manager
-        logger.info("🚀 Calling chat_manager.process_chat_request()")
         response = await chat_manager.process_chat_request(
             request=request,
             current_user=current_user
         )
-
-        logger.info("=" * 80)
-        logger.info(f"✅ CHAT RESPONSE GENERATED")
-        logger.info(f"🆔 Session ID: {response.session_id}")
-        logger.info(f"📝 Response Length: {len(response.response)} chars")
-        logger.info(f"🎯 Triggered Endpoint: {response.triggered_endpoint}")
-        logger.info(f"📊 Endpoint Data Keys: {list(response.endpoint_data.keys()) if response.endpoint_data else None}")
-        logger.info("=" * 80)
+        
+        logger.info(f"✅ Chat response generated for session: {response.session_id}")
 
         # Note: Conversation is already saved by graph_orchestrator._save_conversation_to_mongodb()
         # No need to duplicate the save here
 
         # Return response to client
         return response
-
+        
     except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ ERROR PROCESSING CHAT MESSAGE")
-        logger.error(f"Error Type: {type(e).__name__}")
-        logger.error(f"Error Message: {str(e)}")
-        logger.error("=" * 80)
-        logger.error(f"Full traceback:", exc_info=True)
+        logger.error(f"❌ Error processing chat message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/chat/continue/{session_id}")
-async def continue_chat(
-    session_id: str,
-    user_response: str = Query(..., description="User's response or selection (JSON encoded)"),
-    module_type: str = Query(..., description="Module type"),
-    current_user: dict = Depends(get_current_user)
-):
-    """Continue a chat session after user provides input (Meta Ads selection flow)"""
-    try:
-        logger.info("=" * 80)
-        logger.info(f"🔄 CONTINUE CHAT REQUEST RECEIVED")
-        logger.info(f"👤 User: {current_user.get('email', 'unknown')}")
-        logger.info(f"🆔 Session ID: {session_id}")
-        logger.info(f"🔧 Module: {module_type}")
-        logger.info(f"💬 User Response: {user_response}")
-        logger.info("=" * 80)
-
-        # Continue the chat session
-        response = await chat_manager.continue_chat_session(
-            session_id=session_id,
-            user_response=user_response,
-            module_type=module_type,
-            current_user=current_user
-        )
-
-        logger.info("=" * 80)
-        logger.info(f"✅ CONTINUE CHAT RESPONSE GENERATED")
-        logger.info(f"🆔 Session ID: {response.session_id}")
-        logger.info(f"📝 Response Length: {len(response.response)} chars")
-        logger.info("=" * 80)
-
-        return response
-
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ ERROR CONTINUING CHAT")
-        logger.error(f"Error Type: {type(e).__name__}")
-        logger.error(f"Error Message: {str(e)}")
-        logger.error("=" * 80)
-        logger.error(f"Full traceback:", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
+    
 
 @app.get("/api/chat/sessions/{module_type}")
 async def get_chat_sessions(

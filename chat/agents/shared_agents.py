@@ -28,19 +28,30 @@ DEFAULT_MODEL = "gpt-4-turbo-preview"  # or "gpt-3.5-turbo" for faster/cheaper
 def agent_1_intent_classification(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Agent 1: Classify user intent as chitchat or analytical
-    
+
     Args:
         state: Current chat state
-        
+
     Returns:
         Updated state with intent_type set
     """
-    logger.info("=== AGENT 1: Intent Classification ===")
+    logger.info("=" * 80)
+    logger.info("🤖 AGENT 1: Intent Classification")
+    logger.info(f"   Session ID: {state.get('session_id')}")
+    logger.info(f"   User Question: {state.get('user_question', '')[:100]}...")
+    logger.info(f"   Module Type: {state.get('module_type')}")
     state["current_agent"] = "agent_1_intent_classification"
-    
+
+    # If continuing from a selection (campaign/adset/ad IDs already set), skip classification
+    if state.get("campaign_ids") or state.get("adset_ids") or state.get("ad_ids"):
+        logger.info("🔄 AGENT 1: Continuing from selection - skipping intent classification")
+        state["intent_type"] = "analytical"
+        return state
+
     user_question = state.get("user_question", "")
-    
+
     try:
+        logger.info(f"🧠 AGENT 1: Calling LLM for intent classification")
         # LLM prompt for intent classification
         system_prompt = """You are an intent classifier for a marketing analytics chat system.
 Your job is to determine if the user's message is:
@@ -62,7 +73,7 @@ Examples:
 """
 
         user_prompt = f"Classify this message: {user_question}"
-        
+
         response = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[
@@ -72,27 +83,36 @@ Examples:
             temperature=0.1,
             max_tokens=10
         )
-        
+
         intent = response.choices[0].message.content.strip().lower()
-        
+        logger.info(f"✅ AGENT 1: LLM response received: '{intent}'")
+
         # Validate response
         if intent not in ["chitchat", "analytical"]:
             # Default to analytical if unclear
             intent = "analytical"
-            logger.warning(f"Unclear intent classification, defaulting to: {intent}")
-        
+            logger.warning(f"⚠️ AGENT 1: Unclear intent classification '{intent}', defaulting to: analytical")
+
         state["intent_type"] = intent
-        logger.info(f"Intent classified as: {intent}")
-        
+        logger.info(f"✅ AGENT 1: Intent classified as: {intent}")
+
         # If chitchat, we can prepare a direct response
         if intent == "chitchat":
             state["needs_user_input"] = False
-            logger.info("Chitchat detected - will route to direct LLM response")
-        
+            logger.info("💬 AGENT 1: Chitchat detected - will route to direct LLM response")
+        else:
+            logger.info("📊 AGENT 1: Analytical intent detected - will proceed to parameter extraction")
+
+        logger.info("=" * 80)
         return state
-        
+
     except Exception as e:
-        logger.error(f"Error in intent classification: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ AGENT 1: Error in intent classification")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"   Full traceback:", exc_info=True)
         state["errors"].append(f"Intent classification failed: {str(e)}")
         # Default to analytical to be safe
         state["intent_type"] = "analytical"
@@ -127,9 +147,6 @@ You can help with:
 - Google Ads: Campaign performance, ad metrics, keyword insights
 - Google Analytics: Website traffic, user behavior, conversions
 - Intent Insights: Keyword research and search trends
-- Meta Ads: Facebook/Instagram ad campaigns
-- Facebook Pages: Page insights and engagement
-- Instagram: Profile insights and content performance
 
 Be friendly, concise, and helpful. If the user asks what you can do, briefly explain the capabilities of the current module."""
 
@@ -166,21 +183,27 @@ def agent_2_parameter_extraction(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Agent 2: Extract parameters from user question and context
     Extracts: time periods, IDs, filters, etc.
-    
+
     Args:
         state: Current chat state
-        
+
     Returns:
         Updated state with extracted parameters
     """
-    logger.info("=== AGENT 2: Parameter Extraction ===")
+    logger.info("=" * 80)
+    logger.info("🤖 AGENT 2: Parameter Extraction")
+    logger.info(f"   Session ID: {state.get('session_id')}")
+    logger.info(f"   Module Type: {state.get('module_type')}")
+    logger.info(f"   User Question: {state.get('user_question', '')[:100]}...")
     state["current_agent"] = "agent_2_parameter_extraction"
-    
+
     user_question = state.get("user_question", "")
     module_type = state.get("module_type", "")
     
     try:
         # Build context-specific prompt
+        current_date = datetime.now()
+        current_year = current_date.year
         system_prompt = f"""You are a parameter extraction agent for a {module_type} analytics system.
 
 Extract the following information from the user's question:
@@ -201,14 +224,22 @@ Return your response as a JSON object with these keys:
     "filters": {{"filter_type": "value"}}
 }}
 
-If no time period is mentioned, set has_time_period to false.
-Be generous with date parsing - "last week", "past month", "yesterday" etc.
-
-Current date is: {datetime.now().strftime('%Y-%m-%d')}
+IMPORTANT DATE HANDLING RULES:
+- Current date is: {current_date.strftime('%Y-%m-%d')} (Year: {current_year})
+- If no time period is mentioned, set has_time_period to false
+- Be generous with date parsing - "last week", "past month", "yesterday" etc.
+- When month names or ranges are mentioned WITHOUT a year (e.g., "Oct - Dec", "October to December", "Nov"):
+  * If the month(s) have already passed this year, use the current year ({current_year})
+  * If the month(s) are in the future this year, use the PREVIOUS year ({current_year - 1})
+  * Example: If today is November 2024 and user says "Oct - Dec", interpret as October 2024 - December 2024 (use current year since Oct has passed)
+  * Example: If today is March 2024 and user says "Nov - Dec", interpret as November 2023 - December 2023 (use previous year)
+- NEVER return dates in the future unless explicitly specified with a year
+- For relative periods like "last 7 days", prefer using period_keyword instead of explicit dates
 """
 
         user_prompt = f"Extract parameters from: {user_question}"
-        
+
+        logger.info(f"🧠 AGENT 2: Calling LLM for parameter extraction")
         response = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[
@@ -219,11 +250,11 @@ Current date is: {datetime.now().strftime('%Y-%m-%d')}
             max_tokens=500,
             response_format={"type": "json_object"}
         )
-        
+
         extracted = json.loads(response.choices[0].message.content)
-        logger.info(f"Extracted parameters: {extracted}")
-        
-        # Process time period
+        logger.info(f"✅ AGENT 2: LLM response received")
+        logger.info(f"📊 AGENT 2: Extracted parameters: {extracted}")
+
         # Process time period
         if extracted.get("has_time_period"):
             # If keyword period provided, parse it first (this takes priority)
@@ -239,7 +270,7 @@ Current date is: {datetime.now().strftime('%Y-%m-%d')}
                     state["end_date"] = end_date
                 if period:
                     state["period"] = period
-            
+
             # If explicit dates provided by LLM (and not already set from keyword parsing)
             if extracted.get("start_date") and extracted.get("end_date"):
                 # If we didn't get dates from keyword parsing, use LLM-extracted dates
@@ -251,6 +282,34 @@ Current date is: {datetime.now().strftime('%Y-%m-%d')}
                 if state.get("start_date") and state.get("end_date") and not state.get("period"):
                     if module_type in ["google_ads", "intent_insights"]:
                         state["period"] = "CUSTOM"
+
+            # Validate and correct future dates (inside has_time_period block)
+            if state.get("start_date") and state.get("end_date"):
+                logger.info(f"📅 AGENT 2: Validating extracted dates")
+                logger.info(f"   Start: {state['start_date']}, End: {state['end_date']}")
+
+                try:
+                    start_dt = datetime.strptime(state["start_date"], '%Y-%m-%d')
+                    end_dt = datetime.strptime(state["end_date"], '%Y-%m-%d')
+                    now = datetime.now()
+
+                    # If end date is in the future, adjust both dates by moving them back one year
+                    if end_dt > now:
+                        logger.warning(f"⚠️ AGENT 2: End date {state['end_date']} is in the future, adjusting to previous year")
+
+                        # Move both dates back by one year
+                        start_dt = start_dt.replace(year=start_dt.year - 1)
+                        end_dt = end_dt.replace(year=end_dt.year - 1)
+
+                        state["start_date"] = start_dt.strftime('%Y-%m-%d')
+                        state["end_date"] = end_dt.strftime('%Y-%m-%d')
+
+                        logger.info(f"✅ AGENT 2: Adjusted dates - Start: {state['start_date']}, End: {state['end_date']}")
+                    else:
+                        logger.info(f"✅ AGENT 2: Dates are valid (not in future)")
+
+                except Exception as date_err:
+                    logger.error(f"❌ AGENT 2: Error validating dates: {date_err}")
         else:
             # No time period mentioned - check if we already have one from context
             if not (state.get("start_date") or state.get("period")):
@@ -269,13 +328,24 @@ Current date is: {datetime.now().strftime('%Y-%m-%d')}
         
         if extracted.get("filters"):
             state["extracted_filters"] = extracted["filters"]
-        
-        logger.info(f"Parameters extracted successfully. Time period: {state.get('start_date')} to {state.get('end_date')}, Period: {state.get('period')}")
-        
+
+        logger.info(f"✅ AGENT 2: Parameters extracted successfully")
+        logger.info(f"   Start Date: {state.get('start_date')}")
+        logger.info(f"   End Date: {state.get('end_date')}")
+        logger.info(f"   Period: {state.get('period')}")
+        logger.info(f"   Extracted Entities: {state.get('extracted_entities', [])}")
+        logger.info(f"   Extracted Metrics: {state.get('extracted_metrics', [])}")
+        logger.info("=" * 80)
+
         return state
-        
+
     except Exception as e:
-        logger.error(f"Error in parameter extraction: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ AGENT 2: Error in parameter extraction")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"   Full traceback:", exc_info=True)
         state["errors"].append(f"Parameter extraction failed: {str(e)}")
         
         # If extraction fails but we have defaults from context, use those
@@ -380,23 +450,31 @@ def parse_period_keyword(keyword: str, module_type: str) -> Tuple[str, str, str]
 def agent_3_endpoint_selection(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Agent 3: Select appropriate endpoints based on user question
-    
+
     Args:
         state: Current chat state
-        
+
     Returns:
         Updated state with selected_endpoints
     """
-    logger.info("=== AGENT 3: Endpoint Selection ===")
+    logger.info("=" * 80)
+    logger.info("🤖 AGENT 3: Endpoint Selection")
+    logger.info(f"   Session ID: {state.get('session_id')}")
+    logger.info(f"   Module Type: {state.get('module_type')}")
+    logger.info(f"   User Question: {state.get('user_question', '')[:100]}...")
     state["current_agent"] = "agent_3_endpoint_selection"
-    
+
     user_question = state.get("user_question", "")
     available_endpoints = state.get("available_endpoints", [])
     extracted_metrics = state.get("extracted_metrics", [])
     extracted_entities = state.get("extracted_entities", [])
-    
+
+    logger.info(f"   Available endpoints count: {len(available_endpoints)}")
+    logger.info(f"   Extracted metrics: {extracted_metrics}")
+    logger.info(f"   Extracted entities: {extracted_entities}")
+
     if not available_endpoints:
-        logger.error("No available endpoints in state")
+        logger.error("❌ AGENT 3: No available endpoints in state")
         state["errors"].append("No endpoints available for this module")
         return state
     
@@ -438,6 +516,7 @@ Mentioned entities: {', '.join(extracted_entities) if extracted_entities else 'n
 
 Select the best endpoint(s) to answer this question."""
 
+        logger.info(f"🧠 AGENT 3: Calling LLM for endpoint selection")
         response = client.chat.completions.create(
             model=DEFAULT_MODEL,
             messages=[
@@ -448,34 +527,45 @@ Select the best endpoint(s) to answer this question."""
             max_tokens=500,
             response_format={"type": "json_object"}
         )
-        
+
         result = json.loads(response.choices[0].message.content)
         selected_names = result.get("selected_endpoints", [])
         reasoning = result.get("reasoning", "")
-        
-        logger.info(f"Endpoint selection reasoning: {reasoning}")
-        
+
+        logger.info(f"✅ AGENT 3: LLM response received")
+        logger.info(f"💡 AGENT 3: Selection reasoning: {reasoning}")
+        logger.info(f"📝 AGENT 3: Selected endpoint names: {selected_names}")
+
         # Convert endpoint names to full endpoint objects
         selected_endpoints = []
         for name in selected_names:
             endpoint = next((ep for ep in available_endpoints if ep['name'] == name), None)
             if endpoint:
                 selected_endpoints.append(endpoint)
+                logger.info(f"   ✅ Found endpoint: {name}")
             else:
-                logger.warning(f"Selected endpoint '{name}' not found in available endpoints")
-        
+                logger.warning(f"   ⚠️ AGENT 3: Selected endpoint '{name}' not found in available endpoints")
+
         if not selected_endpoints:
             # Fallback: select a default endpoint based on module
-            logger.warning("No endpoints selected by LLM, using default")
+            logger.warning("⚠️ AGENT 3: No endpoints selected by LLM, using default")
             selected_endpoints = [available_endpoints[0]] if available_endpoints else []
-        
+
         state["selected_endpoints"] = selected_endpoints
-        logger.info(f"Selected {len(selected_endpoints)} endpoint(s): {[ep['name'] for ep in selected_endpoints]}")
-        
+        logger.info(f"✅ AGENT 3: Final selection - {len(selected_endpoints)} endpoint(s)")
+        for ep in selected_endpoints:
+            logger.info(f"   - {ep['name']} ({ep['path']})")
+        logger.info("=" * 80)
+
         return state
-        
+
     except Exception as e:
-        logger.error(f"Error in endpoint selection: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ AGENT 3: Error in endpoint selection")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"   Full traceback:", exc_info=True)
         state["errors"].append(f"Endpoint selection failed: {str(e)}")
         # Fallback to first endpoint
         if available_endpoints:
@@ -491,51 +581,68 @@ def agent_5_data_processing_and_analysis(state: Dict[str, Any]) -> Dict[str, Any
     """
     Agent 5: Process endpoint responses and generate insights with LLM
     Handles chunking if response is too large
-    
+
     Args:
         state: Current chat state
-        
+
     Returns:
         Updated state with llm_insights
     """
-    logger.info("=== AGENT 5: Data Processing & LLM Analysis ===")
+    logger.info("=" * 80)
+    logger.info("🤖 AGENT 5: Data Processing & LLM Analysis")
+    logger.info(f"   Session ID: {state.get('session_id')}")
+    logger.info(f"   Module Type: {state.get('module_type')}")
+    logger.info(f"   User Question: {state.get('user_question', '')[:100]}...")
     state["current_agent"] = "agent_5_data_processing_and_analysis"
-    
+
     user_question = state.get("user_question", "")
     endpoint_responses = state.get("endpoint_responses", [])
-    
+
+    logger.info(f"   Endpoint responses count: {len(endpoint_responses)}")
+    for i, resp in enumerate(endpoint_responses):
+        logger.info(f"   Response {i+1}: endpoint={resp.get('endpoint', 'unknown')}, success={resp.get('success', False)}, data_size={len(str(resp.get('data', '')))}")
+
     if not endpoint_responses:
-        logger.warning("No endpoint responses to analyze")
+        logger.warning("⚠️ AGENT 5: No endpoint responses to analyze")
         state["llm_insights"] = "I didn't receive any data to analyze. Please try again."
         return state
-    
+
     try:
         # Combine all endpoint data
         combined_data = {
             "question": user_question,
             "data": endpoint_responses
         }
-        
+
         data_json = json.dumps(combined_data, indent=2)
-        
+
         # Check token size (rough estimate: 1 token ≈ 4 characters)
         estimated_tokens = len(data_json) / 4
         max_context_tokens = 8000  # Leave room for system prompt and response
-        
+
+        logger.info(f"📊 AGENT 5: Data size: {len(data_json)} chars, ~{estimated_tokens:.0f} tokens")
+
         if estimated_tokens > max_context_tokens:
-            logger.info(f"Data too large ({estimated_tokens:.0f} tokens), chunking required")
+            logger.info(f"🧩 AGENT 5: Data too large, using chunking strategy")
             insights = process_large_data_with_chunking(user_question, endpoint_responses)
         else:
-            logger.info(f"Data size acceptable ({estimated_tokens:.0f} tokens), processing directly")
+            logger.info(f"🧠 AGENT 5: Data size acceptable, processing directly with LLM")
             insights = process_data_directly(user_question, endpoint_responses)
-        
+
         state["llm_insights"] = insights
-        logger.info("Data analysis completed successfully")
-        
+        logger.info(f"✅ AGENT 5: Data analysis completed successfully")
+        logger.info(f"   Insights length: {len(insights)} chars")
+        logger.info("=" * 80)
+
         return state
-        
+
     except Exception as e:
-        logger.error(f"Error in data processing and analysis: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ AGENT 5: Error in data processing and analysis")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Error message: {str(e)}")
+        logger.error("=" * 80)
+        logger.error(f"   Full traceback:", exc_info=True)
         state["errors"].append(f"Data analysis failed: {str(e)}")
         state["llm_insights"] = "I encountered an error while analyzing the data. Please try again."
         return state
