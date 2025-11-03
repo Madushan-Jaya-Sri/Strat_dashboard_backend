@@ -330,7 +330,8 @@ class ChatManager:
             context["property_id"] = request.property_id or context.get("property_id")
         
         elif request.module_type == ModuleType.INTENT_INSIGHTS.value:
-            context["account_id"] = request.customer_id or context.get("account_id")
+            # Frontend sends account_id via selectedAccount prop
+            context["customer_id"] = request.account_id or request.customer_id or context.get("customer_id")
 
         # Add time period with proper handling
         if request.period:

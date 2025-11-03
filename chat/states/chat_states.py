@@ -14,6 +14,7 @@ class ModuleType(str, Enum):
     GOOGLE_ANALYTICS = "google_analytics"
     INTENT_INSIGHTS = "intent_insights"
     META_ADS = "meta_ads"
+    FACEBOOK = "facebook"
 
 
 class IntentType(str, Enum):
@@ -117,7 +118,7 @@ class GoogleAnalyticsState(BaseChatState):
 class IntentInsightsState(BaseChatState):
     """State for Intent Insights module"""
     # Intent specific fields
-    account_id: Optional[str]  # Google Ads account ID used for intent
+    customer_id: Optional[str]  # Google Ads customer ID used for intent (matches API endpoint parameter)
     seed_keywords: Optional[List[str]]
     country: Optional[str]
     include_zero_volume: bool
@@ -163,6 +164,22 @@ class MetaAdsState(BaseChatState):
     campaign_options: Optional[List[Dict[str, Any]]]
     adset_options: Optional[List[Dict[str, Any]]]
     ad_options: Optional[List[Dict[str, Any]]]
+
+    # Available endpoints for this module
+    available_endpoints: List[Dict[str, Any]]
+
+
+# ============================================================================
+# FACEBOOK STATE
+# ============================================================================
+
+class FacebookState(BaseChatState):
+    """State for Facebook Pages module"""
+    # Facebook specific fields
+    page_id: Optional[str]  # Facebook page ID
+
+    # Extracted parameters from query
+    limit: Optional[int]  # For posts limit
 
     # Available endpoints for this module
     available_endpoints: List[Dict[str, Any]]
@@ -245,7 +262,7 @@ def create_initial_state(
     
     elif module_type == ModuleType.INTENT_INSIGHTS.value:
         base_state.update({
-            "account_id": context.get("account_id"),
+            "customer_id": context.get("customer_id") or context.get("account_id"),  # Support both for backward compatibility
             "seed_keywords": context.get("seed_keywords", []),
             "country": context.get("country"),
             "include_zero_volume": context.get("include_zero_volume", True),
@@ -271,6 +288,13 @@ def create_initial_state(
             "adset_options": context.get("adset_options"),
             "ad_options": context.get("ad_options"),
             "available_endpoints": get_meta_ads_endpoints()
+        })
+
+    elif module_type == ModuleType.FACEBOOK.value:
+        base_state.update({
+            "page_id": context.get("page_id"),
+            "limit": context.get("limit", 10),  # Default limit for posts
+            "available_endpoints": get_facebook_endpoints()
         })
 
     return base_state
@@ -319,7 +343,7 @@ def get_ga4_endpoints() -> List[Dict[str, Any]]:
 def get_intent_endpoints() -> List[Dict[str, Any]]:
     """Get available Intent Insights endpoints"""
     return [
-        {'name': 'get_intent_keyword_insights', 'path': '/api/intent/keyword-insights/{account_id}', 'method': 'POST', 'params': ['account_id'], 'body_params': ['seed_keywords', 'country', 'timeframe', 'start_date', 'end_date', 'include_zero_volume'], 'description': 'Get keyword insights and suggestions'},
+        {'name': 'get_intent_keyword_insights', 'path': '/api/intent/keyword-insights/{customer_id}', 'method': 'POST', 'params': ['customer_id'], 'body_params': ['seed_keywords', 'country', 'timeframe', 'start_date', 'end_date', 'include_zero_volume'], 'description': 'Get keyword insights and suggestions'},
     ]
 
 
@@ -352,6 +376,23 @@ def get_meta_ads_endpoints() -> List[Dict[str, Any]]:
         {'name': 'get_ads_timeseries', 'path': '/api/meta/ads/timeseries', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad timeseries data'},
         {'name': 'get_ads_demographics', 'path': '/api/meta/ads/demographics', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad demographics'},
         {'name': 'get_ads_placements', 'path': '/api/meta/ads/placements', 'method': 'POST', 'params': ['period', 'start_date', 'end_date'], 'body_params': ['ad_ids'], 'description': 'Get ad placements'},
+    ]
+
+
+def get_facebook_endpoints() -> List[Dict[str, Any]]:
+    """Get available Facebook Pages endpoints"""
+    return [
+        {'name': 'get_facebook_pages', 'path': '/api/meta/pages', 'method': 'GET', 'params': [], 'description': 'Get list of Facebook pages'},
+        {'name': 'get_facebook_page_insights', 'path': '/api/meta/pages/{page_id}/insights', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get Facebook page insights and metrics'},
+        {'name': 'get_facebook_page_posts', 'path': '/api/meta/pages/{page_id}/posts', 'method': 'GET', 'params': ['page_id', 'limit', 'period', 'start_date', 'end_date'], 'description': 'Get posts from Facebook page'},
+        {'name': 'get_facebook_demographics', 'path': '/api/meta/pages/{page_id}/demographics', 'method': 'GET', 'params': ['page_id'], 'description': 'Get page audience demographics'},
+        {'name': 'get_facebook_engagement', 'path': '/api/meta/pages/{page_id}/engagement-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get engagement breakdown'},
+        {'name': 'get_meta_page_insights_timeseries', 'path': '/api/meta/pages/{page_id}/insights/timeseries', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get time-series insights for Facebook page'},
+        {'name': 'get_meta_page_posts_timeseries', 'path': '/api/meta/pages/{page_id}/posts/timeseries', 'method': 'GET', 'params': ['page_id', 'limit', 'period', 'start_date', 'end_date'], 'description': 'Get posts with time-series insights'},
+        {'name': 'get_meta_video_views_breakdown', 'path': '/api/meta/pages/{page_id}/video-views-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get video views breakdown'},
+        {'name': 'get_meta_content_type_breakdown', 'path': '/api/meta/pages/{page_id}/content-type-breakdown', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get content type breakdown'},
+        {'name': 'get_meta_follows_unfollows', 'path': '/api/meta/pages/{page_id}/follows-unfollows', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get follows and unfollows data'},
+        {'name': 'get_meta_organic_vs_paid', 'path': '/api/meta/pages/{page_id}/organic-vs-paid', 'method': 'GET', 'params': ['page_id', 'period', 'start_date', 'end_date'], 'description': 'Get organic vs paid content breakdown'},
     ]
 
 

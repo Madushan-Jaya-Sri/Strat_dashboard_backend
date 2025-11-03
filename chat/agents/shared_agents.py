@@ -322,12 +322,98 @@ IMPORTANT DATE HANDLING RULES:
         # Store other extracted info
         if extracted.get("entities_mentioned"):
             state["extracted_entities"] = extracted["entities_mentioned"]
-        
+
         if extracted.get("metrics_requested"):
             state["extracted_metrics"] = extracted["metrics_requested"]
-        
+
         if extracted.get("filters"):
             state["extracted_filters"] = extracted["filters"]
+
+        # Intent Insights specific parameter extraction
+        if module_type == "intent_insights":
+            logger.info(f"🔍 AGENT 2: Extracting Intent-specific parameters")
+
+            # Extract seed keywords from entities or question
+            # ONLY if seed keywords are not already provided in context
+            if extracted.get("entities_mentioned"):
+                # Check if we already have seed keywords from the Intent module UI
+                existing_keywords = state.get("seed_keywords", [])
+                if not existing_keywords or len(existing_keywords) == 0:
+                    # No keywords from UI, extract from question
+                    state["seed_keywords"] = extracted["entities_mentioned"]
+                    logger.info(f"   Extracted seed keywords from question: {state['seed_keywords']}")
+                else:
+                    # Use keywords from Intent module UI
+                    logger.info(f"   Using seed keywords from Intent module context: {existing_keywords}")
+
+            # Extract country from filters or question
+            # ONLY if country is not already provided in context
+            if extracted.get("filters") and extracted["filters"].get("country"):
+                existing_country = state.get("country")
+                if not existing_country:
+                    state["country"] = extracted["filters"]["country"]
+                    logger.info(f"   Extracted country from question: {state['country']}")
+                else:
+                    logger.info(f"   Using country from Intent module context: {existing_country}")
+
+            # Convert period to timeframe format for Intent API
+            if state.get("period"):
+                state["timeframe"] = state["period"]  # Use the same format
+                logger.info(f"   Set timeframe: {state['timeframe']}")
+
+            # Ensure we have customer_id from context
+            if not state.get("customer_id"):
+                logger.warning(f"⚠️ AGENT 2: customer_id not found in state for Intent module")
+                state["errors"].append("Google Ads account not selected")
+                state["needs_user_input"] = True
+                state["user_clarification_prompt"] = "Please select a Google Ads account first."
+                return state
+
+            # Use defaults from context if not extracted
+            if not state.get("seed_keywords"):
+                # If seed_keywords from context exist, keep them
+                logger.info(f"   Using seed keywords from context: {state.get('seed_keywords', [])}")
+
+            if not state.get("country"):
+                # If country from context exists, keep it
+                logger.info(f"   Using country from context: {state.get('country')}")
+
+        # Facebook specific parameter extraction
+        if module_type == "facebook":
+            logger.info(f"🔍 AGENT 2: Extracting Facebook-specific parameters")
+
+            # Ensure we have page_id from context
+            if not state.get("page_id"):
+                logger.warning(f"⚠️ AGENT 2: page_id not found in state for Facebook module")
+                state["errors"].append("Facebook page not selected")
+                state["needs_user_input"] = True
+                state["user_clarification_prompt"] = "Please select a Facebook page first."
+                return state
+
+            # Convert period format from standard to Facebook format
+            # Standard: "LAST_7_DAYS", "LAST_30_DAYS" -> Facebook: "7d", "30d", "90d", "365d"
+            if state.get("period"):
+                period_mapping = {
+                    "LAST_7_DAYS": "7d",
+                    "LAST_30_DAYS": "30d",
+                    "LAST_90_DAYS": "90d",
+                    "LAST_365_DAYS": "365d",
+                    "day": "7d",  # Default day period to 7d
+                    "week": "7d",
+                    "month": "30d",
+                }
+                original_period = state["period"]
+                state["period"] = period_mapping.get(state["period"], state["period"])
+                logger.info(f"   Converted period from '{original_period}' to '{state['period']}' for Facebook API")
+
+            # Extract limit for posts if mentioned
+            if extracted.get("entities_mentioned"):
+                # Check if user mentioned a number like "show me 20 posts"
+                for entity in extracted["entities_mentioned"]:
+                    if entity.isdigit():
+                        state["limit"] = int(entity)
+                        logger.info(f"   Extracted posts limit: {state['limit']}")
+                        break
 
         logger.info(f"✅ AGENT 2: Parameters extracted successfully")
         logger.info(f"   Start Date: {state.get('start_date')}")
@@ -335,6 +421,14 @@ IMPORTANT DATE HANDLING RULES:
         logger.info(f"   Period: {state.get('period')}")
         logger.info(f"   Extracted Entities: {state.get('extracted_entities', [])}")
         logger.info(f"   Extracted Metrics: {state.get('extracted_metrics', [])}")
+        if module_type == "intent_insights":
+            logger.info(f"   Customer ID: {state.get('customer_id')}")
+            logger.info(f"   Seed Keywords: {state.get('seed_keywords')}")
+            logger.info(f"   Country: {state.get('country')}")
+            logger.info(f"   Timeframe: {state.get('timeframe')}")
+        if module_type == "facebook":
+            logger.info(f"   Page ID: {state.get('page_id')}")
+            logger.info(f"   Posts Limit: {state.get('limit')}")
         logger.info("=" * 80)
 
         return state

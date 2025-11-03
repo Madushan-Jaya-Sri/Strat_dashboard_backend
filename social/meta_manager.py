@@ -368,11 +368,119 @@ class MetaManager:
             logger.info(f"🔍 FINAL COMPUTED RESULT: {json.dumps(result, indent=2)}")
 
             return result
-            
+
         except Exception as e:
             logger.error(f"Error fetching account insights summary: {e}")
             raise
-        
+
+    def get_account_insights_debug(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
+        """
+        DEBUG method to test different API call formats to match Graph API Explorer exactly
+        """
+        if start_date and end_date:
+            self._validate_date_range(start_date, end_date)
+
+        since, until = self._period_to_dates(period, start_date, end_date)
+        normalized_account_id = self._normalize_account_id(account_id)
+
+        logger.info(f"=" * 80)
+        logger.info(f"🔬 DEBUG MODE: Testing different API call formats")
+        logger.info(f"=" * 80)
+
+        results = {}
+
+        # Test 1: Minimal params (like Graph API Explorer default)
+        try:
+            logger.info(f"🔬 TEST 1: Minimal parameters (Graph API Explorer style)")
+            params1 = {
+                'fields': 'clicks,spend'
+            }
+            logger.info(f"   URL: {normalized_account_id}/insights")
+            logger.info(f"   Params: {params1}")
+            data1 = self._rate_limited_request(f"{normalized_account_id}/insights", params1)
+            logger.info(f"   Response: {json.dumps(data1, indent=2)}")
+            results['test1_minimal'] = data1
+        except HTTPException as e:
+            error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
+            logger.error(f"   Test 1 failed: {error_msg}")
+            results['test1_minimal'] = {'error': error_msg}
+        except Exception as e:
+            logger.error(f"   Test 1 failed: {e}")
+            results['test1_minimal'] = {'error': str(e)}
+
+        # Test 2: With date range (current implementation)
+        try:
+            logger.info(f"🔬 TEST 2: With date_preset parameter")
+            params2 = {
+                'fields': 'clicks,spend',
+                'date_preset': 'last_7d'
+            }
+            logger.info(f"   URL: {normalized_account_id}/insights")
+            logger.info(f"   Params: {params2}")
+            data2 = self._rate_limited_request(f"{normalized_account_id}/insights", params2)
+            logger.info(f"   Response: {json.dumps(data2, indent=2)}")
+            results['test2_date_preset'] = data2
+        except HTTPException as e:
+            error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
+            logger.error(f"   Test 2 failed: {error_msg}")
+            results['test2_date_preset'] = {'error': error_msg}
+        except Exception as e:
+            logger.error(f"   Test 2 failed: {e}")
+            results['test2_date_preset'] = {'error': str(e)}
+
+        # Test 3: With time_range (current implementation)
+        try:
+            logger.info(f"🔬 TEST 3: With time_range (current implementation)")
+            params3 = {
+                'time_range': json.dumps({"since": since, "until": until}),
+                'fields': 'clicks,spend'
+            }
+            logger.info(f"   URL: {normalized_account_id}/insights")
+            logger.info(f"   Params: {params3}")
+            logger.info(f"   Date range: {since} to {until}")
+            data3 = self._rate_limited_request(f"{normalized_account_id}/insights", params3)
+            logger.info(f"   Response: {json.dumps(data3, indent=2)}")
+            results['test3_time_range'] = data3
+        except HTTPException as e:
+            error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
+            logger.error(f"   Test 3 failed: {error_msg}")
+            results['test3_time_range'] = {'error': error_msg}
+        except Exception as e:
+            logger.error(f"   Test 3 failed: {e}")
+            results['test3_time_range'] = {'error': str(e)}
+
+        # Test 4: With time_range and level=account
+        try:
+            logger.info(f"🔬 TEST 4: With time_range and level=account")
+            params4 = {
+                'time_range': json.dumps({"since": since, "until": until}),
+                'fields': 'clicks,spend',
+                'level': 'account'
+            }
+            logger.info(f"   URL: {normalized_account_id}/insights")
+            logger.info(f"   Params: {params4}")
+            data4 = self._rate_limited_request(f"{normalized_account_id}/insights", params4)
+            logger.info(f"   Response: {json.dumps(data4, indent=2)}")
+            results['test4_with_level'] = data4
+        except HTTPException as e:
+            error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
+            logger.error(f"   Test 4 failed: {error_msg}")
+            results['test4_with_level'] = {'error': error_msg}
+        except Exception as e:
+            logger.error(f"   Test 4 failed: {e}")
+            results['test4_with_level'] = {'error': str(e)}
+
+        logger.info(f"=" * 80)
+        logger.info(f"🔬 DEBUG TESTS COMPLETED")
+        logger.info(f"=" * 80)
+
+        return {
+            'account_id': normalized_account_id,
+            'date_range': {'since': since, 'until': until},
+            'tests': results,
+            'note': 'Compare these results with Graph API Explorer to identify the correct format'
+        }
+
     def get_ad_account_insights(self, account_id: str, period: str = None, start_date: str = None, end_date: str = None) -> Dict:
         """Get insights for specific ad account"""
         try:

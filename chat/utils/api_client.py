@@ -561,8 +561,9 @@ def build_params_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
             params["metric"] = state["metric"]
     
     elif module_type == "intent_insights":
-        if state.get("account_id"):
-            params["account_id"] = state["account_id"]
+        # Intent insights uses customer_id (same as Google Ads account ID)
+        if state.get("customer_id"):
+            params["customer_id"] = state["customer_id"]
         if state.get("seed_keywords"):
             params["seed_keywords"] = state["seed_keywords"]
         if state.get("country"):

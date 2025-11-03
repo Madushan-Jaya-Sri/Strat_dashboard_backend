@@ -412,9 +412,13 @@ async def call_internal_endpoint(
         # INTENT
         # ================================================================== #
         elif endpoint_path.startswith("/api/intent/keyword-insights/"):
+            # Convert body dict to KeywordInsightRequest model
+            from models.response_models import KeywordInsightRequest
+            request_data = KeywordInsightRequest(**body)
+
             result = await get_keyword_insights(
                 customer_id=params["customer_id"],
-                request_data=body,                # KeywordInsightRequest
+                request_data=request_data,
                 current_user=current_user,
             )
 

@@ -1458,8 +1458,40 @@ async def get_account_insights_summary(
         logger.info(f"🔍 ENDPOINT RESPONSE TO FRONTEND: {json.dumps(summary, indent=2, default=str)}")
 
         return summary
+    except HTTPException as e:
+        # Re-raise HTTPException as-is to preserve status code and detail
+        raise
     except Exception as e:
         logger.error(f"Error fetching account insights summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/meta/ad-accounts/{account_id}/insights/debug")
+async def get_account_insights_debug(
+    account_id: str,
+    period: Optional[str] = Query(None, pattern="^(7d|30d|90d|365d)$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    DEBUG endpoint: Test Meta API with different parameter combinations
+    to match Graph API Explorer exactly
+    """
+    try:
+        from social.meta_manager import MetaManager
+        meta_manager = MetaManager(current_user["email"], auth_manager)
+
+        logger.info(f"🔍 DEBUG ENDPOINT CALLED for account: {account_id}")
+
+        # Call with minimal parameters (like Graph API Explorer)
+        result = meta_manager.get_account_insights_debug(
+            account_id, period, start_date, end_date
+        )
+
+        return result
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

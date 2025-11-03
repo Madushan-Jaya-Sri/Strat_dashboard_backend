@@ -79,9 +79,9 @@ Return ONLY one word: "api" or "direct"
             state["selected_endpoints"] = [
                 {
                     'name': 'get_intent_keyword_insights',
-                    'path': '/api/intent/keyword-insights/{account_id}',
+                    'path': '/api/intent/keyword-insights/{customer_id}',
                     'method': 'POST',
-                    'params': ['account_id'],
+                    'params': ['customer_id'],
                     'body_params': ['seed_keywords', 'country', 'timeframe', 'start_date', 'end_date', 'include_zero_volume']
                 }
             ]
