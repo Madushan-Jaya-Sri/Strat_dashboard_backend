@@ -166,7 +166,7 @@ async def run_facebook_chat(
     try:
         initial_state = create_initial_state(
             user_question=user_question,
-            module_type="facebook",
+            module_type="facebook_analytics",
             session_id=session_id,
             user_email=user_email,
             auth_token=auth_token,

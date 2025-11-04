@@ -584,6 +584,14 @@ def build_params_from_state(state: Dict[str, Any]) -> Dict[str, Any]:
         # Meta Ads uses period format like "7d", "30d", "90d"
         # Keep the period and date params as is for Meta Ads
 
+    elif module_type == "facebook_analytics":
+        if state.get("page_id"):
+            params["page_id"] = state["page_id"]
+        if state.get("limit"):
+            params["limit"] = state["limit"]
+        # Facebook uses period format like "7d", "30d", "90d"
+        # Keep the period and date params as is for Facebook
+
     # ========================================================================
     # FINAL DATE VALIDATION - Ensure no future dates are passed to endpoints
     # ========================================================================

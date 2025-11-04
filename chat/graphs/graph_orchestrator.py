@@ -11,6 +11,7 @@ from chat.graphs.google_ads_graph import run_google_ads_chat
 from chat.graphs.ga4_graph import run_ga4_chat
 from chat.graphs.intent_graph import run_intent_chat
 from chat.graphs.meta_ads_graph import run_meta_ads_chat
+from chat.graphs.facebook_graph import run_facebook_chat
 from chat.states.chat_states import ModuleType
 
 # Initialize logger
@@ -129,6 +130,17 @@ class GraphOrchestrator:
                     context=prepared_context
                 )
                 logger.info(f"✅ GRAPH ORCHESTRATOR: Meta Ads chat completed")
+
+            elif module_type == ModuleType.FACEBOOK_ANALYTICS.value:
+                logger.info(f"📞 GRAPH ORCHESTRATOR: Calling run_facebook_chat()")
+                final_state = await run_facebook_chat(
+                    user_question=user_question,
+                    session_id=session_id,
+                    user_email=user_email,
+                    auth_token=auth_token,
+                    context=prepared_context
+                )
+                logger.info(f"✅ GRAPH ORCHESTRATOR: Facebook Analytics chat completed")
 
             else:
                 logger.error(f"❌ GRAPH ORCHESTRATOR: Unsupported module type: {module_type}")
@@ -371,6 +383,10 @@ class GraphOrchestrator:
             prepared.setdefault("adset_ids", None)
             prepared.setdefault("ad_ids", None)
 
+        elif module_type == ModuleType.FACEBOOK_ANALYTICS.value:
+            prepared.setdefault("page_id", None)
+            prepared.setdefault("limit", 10)
+
         # Ensure time period fields exist
         prepared.setdefault("period", None)
         prepared.setdefault("start_date", None)
@@ -500,6 +516,22 @@ class GraphOrchestrator:
                     "Placement analysis (Facebook, Instagram)",
                     "Time-series trends",
                     "Multi-level hierarchical analysis"
+                ]
+            },
+            ModuleType.FACEBOOK_ANALYTICS.value: {
+                "name": "Facebook Analytics",
+                "description": "Facebook page insights, posts, and engagement analytics",
+                "required_context": ["page_id"],
+                "optional_context": ["period", "start_date", "end_date", "limit"],
+                "capabilities": [
+                    "Page insights and metrics",
+                    "Post performance analysis",
+                    "Engagement breakdown",
+                    "Audience demographics",
+                    "Content type analysis",
+                    "Video views breakdown",
+                    "Organic vs paid performance",
+                    "Time-series trends"
                 ]
             }
         }

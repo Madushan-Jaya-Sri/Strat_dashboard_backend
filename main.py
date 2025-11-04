@@ -2359,6 +2359,7 @@ async def chat_message(
         logger.info(f"📊 Customer ID: {request.customer_id}")
         logger.info(f"📊 Property ID: {request.property_id}")
         logger.info(f"📊 Account ID: {request.account_id}")
+        logger.info(f"📄 Page ID: {request.page_id}")
         logger.info(f"📅 Period: {request.period}")
         logger.info(f"📅 Start Date: {request.start_date}")
         logger.info(f"📅 End Date: {request.end_date}")
@@ -2466,6 +2467,8 @@ async def get_chat_sessions(
                 "module_type": session.module_type,
                 "customer_id": session.customer_id,
                 "property_id": session.property_id,
+                "account_id": getattr(session, 'account_id', None),
+                "page_id": getattr(session, 'page_id', None),
                 "messages": [
                     {
                         "role": msg.role.value,

@@ -204,6 +204,19 @@ async def call_internal_endpoint(
             get_ads_timeseries,
             get_ads_demographics,
             get_ads_placements,
+
+            # Facebook Pages
+            get_meta_pages,
+            get_meta_page_insights,
+            get_meta_page_posts,
+            get_meta_page_demographics,
+            get_meta_engagement_breakdown,
+            get_meta_page_insights_timeseries,
+            get_meta_page_posts_timeseries,
+            get_meta_video_views_breakdown,
+            get_meta_content_type_breakdown,
+            get_meta_follows_unfollows,
+            get_meta_organic_vs_paid,
         )
 
         result = None
@@ -574,6 +587,101 @@ async def call_internal_endpoint(
         elif endpoint_path == "/api/meta/ads/placements":
             result = await get_ads_placements(
                 ad_ids=body.get("ad_ids", []),
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        # ================================================================== #
+        # FACEBOOK PAGES
+        # ================================================================== #
+        elif endpoint_path == "/api/meta/pages":
+            result = await get_meta_pages(current_user=current_user)
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/insights/timeseries" in endpoint_path:
+            result = await get_meta_page_insights_timeseries(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/insights" in endpoint_path and "/timeseries" not in endpoint_path:
+            result = await get_meta_page_insights(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/posts/timeseries" in endpoint_path:
+            result = await get_meta_page_posts_timeseries(
+                page_id=params["page_id"],
+                limit=params.get("limit", 20),
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/posts" in endpoint_path and "/timeseries" not in endpoint_path:
+            result = await get_meta_page_posts(
+                page_id=params["page_id"],
+                limit=params.get("limit", 20),
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/demographics" in endpoint_path:
+            result = await get_meta_page_demographics(
+                page_id=params["page_id"],
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/engagement-breakdown" in endpoint_path:
+            result = await get_meta_engagement_breakdown(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/video-views-breakdown" in endpoint_path:
+            result = await get_meta_video_views_breakdown(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/content-type-breakdown" in endpoint_path:
+            result = await get_meta_content_type_breakdown(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/follows-unfollows" in endpoint_path:
+            result = await get_meta_follows_unfollows(
+                page_id=params["page_id"],
+                period=params.get("period"),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
+                current_user=current_user,
+            )
+
+        elif endpoint_path.startswith("/api/meta/pages/") and "/organic-vs-paid" in endpoint_path:
+            result = await get_meta_organic_vs_paid(
+                page_id=params["page_id"],
                 period=params.get("period"),
                 start_date=params.get("start_date"),
                 end_date=params.get("end_date"),

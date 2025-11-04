@@ -147,6 +147,8 @@ You can help with:
 - Google Ads: Campaign performance, ad metrics, keyword insights
 - Google Analytics: Website traffic, user behavior, conversions
 - Intent Insights: Keyword research and search trends
+- Meta Ads: Facebook and Instagram ads performance
+- Facebook Analytics: Facebook page insights, posts, and engagement
 
 Be friendly, concise, and helpful. If the user asks what you can do, briefly explain the capabilities of the current module."""
 
@@ -379,7 +381,7 @@ IMPORTANT DATE HANDLING RULES:
                 logger.info(f"   Using country from context: {state.get('country')}")
 
         # Facebook specific parameter extraction
-        if module_type == "facebook":
+        if module_type == "facebook_analytics":
             logger.info(f"🔍 AGENT 2: Extracting Facebook-specific parameters")
 
             # Ensure we have page_id from context
@@ -391,13 +393,18 @@ IMPORTANT DATE HANDLING RULES:
                 return state
 
             # Convert period format from standard to Facebook format
-            # Standard: "LAST_7_DAYS", "LAST_30_DAYS" -> Facebook: "7d", "30d", "90d", "365d"
+            # Standard: "LAST_7_DAYS", "LAST_30_DAYS", "7 Days" -> Facebook: "7d", "30d", "90d", "365d"
             if state.get("period"):
                 period_mapping = {
                     "LAST_7_DAYS": "7d",
                     "LAST_30_DAYS": "30d",
                     "LAST_90_DAYS": "90d",
                     "LAST_365_DAYS": "365d",
+                    "7 Days": "7d",
+                    "30 Days": "30d",
+                    "90 Days": "90d",
+                    "3 Months": "90d",
+                    "1 Year": "365d",
                     "day": "7d",  # Default day period to 7d
                     "week": "7d",
                     "month": "30d",
@@ -426,7 +433,7 @@ IMPORTANT DATE HANDLING RULES:
             logger.info(f"   Seed Keywords: {state.get('seed_keywords')}")
             logger.info(f"   Country: {state.get('country')}")
             logger.info(f"   Timeframe: {state.get('timeframe')}")
-        if module_type == "facebook":
+        if module_type == "facebook_analytics":
             logger.info(f"   Page ID: {state.get('page_id')}")
             logger.info(f"   Posts Limit: {state.get('limit')}")
         logger.info("=" * 80)

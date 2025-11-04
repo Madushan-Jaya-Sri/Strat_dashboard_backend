@@ -9,6 +9,7 @@ class ModuleType(str, Enum):
     GOOGLE_ANALYTICS = "google_analytics"
     INTENT_INSIGHTS = "intent_insights"
     META_ADS = "meta_ads"
+    FACEBOOK_ANALYTICS = "facebook_analytics"
     COMBINED = "combined"
 
 class MessageRole(str, Enum):
@@ -29,6 +30,7 @@ class ChatRequest(BaseModel):
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
     account_id: Optional[str] = None
+    page_id: Optional[str] = None
     period: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -48,6 +50,8 @@ class ChatSession(BaseModel):
     module_type: ModuleType
     customer_id: Optional[str] = None
     property_id: Optional[str] = None
+    account_id: Optional[str] = None
+    page_id: Optional[str] = None
     messages: List[ChatMessage] = []
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_activity: datetime = Field(default_factory=datetime.utcnow)

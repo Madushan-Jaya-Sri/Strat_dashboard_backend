@@ -14,7 +14,7 @@ class ModuleType(str, Enum):
     GOOGLE_ANALYTICS = "google_analytics"
     INTENT_INSIGHTS = "intent_insights"
     META_ADS = "meta_ads"
-    FACEBOOK = "facebook"
+    FACEBOOK_ANALYTICS = "facebook_analytics"
 
 
 class IntentType(str, Enum):
@@ -290,7 +290,7 @@ def create_initial_state(
             "available_endpoints": get_meta_ads_endpoints()
         })
 
-    elif module_type == ModuleType.FACEBOOK.value:
+    elif module_type == ModuleType.FACEBOOK_ANALYTICS.value:
         base_state.update({
             "page_id": context.get("page_id"),
             "limit": context.get("limit", 10),  # Default limit for posts
